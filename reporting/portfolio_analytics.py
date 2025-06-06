@@ -6,12 +6,18 @@ import pandas as pd
 
 class PortfolioAnalytics:
     def __init__(
-        self, portfolio_value_history, trades_history=None, trades_status=None, product_data=None
+        self,
+        portfolio_value_history,
+        trades_history=None,
+        trades_status=None,
+        product_data=None,
+        holdings_history=None,
     ):
         self.portfolio_value_history = portfolio_value_history
         self.trades_history = trades_history
         self.trades_status = trades_status
         self.product_data = product_data
+        self.holdings_history = holdings_history
 
     def performance(self, rf=0.02, bmk_returns=0.1):
         portfolio_value = pd.Series(self.portfolio_value_history)
@@ -81,7 +87,7 @@ class PortfolioAnalytics:
         profit_factor = abs(avg_win / avg_loss) if avg_loss != 0 else np.inf
 
         monthly_returns.index = monthly_returns.index.strftime("%Y-%m")
-        quarterly_returns.index = quarterly_returns.index.strftime("%Y-Q%q")
+        quarterly_returns.index = quarterly_returns.index.to_period("Q").astype(str)
         annual_returns.index = annual_returns.index.strftime("%Y")
 
         return {
@@ -121,7 +127,7 @@ class PortfolioAnalytics:
         # Sector
         sector_ts = []
         sectors = filtered_product_data.sector.unique()
-        for holdings in self.trades_history.values():
+        for holdings in self.holdings_history.values():
             prd = filtered_product_data[filtered_product_data.ticker.isin(holdings)]
             sector_counts = prd.groupby("sector").size()
             sectors_dict = {sector: sector_counts.get(sector, 0) for sector in sectors}
@@ -144,7 +150,7 @@ class PortfolioAnalytics:
 
         for ticker in total_unique_holdings:
             trade_signals = ticker_trades[ticker]
-            duration = longest_interval_state_machine(trade_signals)
+            duration = _longest_interval_state_machine(trade_signals)
             duration_by_ticker.append({"ticker": ticker, "duration": duration})
 
             trades_by_ticker.append(
@@ -156,7 +162,9 @@ class PortfolioAnalytics:
             )
 
         return {
-            "holdings_count": {d: len(holdings) for d, holdings in self.trades_history.items()},
+            "holdings_count": {
+                d: len(np.unique(holdings)) for d, holdings in self.holdings_history.items()
+            },
             "cancelled_trades_count": len(self.trades_status)
             - np.sum(list(self.trades_status.values())),
             "sector_ts": sector_ts,
@@ -166,8 +174,54 @@ class PortfolioAnalytics:
             "dates": dates,
         }
 
+    @staticmethod
+    def get_trades_details(portfolio) -> dict:
+        # more advance analysis, time consuming, not run unless needed
+        price = portfolio.open_prices
+        trades = portfolio.trades_history
+        trades_df = pd.DataFrame(trades).T
+        trades_df, price_df = trades_df.align(price, join="left", fill_value=0)
+        trades_amount = trades_df * price_df
+        trades_details = trades_amount.apply(lambda x: _get_trades_details(x)).to_dict()
+        return trades_details
 
-def longest_interval_state_machine(arr):
+
+def _get_trades_details(trades: pd.Series) -> list[dict]:
+    cum_cost = 0
+    buy_count = 0
+    earliest_trade_date = None
+    trades_details = []
+    for t, price in trades.items():
+        if price < 0:  # a sell trade -> a buy and hold and sell trade is completed
+            if cum_cost == 0 or earliest_trade_date is None or buy_count == 0:
+                # print(f"{trades.name} has a short trade on {t.date()}")
+                continue
+            duration = (t - earliest_trade_date).days
+            avg_cost = cum_cost / buy_count
+            profit = -1 * price - avg_cost
+            trades_details.append(
+                {
+                    "holding_start_date": earliest_trade_date.date(),
+                    "holding_period": duration,
+                    "avg_cost": avg_cost,
+                    "sell_price": price,
+                    "sell_date": t.date(),
+                    "profit": profit,
+                    "total_long_trades": buy_count,
+                }
+            )
+            cum_cost = 0
+            earliest_trade_date = None
+            buy_count = 0
+        elif price > 0:
+            if earliest_trade_date is None:
+                earliest_trade_date = t
+            buy_count += 1
+            cum_cost += price
+    return trades_details
+
+
+def _longest_interval_state_machine(arr):
     """Calculate longest holding interval using state machine approach"""
     max_length = 0
 

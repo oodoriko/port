@@ -23,6 +23,7 @@ class Portfolio:
         self.setup = additional_setup
         self.set_up_constraints(constraints)
         self.transaction_cost = additional_setup.get("transaction_cost", 0.001)
+        self.allow_short = False
 
         self.portfolio_value = additional_setup.get("initial_capital", 0)
         self.holdings = additional_setup.get("initial_holdings", [])
@@ -133,6 +134,8 @@ class Portfolio:
 
         actions = defaultdict(list)
         for ticker, signal in trades_plan.items():
+            if not self.allow_short and signal == -1 and ticker not in self.holdings:  # no shorting
+                continue
             actions[signal].append(ticker)
 
         sell_positions = actions[-1]
@@ -145,7 +148,7 @@ class Portfolio:
         new_holdings = [
             ticker for ticker in self.holdings if ticker not in sell_positions
         ] + buy_positions
-        self.holdings = new_holdings
+        self.holdings = np.unique(new_holdings)
         self.holdings_history[date] = self.holdings
 
         self.watchlist = [ticker for ticker in self.universe if ticker not in new_holdings]
@@ -184,6 +187,7 @@ class Portfolio:
             self.trades_history,
             self.trades_status,
             self.product_data,
+            self.holdings_history,
         )
         self.metrics = self.analytics.performance(rf=rf, bmk_returns=bmk_returns)
         self.holdings_summary = self.analytics.holdings()

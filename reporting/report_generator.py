@@ -1,25 +1,67 @@
 import io
 import os
+from collections import Counter
 from datetime import datetime
+from enum import Enum
+from io import BytesIO
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-from reportlab.lib.pagesizes import A4, letter
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
+from reportlab.lib.pagesizes import A4, landscape, letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import (
+    BaseDocTemplate,
+    Frame,
     Image,
     PageBreak,
+    PageTemplate,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
     Table,
     TableStyle,
 )
+
+
+# Professional inspired color palette
+class Colors:
+    # Primary colors for ReportLab (PDF elements) - inspired
+    NAVY_BLUE = colors.HexColor("#003366")  # Deep navy
+    DEEP_BLUE = colors.HexColor("#001a33")  # Darker navy
+    SLATE_BLUE = colors.HexColor("#2c5282")  # Professional blue
+
+    # Accent colors for ReportLab (PDF elements) - gold and professional tones
+    GOLD = colors.HexColor("#DAA520")  # signature gold
+    AMBER = colors.HexColor("#FF8C00")  # Darker gold
+    EMERALD = colors.HexColor("#2F855A")  # Professional green
+    CORAL = colors.HexColor("#E53E3E")  # Professional red
+
+    # Neutral colors for ReportLab (PDF elements)
+    CHARCOAL = colors.HexColor("#2D3748")  # Professional dark gray
+    LIGHT_GRAY = colors.HexColor("#F7FAFC")  # Very light gray
+    MEDIUM_GRAY = colors.HexColor("#E2E8F0")  # Medium gray
+    DARK_GRAY = colors.HexColor("#4A5568")  # Darker gray
+    WHITE = colors.HexColor("#FFFFFF")
+
+    # Chart colors for matplotlib (string format) - inspired
+    CHART_NAVY = "#003366"  # Primary navy
+    CHART_GOLD = "#DAA520"  # signature gold
+    CHART_BLUE = "#2c5282"  # Professional blue
+    CHART_GREEN = "#2F855A"  # Professional green
+    CHART_RED = "#E53E3E"  # Professional red
+    CHART_AMBER = "#FF8C00"  # Darker gold
+    CHART_TEAL = "#2C7A7B"  # Professional teal
+    CHART_DEEP_BLUE = "#001a33"  # Darker navy
+    CHART_CHARCOAL = "#2D3748"  # Professional dark gray
+    CHART_LIGHT_GRAY = "#F7FAFC"  # Very light gray
+    CHART_MEDIUM_GRAY = "#E2E8F0"  # Medium gray
+    CHART_DARK_GRAY = "#4A5568"  # Darker gray
+    CHART_WHITE = "#FFFFFF"
 
 
 class ReportGenerator:
@@ -29,35 +71,187 @@ class ReportGenerator:
         self.holdings_summary = holdings_summary
         self.styles = getSampleStyleSheet()
 
-        # Create custom styles
+        # Create custom styles with professional typography
         self.title_style = ParagraphStyle(
             "CustomTitle",
             parent=self.styles["Heading1"],
-            fontSize=20,
-            spaceAfter=20,
+            fontName="Helvetica-Bold",
+            fontSize=28,
+            spaceAfter=30,
+            spaceBefore=20,
             alignment=TA_CENTER,
-            textColor=colors.darkblue,
+            textColor=Colors.NAVY_BLUE,
+            leading=32,
         )
 
         self.block_title_style = ParagraphStyle(
             "BlockTitle",
             parent=self.styles["Heading2"],
-            fontSize=16,
-            spaceAfter=12,
+            fontName="Helvetica-Bold",
+            fontSize=18,
+            spaceAfter=16,
+            spaceBefore=25,
+            textColor=Colors.DEEP_BLUE,
+            alignment=TA_CENTER,
+            leading=22,
+        )
+
+        self.section_title_style = ParagraphStyle(
+            "SectionTitle",
+            parent=self.styles["Heading3"],
+            fontName="Helvetica-Bold",
+            fontSize=14,
+            spaceAfter=10,
             spaceBefore=15,
-            textColor=colors.darkblue,
-            alignment=TA_LEFT,
+            textColor=Colors.SLATE_BLUE,
+            alignment=TA_CENTER,
+            leading=16,
         )
 
         self.normal_style = ParagraphStyle(
             "CustomNormal",
             parent=self.styles["Normal"],
+            fontName="Helvetica",
             fontSize=11,
-            spaceAfter=6,
+            spaceAfter=8,
+            textColor=Colors.CHARCOAL,
+            leading=14,
+            alignment=TA_JUSTIFY,
         )
 
+        self.page_header_style = ParagraphStyle(
+            "PageHeader",
+            parent=self.styles["Heading2"],
+            fontName="Helvetica-Bold",
+            fontSize=16,
+            spaceAfter=12,
+            spaceBefore=8,
+            textColor=Colors.NAVY_BLUE,
+            alignment=TA_CENTER,
+            leading=18,
+        )
+
+        # Portfolio info style for header
+        self.portfolio_info_style = ParagraphStyle(
+            "PortfolioInfo",
+            parent=self.styles["Normal"],
+            fontName="Helvetica",
+            fontSize=10,
+            spaceAfter=8,
+            spaceBefore=5,
+            textColor=Colors.CHARCOAL,
+            alignment=TA_CENTER,
+            leading=12,
+        )
+
+        # Section header style
+        self.section_header_style = ParagraphStyle(
+            "SectionHeader",
+            parent=self.styles["Heading3"],
+            fontName="Helvetica-Bold",
+            fontSize=14,
+            spaceAfter=8,
+            spaceBefore=10,
+            textColor=Colors.SLATE_BLUE,
+            alignment=TA_LEFT,
+            leading=16,
+        )
+
+        self.interval = (
+            1
+            if len(self.holdings_summary["holdings_count"]) // 365 <= 2
+            else (
+                3
+                if len(self.holdings_summary["holdings_count"]) // 365 > 2
+                and len(self.holdings_summary["holdings_count"]) // 365 <= 5
+                else 4
+            )
+        )
+
+    def create_title_page(self):
+        """Create a centered title page with key portfolio information"""
+        story = []
+
+        # Add spacer to center content vertically
+        story.append(Spacer(1, 2.5 * inch))
+
+        # Portfolio Name (Main Title)
+        portfolio_name = self.portfolio.name or "Unnamed Portfolio"
+        title_style = ParagraphStyle(
+            "TitlePageTitle",
+            parent=self.styles["Heading1"],
+            fontName="Helvetica-Bold",
+            fontSize=36,
+            spaceAfter=60,
+            spaceBefore=20,
+            alignment=TA_CENTER,
+            textColor=Colors.NAVY_BLUE,
+            leading=42,
+        )
+        story.append(Paragraph(portfolio_name, title_style))
+
+        # Create info style for title page
+        info_style = ParagraphStyle(
+            "TitlePageInfo",
+            parent=self.styles["Normal"],
+            fontName="Helvetica",
+            fontSize=16,
+            spaceAfter=20,
+            spaceBefore=10,
+            textColor=Colors.CHARCOAL,
+            alignment=TA_CENTER,
+            leading=20,
+        )
+
+        # Benchmark
+        benchmark_text = (
+            self.portfolio.benchmark.value
+            if hasattr(self.portfolio.benchmark, "value")
+            else str(self.portfolio.benchmark)
+        )
+        story.append(Paragraph(f"<b>Benchmark:</b> {benchmark_text}", info_style))
+
+        # Run Date
+        run_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        story.append(Paragraph(f"<b>Run Date:</b> {run_date}", info_style))
+
+        # Period
+        portfolio_dates = list(self.portfolio.portfolio_value_history.keys())
+        if portfolio_dates:
+            start_date = min(portfolio_dates).strftime("%Y-%m-%d")
+            end_date = max(portfolio_dates).strftime("%Y-%m-%d")
+            period_text = f"{start_date} to {end_date}"
+        else:
+            period_text = "N/A"
+        story.append(Paragraph(f"<b>Analysis Period:</b> {period_text}", info_style))
+
+        return story
+
+    def create_section_title_page(self, section_name):
+        """Create a centered section title page"""
+        story = []
+
+        # Add spacer to center content vertically
+        story.append(Spacer(1, 3 * inch))
+
+        # Section Name (Main Title)
+        section_title_style = ParagraphStyle(
+            "SectionTitlePage",
+            parent=self.styles["Heading1"],
+            fontName="Helvetica-Bold",
+            fontSize=48,
+            spaceAfter=60,
+            spaceBefore=20,
+            alignment=TA_CENTER,
+            textColor=Colors.NAVY_BLUE,
+            leading=54,
+        )
+        story.append(Paragraph(section_name, section_title_style))
+
+        return story
+
     def create_header_info_block(self):
-        """Create the header information block"""
+        """Create the header information block with professional styling"""
         # Get analysis period
         portfolio_dates = list(self.portfolio.portfolio_value_history.keys())
         start_date = min(portfolio_dates) if portfolio_dates else "N/A"
@@ -74,10 +268,13 @@ class ReportGenerator:
                 ),
             ],
             ["Run Date:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
-            ["Analysis Period:", f"{start_date} to {end_date}"],
+            [
+                "Period:",
+                f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}",
+            ],
         ]
 
-        table = Table(header_data, colWidths=[2.5 * inch, 4 * inch])
+        table = Table(header_data, colWidths=[2.8 * inch, 4.5 * inch])
         table.setStyle(
             TableStyle(
                 [
@@ -85,10 +282,15 @@ class ReportGenerator:
                     ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
                     ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
                     ("FONTSIZE", (0, 0), (-1, -1), 12),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                    ("TOPPADDING", (0, 0), (-1, -1), 8),
-                    ("GRID", (0, 0), (-1, -1), 1, colors.lightgrey),
-                    ("BACKGROUND", (0, 0), (-1, -1), colors.whitesmoke),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+                    ("TOPPADDING", (0, 0), (-1, -1), 12),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 15),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 15),
+                    ("BACKGROUND", (0, 0), (0, -1), Colors.LIGHT_GRAY),
+                    ("BACKGROUND", (1, 0), (1, -1), Colors.WHITE),
+                    ("LINEBELOW", (0, 0), (-1, -1), 1, Colors.MEDIUM_GRAY),
+                    ("LINEAFTER", (0, 0), (0, -1), 1, Colors.MEDIUM_GRAY),
+                    ("BOX", (0, 0), (-1, -1), 1.5, Colors.SLATE_BLUE),
                 ]
             )
         )
@@ -96,86 +298,144 @@ class ReportGenerator:
         return table
 
     def create_portfolio_config_block(self):
-        """Create the portfolio configuration block"""
-        # Get initial capital
-        initial_capital = (
-            self.portfolio.setup.get("initial_capital", 0)
-            if hasattr(self.portfolio, "setup")
-            else 0
-        )
+        """Create the portfolio configuration block with title and enhanced styling"""
+        # Create title
+        title = Paragraph("Portfolio Configuration", self.section_title_style)
 
         # Get constraints information
         constraints_info = "None"
         if hasattr(self.portfolio, "constraints") and self.portfolio.constraints:
-            constraints_list = []
-            if hasattr(self.portfolio.constraints, "max_long_count"):
-                constraints_list.append(
-                    f"Max Long: {getattr(self.portfolio.constraints, 'max_long_count', 'N/A')}"
-                )
-            if hasattr(self.portfolio.constraints, "max_short_count"):
-                constraints_list.append(
-                    f"Max Short: {getattr(self.portfolio.constraints, 'max_short_count', 'N/A')}"
-                )
-            if constraints_list:
-                constraints_info = ", ".join(constraints_list)
+            constraints_list = self.portfolio.constraints.list_constraints()
+            constraints_info = "\n".join([f"{k}: {v}" for k, v in constraints_list.items()])
 
-        config_data = [
-            ["Initial Capital:", f"${initial_capital:,.2f}"],
-            ["Transaction Cost:", f"{self.portfolio.transaction_cost:.3%}"],
-            ["Universe Size:", f"{len(self.portfolio.universe)}"],
-            ["Setup Constraints:", constraints_info],
-        ]
+        config_data = []
+        for k, v in self.portfolio.setup.items():
+            if isinstance(v, list) and all(isinstance(item, Enum) for item in v):
+                config_data.append([f"{k}:", "\n".join([vv.value for vv in v])])
+            elif isinstance(v, list):
+                config_data.append([f"{k}:", "\n".join(v)])
+            elif not isinstance(v, str):
+                if isinstance(v, (int, float)) and 0 <= v <= 1:
+                    config_data.append([f"{k}:", f"{v:.2%}"])
+                else:
+                    config_data.append([f"{k}:", f"{v:,.2f}"])
+            else:
+                config_data.append([f"{k}:", v])
 
-        table = Table(config_data, colWidths=[2.5 * inch, 4 * inch])
+        table = Table(config_data, colWidths=[2.0 * inch, 2.5 * inch])
         table.setStyle(
             TableStyle(
                 [
                     ("ALIGN", (0, 0), (-1, -1), "LEFT"),
                     ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
                     ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 12),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                    ("TOPPADDING", (0, 0), (-1, -1), 8),
-                    ("GRID", (0, 0), (-1, -1), 1, colors.lightgrey),
-                    ("BACKGROUND", (0, 0), (-1, -1), colors.lightblue),
+                    ("FONTSIZE", (0, 0), (-1, -1), 11),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 10),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 12),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+                    ("BACKGROUND", (0, 0), (0, -1), Colors.LIGHT_GRAY),
+                    ("BACKGROUND", (1, 0), (1, -1), Colors.WHITE),
+                    ("LINEBELOW", (0, 0), (-1, -1), 1, Colors.MEDIUM_GRAY),
+                    ("LINEAFTER", (0, 0), (0, -1), 1, Colors.MEDIUM_GRAY),
+                    ("BOX", (0, 0), (-1, -1), 1.5, Colors.EMERALD),
                 ]
             )
         )
 
-        return table
+        # Combine title and table
+        content = []
+        content.append(title)
+        content.append(Spacer(1, 10))
+        content.append(table)
+
+        return content
 
     def create_key_performance_block(self):
-        """Create the key performance metrics block"""
+        """Create the key performance metrics block with title and professional colors"""
+        # Create title
+        title = Paragraph("Key Performance Metrics", self.section_title_style)
+
         performance_data = [
             ["Total Return:", f"{self.metrics['total_return']:.2%}"],
             ["Annualized Return:", f"{self.metrics['annualized_return']:.2%}"],
             ["Overall Sharpe Ratio:", f"{self.metrics['overall_sharpe_ratio']:.2f}"],
             ["Win Rate:", f"{self.metrics['win_rate']:.2%}"],
             ["Daily Win Rate:", f"{self.metrics['avg_win']:.2%}"],
+            ["Sharpe Ratio:", f"{self.metrics['overall_sharpe_ratio']:.2f}"],
         ]
 
-        table = Table(performance_data, colWidths=[2.5 * inch, 4 * inch])
+        table = Table(performance_data, colWidths=[2.0 * inch, 2.5 * inch])
         table.setStyle(
             TableStyle(
                 [
                     ("ALIGN", (0, 0), (-1, -1), "LEFT"),
                     ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
                     ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 12),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                    ("TOPPADDING", (0, 0), (-1, -1), 8),
-                    ("GRID", (0, 0), (-1, -1), 1, colors.lightgrey),
-                    ("BACKGROUND", (0, 0), (-1, -1), colors.lightgreen),
+                    ("FONTSIZE", (0, 0), (-1, -1), 11),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 10),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 12),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+                    ("BACKGROUND", (0, 0), (0, -1), Colors.LIGHT_GRAY),
+                    ("BACKGROUND", (1, 0), (1, -1), Colors.WHITE),
+                    ("LINEBELOW", (0, 0), (-1, -1), 1, Colors.MEDIUM_GRAY),
+                    ("LINEAFTER", (0, 0), (0, -1), 1, Colors.MEDIUM_GRAY),
+                    ("BOX", (0, 0), (-1, -1), 1.5, Colors.AMBER),
                 ]
             )
         )
 
-        return table
+        # Combine title and table
+        content = []
+        content.append(title)
+        content.append(Spacer(1, 10))
+        content.append(table)
+
+        return content
+
+    def create_portfolio_info_header(self):
+        """Create portfolio info header for each page"""
+        portfolio_dates = list(self.portfolio.portfolio_value_history.keys())
+        start_date = min(portfolio_dates) if portfolio_dates else "N/A"
+        end_date = max(portfolio_dates) if portfolio_dates else "N/A"
+
+        portfolio_name = self.portfolio.name or "Unnamed Portfolio"
+        benchmark = (
+            self.portfolio.benchmark.value
+            if hasattr(self.portfolio.benchmark, "value")
+            else str(self.portfolio.benchmark)
+        )
+        run_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        period = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+
+        info_text = (
+            f"{portfolio_name} | Benchmark: {benchmark} | Run Date: {run_date} | Period: {period}"
+        )
+        return Paragraph(info_text, self.portfolio_info_style)
 
     def create_holdings_analysis_chart(self):
-        """Create holdings count over time line chart"""
+        """Create holdings count over time line chart with professional styling"""
+        # Set matplotlib style for professional look
         plt.style.use("default")
-        fig, ax = plt.subplots(figsize=(10, 6))
+        plt.rcParams.update(
+            {
+                "font.family": ["Arial", "Helvetica", "sans-serif"],
+                "font.size": 12,
+                "axes.titlesize": 16,
+                "axes.labelsize": 12,
+                "xtick.labelsize": 10,
+                "ytick.labelsize": 10,
+                "legend.fontsize": 10,
+                "axes.spines.top": False,
+                "axes.spines.right": False,
+                "axes.grid": True,
+                "grid.alpha": 0.3,
+            }
+        )
+
+        fig, ax = plt.subplots(figsize=(8, 4.5))
+        fig.patch.set_facecolor("white")
 
         if self.holdings_summary["holdings_count"]:
             # Create dataframe from holdings count data
@@ -190,15 +450,28 @@ class ReportGenerator:
             ax.plot(
                 holdings_df["Date"],
                 holdings_df["Count"],
-                marker="o",
-                markersize=4,
-                linewidth=2,
-                color="darkblue",
+                linewidth=1,
+                color=Colors.CHART_NAVY,
             )
-            ax.set_title("Holdings Count Over Time", fontsize=14, fontweight="bold")
-            ax.set_ylabel("Number of Holdings")
-            ax.set_xlabel("Date")
-            ax.grid(True, alpha=0.3)
+            ax.set_title(
+                "Holdings Count Over Time",
+                fontsize=18,
+                fontweight="bold",
+                color=Colors.CHART_DEEP_BLUE,
+                pad=20,
+            )
+            ax.set_ylabel("Number of Holdings", fontsize=14, color=Colors.CHART_CHARCOAL)
+            ax.set_xlabel("Date", fontsize=14, color=Colors.CHART_CHARCOAL)
+
+            # Styling
+            ax.tick_params(colors=Colors.CHART_CHARCOAL)
+            ax.grid(True, alpha=0.3, color=Colors.CHART_MEDIUM_GRAY)
+            ax.set_facecolor(Colors.CHART_LIGHT_GRAY)
+
+            # Add more ticks
+            ax.xaxis.set_major_locator(mdates.MonthLocator(interval=self.interval))
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+
             plt.xticks(rotation=45)
         else:
             ax.text(
@@ -208,54 +481,77 @@ class ReportGenerator:
                 transform=ax.transAxes,
                 ha="center",
                 va="center",
+                fontsize=14,
+                color=Colors.CHART_CHARCOAL,
             )
-            ax.set_title("Holdings Count Over Time", fontsize=14, fontweight="bold")
+            ax.set_title(
+                "Holdings Count Over Time",
+                fontsize=18,
+                fontweight="bold",
+                color=Colors.CHART_DEEP_BLUE,
+                pad=20,
+            )
 
         plt.tight_layout()
 
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=300, bbox_inches="tight")
+        fig.savefig(
+            buf, format="png", dpi=300, bbox_inches="tight", facecolor="white", edgecolor="none"
+        )
         buf.seek(0)
         plt.close()
 
         return buf
 
     def create_holdings_summary_table(self):
-        """Create holdings summary table with max, min, and average"""
+        """Create holdings summary table with professional styling"""
         if not self.holdings_summary["holdings_count"]:
             return None
 
         holdings_dates = list(self.holdings_summary["holdings_count"].keys())
         holdings_counts = list(self.holdings_summary["holdings_count"].values())
+        holdings_counts_arr = np.array(holdings_counts)
+        non_zero_mask = holdings_counts_arr > 0
+
+        if np.any(non_zero_mask):
+            min_holdings_idx = np.argmin(np.where(non_zero_mask, holdings_counts_arr, np.inf))
+            min_holdings = holdings_counts[min_holdings_idx]
+            min_date = holdings_dates[min_holdings_idx]
+        else:
+            min_holdings = min(holdings_counts)
+            min_date = holdings_dates[holdings_counts.index(min_holdings)]
 
         # Find max and min
-        max_holdings = max(holdings_counts)
-        min_holdings = min(holdings_counts)
         avg_holdings = sum(holdings_counts) / len(holdings_counts)
-
-        # Find dates for max and min
+        max_holdings = max(holdings_counts)
         max_date = holdings_dates[holdings_counts.index(max_holdings)]
-        min_date = holdings_dates[holdings_counts.index(min_holdings)]
 
         summary_data = [
             ["Metric", "Value", "Date"],
-            ["Maximum Holdings", f"{max_holdings}", str(max_date)],
-            ["Minimum Holdings", f"{min_holdings}", str(min_date)],
-            ["Average Holdings", f"{avg_holdings:.1f}", "Overall"],
+            ["Maximum Holdings", f"{max_holdings}", str(max_date.date())],
+            ["Minimum None-zero Holdings", f"{min_holdings}", str(min_date.date())],
+            ["Average Holdings", f"{avg_holdings:.1f}", "Daily"],
+            ["Universe Size", f"{len(self.portfolio.universe)}", ""],
         ]
 
-        table = Table(summary_data, colWidths=[2 * inch, 1.5 * inch, 2.5 * inch])
+        table = Table(summary_data, colWidths=[2.2 * inch, 1.8 * inch, 2.5 * inch])
         table.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.darkblue),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("BACKGROUND", (0, 0), (-1, 0), Colors.NAVY_BLUE),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), Colors.WHITE),
                     ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
                     ("FONTSIZE", (0, 0), (-1, 0), 12),
-                    ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
-                    ("BACKGROUND", (0, 1), (-1, -1), colors.lightblue),
-                    ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                    ("FONTSIZE", (0, 1), (-1, -1), 11),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 10),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                    ("BACKGROUND", (0, 1), (-1, -1), Colors.LIGHT_GRAY),
+                    ("LINEBELOW", (0, 0), (-1, -1), 1, Colors.MEDIUM_GRAY),
+                    ("BOX", (0, 0), (-1, -1), 1.5, Colors.NAVY_BLUE),
                 ]
             )
         )
@@ -263,7 +559,7 @@ class ReportGenerator:
         return table
 
     def create_holding_duration_summary_table(self):
-        """Create holding duration summary table with max and min"""
+        """Create holding duration summary table with professional styling"""
         if not self.holdings_summary["duration_by_ticker"]:
             return None
 
@@ -281,18 +577,24 @@ class ReportGenerator:
             ["Average Duration", f"{avg_duration:.1f}"],
         ]
 
-        table = Table(duration_data, colWidths=[2.5 * inch, 2 * inch])
+        table = Table(duration_data, colWidths=[2.8 * inch, 2.2 * inch])
         table.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.darkgreen),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("BACKGROUND", (0, 0), (-1, 0), Colors.EMERALD),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), Colors.WHITE),
                     ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
                     ("FONTSIZE", (0, 0), (-1, 0), 12),
-                    ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
-                    ("BACKGROUND", (0, 1), (-1, -1), colors.lightgreen),
-                    ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                    ("FONTSIZE", (0, 1), (-1, -1), 11),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 10),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                    ("BACKGROUND", (0, 1), (-1, -1), Colors.LIGHT_GRAY),
+                    ("LINEBELOW", (0, 0), (-1, -1), 1, Colors.MEDIUM_GRAY),
+                    ("BOX", (0, 0), (-1, -1), 1.5, Colors.EMERALD),
                 ]
             )
         )
@@ -300,7 +602,7 @@ class ReportGenerator:
         return table
 
     def create_top_duration_tables(self):
-        """Create tables for top longest and shortest hold tickers"""
+        """Create tables for top longest and shortest hold tickers with professional styling"""
         if not self.holdings_summary["duration_by_ticker"]:
             return None, None
 
@@ -312,18 +614,22 @@ class ReportGenerator:
         for _, row in top_longest.iterrows():
             longest_data.append([str(row["ticker"]), str(row["duration"])])
 
-        longest_table = Table(longest_data, colWidths=[1.5 * inch, 1.5 * inch])
+        longest_table = Table(longest_data, colWidths=[1.7 * inch, 1.8 * inch])
         longest_table.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.darkblue),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("BACKGROUND", (0, 0), (-1, 0), Colors.SLATE_BLUE),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), Colors.WHITE),
                     ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
                     ("FONTSIZE", (0, 0), (-1, 0), 12),
-                    ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
-                    ("BACKGROUND", (0, 1), (-1, -1), colors.lightblue),
-                    ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                    ("FONTSIZE", (0, 1), (-1, -1), 11),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (-1, -1), 8),
+                    ("BACKGROUND", (0, 1), (-1, -1), Colors.LIGHT_GRAY),
+                    ("LINEBELOW", (0, 0), (-1, -1), 1, Colors.MEDIUM_GRAY),
+                    ("BOX", (0, 0), (-1, -1), 1.5, Colors.SLATE_BLUE),
                 ]
             )
         )
@@ -334,18 +640,22 @@ class ReportGenerator:
         for _, row in top_shortest.iterrows():
             shortest_data.append([str(row["ticker"]), str(row["duration"])])
 
-        shortest_table = Table(shortest_data, colWidths=[1.5 * inch, 1.5 * inch])
+        shortest_table = Table(shortest_data, colWidths=[1.7 * inch, 1.8 * inch])
         shortest_table.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.darkorange),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("BACKGROUND", (0, 0), (-1, 0), Colors.CORAL),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), Colors.WHITE),
                     ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
                     ("FONTSIZE", (0, 0), (-1, 0), 12),
-                    ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
-                    ("BACKGROUND", (0, 1), (-1, -1), colors.lightyellow),
-                    ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                    ("FONTSIZE", (0, 1), (-1, -1), 11),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (-1, -1), 8),
+                    ("BACKGROUND", (0, 1), (-1, -1), Colors.LIGHT_GRAY),
+                    ("LINEBELOW", (0, 0), (-1, -1), 1, Colors.MEDIUM_GRAY),
+                    ("BOX", (0, 0), (-1, -1), 1.5, Colors.CORAL),
                 ]
             )
         )
@@ -353,206 +663,789 @@ class ReportGenerator:
         return longest_table, shortest_table
 
     def create_portfolio_value_chart(self):
-        """Create portfolio value over time line chart"""
+        """Create portfolio value over time line chart with professional styling"""
         try:
-            plt.figure(figsize=(12, 6))
+            # Set professional matplotlib styling
+            plt.style.use("default")
+            plt.rcParams.update(
+                {
+                    "font.family": ["Arial", "Helvetica", "sans-serif"],
+                    "font.size": 12,
+                    "axes.titlesize": 18,
+                    "axes.labelsize": 14,
+                    "xtick.labelsize": 11,
+                    "ytick.labelsize": 11,
+                    "legend.fontsize": 12,
+                    "axes.spines.top": False,
+                    "axes.spines.right": False,
+                    "axes.grid": True,
+                    "grid.alpha": 0.3,
+                }
+            )
 
-            if "portfolio_value" in self.metrics and self.metrics["portfolio_value"]:
-                dates = pd.to_datetime(list(self.metrics["portfolio_value"].keys()))
-                values = list(self.metrics["portfolio_value"].values())
+            fig, ax = plt.subplots(figsize=(9, 4.5))
+            fig.patch.set_facecolor("white")
 
-                plt.plot(dates, values, linewidth=2, color="darkblue", label="Portfolio Value")
-                plt.title("Portfolio Value Over Time", fontsize=16, fontweight="bold")
-                plt.xlabel("Date", fontsize=12)
-                plt.ylabel("Portfolio Value ($)", fontsize=12)
-                plt.grid(True, alpha=0.3)
-                plt.xticks(rotation=45)
-                plt.legend()
+            if (
+                self.portfolio.portfolio_value_history
+                and len(self.portfolio.portfolio_value_history) > 0
+            ):
+                dates = pd.to_datetime(list(self.portfolio.portfolio_value_history.keys()))
+                values = list(self.portfolio.portfolio_value_history.values())
 
-                # Format y-axis to show dollar amounts
-                plt.gca().yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x:,.0f}"))
+                ax.plot(
+                    dates,
+                    values,
+                    linewidth=1,
+                    color=Colors.CHART_NAVY,
+                    label="Portfolio Value",
+                )
+            else:
+                # No data available - create a placeholder message
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No portfolio value data available",
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="center",
+                    fontsize=16,
+                    color=Colors.CHART_CHARCOAL,
+                )
+            # Set title and labels (common for both cases)
+            ax.set_title(
+                "Portfolio Value Over Time",
+                fontsize=20,
+                fontweight="bold",
+                color=Colors.CHART_DEEP_BLUE,
+                pad=25,
+            )
+
+            # Only set axis labels if we have data
+            if (
+                self.portfolio.portfolio_value_history
+                and len(self.portfolio.portfolio_value_history) > 0
+            ):
+                ax.set_xlabel("Date", fontsize=14, color=Colors.CHART_CHARCOAL)
+                ax.set_ylabel("Portfolio Value ($)", fontsize=14, color=Colors.CHART_CHARCOAL)
+
+                # Date formatting
+                ax.xaxis.set_major_locator(mdates.MonthLocator(interval=self.interval))
+                ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+
+                # Y-axis formatting
+                ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x:,.0f}"))
+
+                # Legend styling
+                legend = ax.legend(
+                    frameon=True,
+                    fancybox=True,
+                    shadow=True,
+                    facecolor=Colors.CHART_WHITE,
+                    edgecolor=Colors.CHART_BLUE,
+                )
+                legend.get_frame().set_alpha(0.9)
+
+            # Professional styling (applied to both cases)
+            ax.tick_params(colors=Colors.CHART_CHARCOAL)
+            ax.grid(True, alpha=0.3, color=Colors.CHART_MEDIUM_GRAY)
+            ax.set_facecolor(Colors.CHART_LIGHT_GRAY)
 
             plt.tight_layout()
 
             buffer = BytesIO()
-            plt.savefig(buffer, format="png", dpi=150, bbox_inches="tight")
+            fig.savefig(
+                buffer,
+                format="png",
+                dpi=300,
+                bbox_inches="tight",
+                facecolor="white",
+                edgecolor="none",
+            )
             buffer.seek(0)
             plt.close()
 
-            return Image(buffer, width=7 * inch, height=3.5 * inch)
+            return buffer
         except Exception as e:
             plt.close()
             return Paragraph(f"Error creating portfolio value chart: {str(e)}", self.normal_style)
 
-    def create_returns_charts(self):
-        """Create daily, monthly, and annual returns line charts"""
+    def create_daily_returns_chart(self):
+        """Create daily returns chart with professional styling"""
         try:
-            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
+            # Set professional matplotlib styling
+            plt.style.use("default")
+            plt.rcParams.update(
+                {
+                    "font.family": ["Arial", "Helvetica", "sans-serif"],
+                    "font.size": 12,
+                    "axes.titlesize": 18,
+                    "axes.labelsize": 14,
+                    "xtick.labelsize": 11,
+                    "ytick.labelsize": 11,
+                    "legend.fontsize": 12,
+                    "axes.spines.top": False,
+                    "axes.spines.right": False,
+                    "axes.grid": True,
+                    "grid.alpha": 0.3,
+                }
+            )
+
+            fig, ax = plt.subplots(figsize=(10, 6))
+            fig.patch.set_facecolor("white")
 
             # Daily returns
-            if "daily_returns" in self.metrics and self.metrics["daily_returns"]:
-                dates = pd.to_datetime(list(self.metrics["daily_returns"].keys()))
-                returns = [
-                    float(r) * 100 for r in self.metrics["daily_returns"].values()
-                ]  # Convert to percentage
+            if (
+                "daily_returns" in self.metrics
+                and self.metrics["daily_returns"] is not None
+                and len(self.metrics["daily_returns"]) > 0
+            ):
+                daily_returns_data = self.metrics["daily_returns"]
+                if hasattr(daily_returns_data, "keys") and hasattr(daily_returns_data, "values"):
+                    dates = pd.to_datetime(list(daily_returns_data.keys()))
+                    returns = [float(r) * 100 for r in daily_returns_data.values]
+                else:
+                    dates = (
+                        pd.to_datetime(list(daily_returns_data.index))
+                        if hasattr(daily_returns_data, "index")
+                        else []
+                    )
+                    returns = [float(r) * 100 for r in daily_returns_data] if len(dates) > 0 else []
 
-                ax1.plot(dates, returns, linewidth=1, color="green", alpha=0.7)
-                ax1.set_title("Daily Returns (%)", fontsize=14, fontweight="bold")
-                ax1.set_ylabel("Return (%)")
-                ax1.grid(True, alpha=0.3)
-                ax1.tick_params(axis="x", rotation=45)
+                ax.plot(dates, returns, linewidth=1, color=Colors.CHART_NAVY, alpha=0.8)
+                ax.axhline(y=0, color=Colors.CHART_CHARCOAL, linestyle="--", alpha=0.5)
+                ax.set_ylabel("Return (%)", color=Colors.CHART_CHARCOAL, fontsize=14)
+                ax.set_xlabel("Date", color=Colors.CHART_CHARCOAL, fontsize=14)
+                ax.tick_params(colors=Colors.CHART_CHARCOAL)
+                ax.grid(True, alpha=0.3, color=Colors.CHART_MEDIUM_GRAY)
+                ax.set_facecolor(Colors.CHART_LIGHT_GRAY)
 
-            # Monthly returns
-            if "monthly_returns" in self.metrics and self.metrics["monthly_returns"]:
-                dates = pd.to_datetime(list(self.metrics["monthly_returns"].keys()))
-                returns = [float(r) * 100 for r in self.metrics["monthly_returns"].values()]
-
-                ax2.plot(dates, returns, linewidth=2, color="orange", marker="o", markersize=4)
-                ax2.set_title("Monthly Returns (%)", fontsize=14, fontweight="bold")
-                ax2.set_ylabel("Return (%)")
-                ax2.grid(True, alpha=0.3)
-                ax2.tick_params(axis="x", rotation=45)
-
-            # Annual returns
-            if "annual_returns" in self.metrics and self.metrics["annual_returns"]:
-                years = list(self.metrics["annual_returns"].keys())
-                returns = [float(r) * 100 for r in self.metrics["annual_returns"].values()]
-
-                ax3.bar(years, returns, color="purple", alpha=0.7)
-                ax3.set_title("Annual Returns (%)", fontsize=14, fontweight="bold")
-                ax3.set_ylabel("Return (%)")
-                ax3.grid(True, alpha=0.3)
-                ax3.tick_params(axis="x", rotation=45)
-
-            # Sharpe ratio over time (rolling)
-            if "sharpe_ratio" in self.holdings_summary:
-                # Create a simple visualization showing Sharpe ratio
-                ax4.text(
+                # Date formatting
+                ax.xaxis.set_major_locator(mdates.MonthLocator(interval=self.interval))
+                ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+            else:
+                ax.text(
                     0.5,
                     0.5,
-                    f'Overall Sharpe Ratio\n{self.holdings_summary["sharpe_ratio"]:.3f}',
-                    horizontalalignment="center",
-                    verticalalignment="center",
-                    transform=ax4.transAxes,
-                    fontsize=20,
-                    fontweight="bold",
-                    bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.8),
+                    "No daily returns data available",
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="center",
+                    fontsize=16,
+                    color=Colors.CHART_CHARCOAL,
                 )
-                ax4.set_title("Sharpe Ratio", fontsize=14, fontweight="bold")
-                ax4.set_xlim(0, 1)
-                ax4.set_ylim(0, 1)
-                ax4.set_xticks([])
-                ax4.set_yticks([])
+
+            ax.set_title(
+                "Daily Returns (%)",
+                fontsize=20,
+                fontweight="bold",
+                color=Colors.CHART_DEEP_BLUE,
+                pad=25,
+            )
 
             plt.tight_layout()
 
             buffer = BytesIO()
-            plt.savefig(buffer, format="png", dpi=150, bbox_inches="tight")
+            fig.savefig(
+                buffer,
+                format="png",
+                dpi=300,
+                bbox_inches="tight",
+                facecolor="white",
+                edgecolor="none",
+            )
             buffer.seek(0)
             plt.close()
 
-            return Image(buffer, width=7 * inch, height=5 * inch)
+            return buffer
         except Exception as e:
             plt.close()
-            return Paragraph(f"Error creating returns charts: {str(e)}", self.normal_style)
+            return Paragraph(f"Error creating daily returns chart: {str(e)}", self.normal_style)
 
-    def create_return_distribution_charts(self):
-        """Create return distribution analysis for daily and monthly returns"""
+    def create_monthly_returns_chart(self):
+        """Create monthly returns chart with professional styling"""
         try:
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+            # Set professional matplotlib styling
+            plt.style.use("default")
+            plt.rcParams.update(
+                {
+                    "font.family": ["Arial", "Helvetica", "sans-serif"],
+                    "font.size": 12,
+                    "axes.titlesize": 18,
+                    "axes.labelsize": 14,
+                    "xtick.labelsize": 11,
+                    "ytick.labelsize": 11,
+                    "legend.fontsize": 12,
+                    "axes.spines.top": False,
+                    "axes.spines.right": False,
+                    "axes.grid": True,
+                    "grid.alpha": 0.3,
+                }
+            )
 
-            # Daily return distribution
-            if "daily_returns" in self.metrics and self.metrics["daily_returns"]:
-                returns = [float(r) * 100 for r in self.metrics["daily_returns"].values()]
+            fig, ax = plt.subplots(figsize=(10, 6))
+            fig.patch.set_facecolor("white")
 
-                ax1.hist(returns, bins=50, alpha=0.7, color="green", edgecolor="black")
-                ax1.axvline(
-                    np.mean(returns),
-                    color="red",
-                    linestyle="--",
-                    linewidth=2,
-                    label=f"Mean: {np.mean(returns):.2f}%",
-                )
-                ax1.axvline(
-                    np.median(returns),
-                    color="orange",
-                    linestyle="--",
-                    linewidth=2,
-                    label=f"Median: {np.median(returns):.2f}%",
-                )
-                ax1.set_title("Daily Return Distribution", fontsize=14, fontweight="bold")
-                ax1.set_xlabel("Daily Return (%)")
-                ax1.set_ylabel("Frequency")
-                ax1.legend()
-                ax1.grid(True, alpha=0.3)
+            # Monthly returns
+            if (
+                "monthly_returns" in self.metrics
+                and self.metrics["monthly_returns"] is not None
+                and len(self.metrics["monthly_returns"]) > 0
+            ):
+                monthly_returns_data = self.metrics["monthly_returns"]
+                if hasattr(monthly_returns_data, "keys") and hasattr(
+                    monthly_returns_data, "values"
+                ):
+                    dates = pd.to_datetime(list(monthly_returns_data.keys()))
+                    returns = [float(r) * 100 for r in monthly_returns_data.values]
+                else:
+                    dates = (
+                        pd.to_datetime(list(monthly_returns_data.index))
+                        if hasattr(monthly_returns_data, "index")
+                        else []
+                    )
+                    returns = (
+                        [float(r) * 100 for r in monthly_returns_data] if len(dates) > 0 else []
+                    )
 
-                # Add statistics text
-                stats_text = f"Std: {np.std(returns):.2f}%\nSkew: {pd.Series(returns).skew():.2f}\nKurt: {pd.Series(returns).kurtosis():.2f}"
-                ax1.text(
-                    0.02,
-                    0.98,
-                    stats_text,
-                    transform=ax1.transAxes,
-                    fontsize=10,
-                    verticalalignment="top",
-                    bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+                ax.plot(
+                    dates,
+                    returns,
+                    linewidth=1,
+                    color=Colors.CHART_GREEN,
+                )
+                ax.axhline(y=0, color=Colors.CHART_CHARCOAL, linestyle="--", alpha=0.5)
+                ax.set_ylabel("Return (%)", color=Colors.CHART_CHARCOAL, fontsize=14)
+                ax.set_xlabel("Date", color=Colors.CHART_CHARCOAL, fontsize=14)
+                ax.tick_params(colors=Colors.CHART_CHARCOAL)
+                ax.grid(True, alpha=0.3, color=Colors.CHART_MEDIUM_GRAY)
+                ax.set_facecolor(Colors.CHART_LIGHT_GRAY)
+
+                # Date formatting
+                ax.xaxis.set_major_locator(mdates.MonthLocator(interval=self.interval))
+                ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+            else:
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No monthly returns data available",
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="center",
+                    fontsize=16,
+                    color=Colors.CHART_CHARCOAL,
                 )
 
-            # Monthly return distribution
-            if "monthly_returns" in self.metrics and self.metrics["monthly_returns"]:
-                returns = [float(r) * 100 for r in self.metrics["monthly_returns"].values()]
-
-                ax2.hist(returns, bins=20, alpha=0.7, color="orange", edgecolor="black")
-                ax2.axvline(
-                    np.mean(returns),
-                    color="red",
-                    linestyle="--",
-                    linewidth=2,
-                    label=f"Mean: {np.mean(returns):.2f}%",
-                )
-                ax2.axvline(
-                    np.median(returns),
-                    color="darkblue",
-                    linestyle="--",
-                    linewidth=2,
-                    label=f"Median: {np.median(returns):.2f}%",
-                )
-                ax2.set_title("Monthly Return Distribution", fontsize=14, fontweight="bold")
-                ax2.set_xlabel("Monthly Return (%)")
-                ax2.set_ylabel("Frequency")
-                ax2.legend()
-                ax2.grid(True, alpha=0.3)
-
-                # Add statistics text
-                stats_text = f"Std: {np.std(returns):.2f}%\nSkew: {pd.Series(returns).skew():.2f}\nKurt: {pd.Series(returns).kurtosis():.2f}"
-                ax2.text(
-                    0.02,
-                    0.98,
-                    stats_text,
-                    transform=ax2.transAxes,
-                    fontsize=10,
-                    verticalalignment="top",
-                    bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
-                )
+            ax.set_title(
+                "Monthly Returns (%)",
+                fontsize=20,
+                fontweight="bold",
+                color=Colors.CHART_DEEP_BLUE,
+                pad=25,
+            )
 
             plt.tight_layout()
 
             buffer = BytesIO()
-            plt.savefig(buffer, format="png", dpi=150, bbox_inches="tight")
+            fig.savefig(
+                buffer,
+                format="png",
+                dpi=300,
+                bbox_inches="tight",
+                facecolor="white",
+                edgecolor="none",
+            )
             buffer.seek(0)
             plt.close()
 
-            return Image(buffer, width=7 * inch, height=3 * inch)
+            return buffer
+        except Exception as e:
+            plt.close()
+            return Paragraph(f"Error creating monthly returns chart: {str(e)}", self.normal_style)
+
+    def create_quarterly_returns_chart(self):
+        """Create quarterly returns chart with professional styling"""
+        try:
+            # Set professional matplotlib styling
+            plt.style.use("default")
+            plt.rcParams.update(
+                {
+                    "font.family": ["Arial", "Helvetica", "sans-serif"],
+                    "font.size": 12,
+                    "axes.titlesize": 18,
+                    "axes.labelsize": 14,
+                    "xtick.labelsize": 11,
+                    "ytick.labelsize": 11,
+                    "legend.fontsize": 12,
+                    "axes.spines.top": False,
+                    "axes.spines.right": False,
+                    "axes.grid": True,
+                    "grid.alpha": 0.3,
+                }
+            )
+
+            fig, ax = plt.subplots(figsize=(10, 6))
+            fig.patch.set_facecolor("white")
+
+            # Quarterly returns
+            if (
+                "quarterly_returns" in self.metrics
+                and self.metrics["quarterly_returns"] is not None
+                and len(self.metrics["quarterly_returns"]) > 0
+            ):
+                quarterly_returns_data = self.metrics["quarterly_returns"]
+                if hasattr(quarterly_returns_data, "keys") and hasattr(
+                    quarterly_returns_data, "values"
+                ):
+                    dates = pd.to_datetime(list(quarterly_returns_data.keys()))
+                    returns = [float(r) * 100 for r in quarterly_returns_data.values]
+                else:
+                    dates = pd.to_datetime(list(quarterly_returns_data.index))
+                    returns = (
+                        [float(r) * 100 for r in quarterly_returns_data] if len(dates) > 0 else []
+                    )
+
+                ax.plot(
+                    dates,
+                    returns,
+                    linewidth=1,
+                    color=Colors.CHART_GOLD,
+                )
+                ax.axhline(y=0, color=Colors.CHART_CHARCOAL, linestyle="--", alpha=0.5)
+                ax.set_ylabel("Return (%)", color=Colors.CHART_CHARCOAL, fontsize=14)
+                ax.set_xlabel("Date", color=Colors.CHART_CHARCOAL, fontsize=14)
+                ax.tick_params(colors=Colors.CHART_CHARCOAL)
+                ax.grid(True, alpha=0.3, color=Colors.CHART_MEDIUM_GRAY)
+                ax.set_facecolor(Colors.CHART_LIGHT_GRAY)
+
+                # Date formatting
+                ax.xaxis.set_major_locator(mdates.MonthLocator(interval=self.interval))
+                ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+            else:
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No quarterly returns data available",
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="center",
+                    fontsize=16,
+                    color=Colors.CHART_CHARCOAL,
+                )
+
+            ax.set_title(
+                "Quarterly Returns (%)",
+                fontsize=20,
+                fontweight="bold",
+                color=Colors.CHART_DEEP_BLUE,
+                pad=25,
+            )
+
+            plt.tight_layout()
+
+            buffer = BytesIO()
+            fig.savefig(
+                buffer,
+                format="png",
+                dpi=300,
+                bbox_inches="tight",
+                facecolor="white",
+                edgecolor="none",
+            )
+            buffer.seek(0)
+            plt.close()
+
+            return buffer
+        except Exception as e:
+            plt.close()
+            return Paragraph(f"Error creating quarterly returns chart: {str(e)}", self.normal_style)
+
+    def create_annual_returns_chart(self):
+        """Create annual returns chart with professional styling"""
+        try:
+            # Set professional matplotlib styling
+            plt.style.use("default")
+            plt.rcParams.update(
+                {
+                    "font.family": ["Arial", "Helvetica", "sans-serif"],
+                    "font.size": 12,
+                    "axes.titlesize": 18,
+                    "axes.labelsize": 14,
+                    "xtick.labelsize": 11,
+                    "ytick.labelsize": 11,
+                    "legend.fontsize": 12,
+                    "axes.spines.top": False,
+                    "axes.spines.right": False,
+                    "axes.grid": True,
+                    "grid.alpha": 0.3,
+                }
+            )
+
+            fig, ax = plt.subplots(figsize=(10, 6))
+            fig.patch.set_facecolor("white")
+
+            # Annual returns
+            if (
+                "annual_returns" in self.metrics
+                and self.metrics["annual_returns"] is not None
+                and len(self.metrics["annual_returns"]) > 0
+            ):
+                annual_returns_data = self.metrics["annual_returns"]
+                if hasattr(annual_returns_data, "keys") and hasattr(annual_returns_data, "values"):
+                    years = list(annual_returns_data.keys())
+                    returns = [float(r) * 100 for r in annual_returns_data.values]
+                else:
+                    years = (
+                        list(annual_returns_data.index)
+                        if hasattr(annual_returns_data, "index")
+                        else []
+                    )
+                    returns = (
+                        [float(r) * 100 for r in annual_returns_data] if len(years) > 0 else []
+                    )
+
+                ax.plot(
+                    years,
+                    returns,
+                    linewidth=1,
+                    color=Colors.CHART_RED,
+                    marker="o",
+                    markersize=8,
+                )
+                ax.axhline(y=0, color=Colors.CHART_CHARCOAL, linestyle="--", alpha=0.5)
+                ax.set_ylabel("Return (%)", color=Colors.CHART_CHARCOAL, fontsize=14)
+                ax.set_xlabel("Year", color=Colors.CHART_CHARCOAL, fontsize=14)
+                ax.tick_params(colors=Colors.CHART_CHARCOAL)
+                ax.grid(True, alpha=0.3, color=Colors.CHART_MEDIUM_GRAY)
+                ax.set_facecolor(Colors.CHART_LIGHT_GRAY)
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+            else:
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No annual returns data available",
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="center",
+                    fontsize=16,
+                    color=Colors.CHART_CHARCOAL,
+                )
+
+            ax.set_title(
+                "Annual Returns (%)",
+                fontsize=20,
+                fontweight="bold",
+                color=Colors.CHART_DEEP_BLUE,
+                pad=25,
+            )
+
+            plt.tight_layout()
+
+            buffer = BytesIO()
+            fig.savefig(
+                buffer,
+                format="png",
+                dpi=300,
+                bbox_inches="tight",
+                facecolor="white",
+                edgecolor="none",
+            )
+            buffer.seek(0)
+            plt.close()
+
+            return buffer
+        except Exception as e:
+            plt.close()
+            return Paragraph(f"Error creating annual returns chart: {str(e)}", self.normal_style)
+
+    def create_daily_return_distribution_chart(self):
+        """Create daily return distribution analysis with professional styling"""
+        try:
+            # Set professional matplotlib styling
+            plt.style.use("default")
+            plt.rcParams.update(
+                {
+                    "font.family": ["Arial", "Helvetica", "sans-serif"],
+                    "font.size": 12,
+                    "axes.titlesize": 18,
+                    "axes.labelsize": 14,
+                    "xtick.labelsize": 11,
+                    "ytick.labelsize": 11,
+                    "legend.fontsize": 12,
+                    "axes.spines.top": False,
+                    "axes.spines.right": False,
+                    "axes.grid": True,
+                    "grid.alpha": 0.3,
+                }
+            )
+
+            fig, ax = plt.subplots(figsize=(12, 7))
+            fig.patch.set_facecolor("white")
+
+            # Daily return distribution
+            if (
+                "daily_returns" in self.metrics
+                and self.metrics["daily_returns"] is not None
+                and len(self.metrics["daily_returns"]) > 0
+            ):
+                daily_returns_data = self.metrics["daily_returns"]
+                if hasattr(daily_returns_data, "values"):
+                    returns = [float(r) * 100 for r in daily_returns_data.values]
+                else:
+                    returns = [float(r) * 100 for r in daily_returns_data]
+
+                ax.hist(
+                    returns,
+                    bins=50,
+                    alpha=0.7,
+                    color=Colors.CHART_NAVY,
+                    edgecolor=Colors.CHART_CHARCOAL,
+                    linewidth=0.5,
+                )
+                ax.axvline(
+                    np.mean(returns),
+                    color=Colors.CHART_RED,
+                    linestyle="--",
+                    linewidth=3,
+                    label=f"Mean: {np.mean(returns):.2f}%",
+                )
+                ax.axvline(
+                    np.median(returns),
+                    color=Colors.CHART_GOLD,
+                    linestyle="--",
+                    linewidth=3,
+                    label=f"Median: {np.median(returns):.2f}%",
+                )
+                ax.set_xlabel("Daily Return (%)", fontsize=14, color=Colors.CHART_CHARCOAL)
+                ax.set_ylabel("Frequency", fontsize=14, color=Colors.CHART_CHARCOAL)
+                ax.tick_params(colors=Colors.CHART_CHARCOAL)
+                ax.grid(True, alpha=0.3, color=Colors.CHART_MEDIUM_GRAY)
+                ax.set_facecolor(Colors.CHART_LIGHT_GRAY)
+
+                # Enhanced legend
+                legend = ax.legend(
+                    frameon=True,
+                    fancybox=True,
+                    shadow=True,
+                    facecolor=Colors.CHART_WHITE,
+                    edgecolor=Colors.CHART_BLUE,
+                )
+                legend.get_frame().set_alpha(0.9)
+
+                # Add statistics text with better styling
+                stats_text = f"Std Dev: {np.std(returns):.2f}%\nSkewness: {pd.Series(returns).skew():.2f}\nKurtosis: {pd.Series(returns).kurtosis():.2f}"
+                ax.text(
+                    0.02,
+                    0.98,
+                    stats_text,
+                    transform=ax.transAxes,
+                    fontsize=12,
+                    verticalalignment="top",
+                    bbox=dict(
+                        boxstyle="round,pad=0.5",
+                        facecolor=Colors.CHART_WHITE,
+                        alpha=0.9,
+                        edgecolor=Colors.CHART_BLUE,
+                    ),
+                )
+            else:
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No daily returns data available",
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="center",
+                    fontsize=16,
+                    color=Colors.CHART_CHARCOAL,
+                )
+
+            ax.set_title(
+                "Daily Return Distribution",
+                fontsize=20,
+                fontweight="bold",
+                color=Colors.CHART_DEEP_BLUE,
+                pad=25,
+            )
+
+            plt.tight_layout()
+
+            buffer = BytesIO()
+            fig.savefig(
+                buffer,
+                format="png",
+                dpi=300,
+                bbox_inches="tight",
+                facecolor="white",
+                edgecolor="none",
+            )
+            buffer.seek(0)
+            plt.close()
+
+            return buffer
         except Exception as e:
             plt.close()
             return Paragraph(
-                f"Error creating return distribution charts: {str(e)}", self.normal_style
+                f"Error creating daily return distribution chart: {str(e)}", self.normal_style
+            )
+
+    def create_monthly_return_distribution_chart(self):
+        """Create monthly return distribution analysis with professional styling"""
+        try:
+            # Set professional matplotlib styling
+            plt.style.use("default")
+            plt.rcParams.update(
+                {
+                    "font.family": ["Arial", "Helvetica", "sans-serif"],
+                    "font.size": 12,
+                    "axes.titlesize": 18,
+                    "axes.labelsize": 14,
+                    "xtick.labelsize": 11,
+                    "ytick.labelsize": 11,
+                    "legend.fontsize": 12,
+                    "axes.spines.top": False,
+                    "axes.spines.right": False,
+                    "axes.grid": True,
+                    "grid.alpha": 0.3,
+                }
+            )
+
+            fig, ax = plt.subplots(figsize=(12, 7))
+            fig.patch.set_facecolor("white")
+
+            # Monthly return distribution
+            if (
+                "monthly_returns" in self.metrics
+                and self.metrics["monthly_returns"] is not None
+                and len(self.metrics["monthly_returns"]) > 0
+            ):
+                monthly_returns_data = self.metrics["monthly_returns"]
+                if hasattr(monthly_returns_data, "values"):
+                    returns = [float(r) * 100 for r in monthly_returns_data.values]
+                else:
+                    returns = [float(r) * 100 for r in monthly_returns_data]
+
+                ax.hist(
+                    returns,
+                    bins=20,
+                    alpha=0.7,
+                    color=Colors.CHART_GOLD,
+                    edgecolor=Colors.CHART_CHARCOAL,
+                    linewidth=0.5,
+                )
+                ax.axvline(
+                    np.mean(returns),
+                    color=Colors.CHART_RED,
+                    linestyle="--",
+                    linewidth=3,
+                    label=f"Mean: {np.mean(returns):.2f}%",
+                )
+                ax.axvline(
+                    np.median(returns),
+                    color=Colors.CHART_DEEP_BLUE,
+                    linestyle="--",
+                    linewidth=3,
+                    label=f"Median: {np.median(returns):.2f}%",
+                )
+                ax.set_xlabel("Monthly Return (%)", fontsize=14, color=Colors.CHART_CHARCOAL)
+                ax.set_ylabel("Frequency", fontsize=14, color=Colors.CHART_CHARCOAL)
+                ax.tick_params(colors=Colors.CHART_CHARCOAL)
+                ax.grid(True, alpha=0.3, color=Colors.CHART_MEDIUM_GRAY)
+                ax.set_facecolor(Colors.CHART_LIGHT_GRAY)
+
+                # Enhanced legend
+                legend = ax.legend(
+                    frameon=True,
+                    fancybox=True,
+                    shadow=True,
+                    facecolor=Colors.CHART_WHITE,
+                    edgecolor=Colors.CHART_BLUE,
+                )
+                legend.get_frame().set_alpha(0.9)
+
+                # Add statistics text with better styling
+                stats_text = f"Std Dev: {np.std(returns):.2f}%\nSkewness: {pd.Series(returns).skew():.2f}\nKurtosis: {pd.Series(returns).kurtosis():.2f}"
+                ax.text(
+                    0.02,
+                    0.98,
+                    stats_text,
+                    transform=ax.transAxes,
+                    fontsize=12,
+                    verticalalignment="top",
+                    bbox=dict(
+                        boxstyle="round,pad=0.5",
+                        facecolor=Colors.CHART_WHITE,
+                        alpha=0.9,
+                        edgecolor=Colors.CHART_BLUE,
+                    ),
+                )
+            else:
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No monthly returns data available",
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="center",
+                    fontsize=16,
+                    color=Colors.CHART_CHARCOAL,
+                )
+
+            ax.set_title(
+                "Monthly Return Distribution",
+                fontsize=20,
+                fontweight="bold",
+                color=Colors.CHART_DEEP_BLUE,
+                pad=25,
+            )
+
+            plt.tight_layout()
+
+            buffer = BytesIO()
+            fig.savefig(
+                buffer,
+                format="png",
+                dpi=300,
+                bbox_inches="tight",
+                facecolor="white",
+                edgecolor="none",
+            )
+            buffer.seek(0)
+            plt.close()
+
+            return buffer
+        except Exception as e:
+            plt.close()
+            return Paragraph(
+                f"Error creating monthly return distribution chart: {str(e)}", self.normal_style
             )
 
     def create_sector_exposure_chart(self):
-        """Create multiline plot showing sector percentage over time"""
+        """Create multiline plot showing sector percentage over time with professional styling"""
+        # Set professional matplotlib styling
         plt.style.use("default")
-        fig, ax = plt.subplots(figsize=(12, 8))
+        plt.rcParams.update(
+            {
+                "font.family": ["Arial", "Helvetica", "sans-serif"],
+                "font.size": 12,
+                "axes.titlesize": 18,
+                "axes.labelsize": 14,
+                "xtick.labelsize": 11,
+                "ytick.labelsize": 11,
+                "legend.fontsize": 11,
+                "axes.spines.top": False,
+                "axes.spines.right": False,
+                "axes.grid": True,
+                "grid.alpha": 0.3,
+            }
+        )
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+        fig.patch.set_facecolor("white")
 
         if self.holdings_summary["sector_ts"] and self.holdings_summary["holdings_count"]:
             # Create dataframe from sector time series
@@ -561,41 +1454,66 @@ class ReportGenerator:
             sector_df.index = pd.to_datetime(holdings_dates)
             sector_df = sector_df.sort_index()
 
-            # Calculate total holdings for each date to get percentages
-            holdings_df = (
-                pd.DataFrame(
-                    {
-                        "Date": pd.to_datetime(holdings_dates),
-                        "Total": list(self.holdings_summary["holdings_count"].values()),
-                    }
-                )
-                .set_index("Date")
-                .sort_index()
-            )
-
-            # Calculate percentages for each sector
-            sector_pct_df = sector_df.div(holdings_df["Total"], axis=0) * 100
+            sector_pct_df = sector_df.div(sector_df[sector_df.columns].sum(axis=1), axis=0) * 100
             sector_pct_df = sector_pct_df.fillna(0)
 
+            professional_colors = [
+                Colors.CHART_NAVY,
+                Colors.CHART_GOLD,
+                Colors.CHART_BLUE,
+                Colors.CHART_GREEN,
+                Colors.CHART_RED,
+                Colors.CHART_AMBER,
+                Colors.CHART_TEAL,
+                Colors.CHART_DEEP_BLUE,
+                Colors.CHART_CHARCOAL,
+                Colors.CHART_DARK_GRAY,
+                "#8E44AD",
+                "#E67E22",
+            ]
+
             # Plot each sector as a line
-            colors_list = plt.cm.tab10(np.linspace(0, 1, len(sector_pct_df.columns)))
             for i, sector in enumerate(sector_pct_df.columns):
+                color = professional_colors[i % len(professional_colors)]
                 ax.plot(
                     sector_pct_df.index,
                     sector_pct_df[sector],
-                    marker="o",
-                    markersize=3,
-                    linewidth=2,
+                    linewidth=1,
                     label=sector,
-                    color=colors_list[i],
+                    color=color,
                 )
 
-            ax.set_title("Sector Exposure Over Time (%)", fontsize=14, fontweight="bold")
-            ax.set_ylabel("Percentage of Portfolio (%)")
-            ax.set_xlabel("Date")
-            ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
-            ax.grid(True, alpha=0.3)
-            plt.xticks(rotation=45)
+            ax.set_title(
+                "Sector Exposure Over Time (%)",
+                fontsize=20,
+                fontweight="bold",
+                color=Colors.CHART_DEEP_BLUE,
+                pad=25,
+            )
+            ax.xaxis.set_major_locator(mdates.MonthLocator(interval=self.interval))
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+            ax.set_ylabel("Percentage of Portfolio (%)", fontsize=14, color=Colors.CHART_CHARCOAL)
+            ax.set_xlabel("Date", fontsize=14, color=Colors.CHART_CHARCOAL)
+
+            # Professional styling
+            ax.tick_params(colors=Colors.CHART_CHARCOAL)
+            ax.grid(True, alpha=0.3, color=Colors.CHART_MEDIUM_GRAY)
+            ax.set_facecolor(Colors.CHART_LIGHT_GRAY)
+
+            # Legend styling - place on top
+            legend = ax.legend(
+                bbox_to_anchor=(0.5, 1.02),
+                loc="lower center",
+                ncol=3,
+                frameon=True,
+                fancybox=True,
+                shadow=True,
+                facecolor=Colors.CHART_WHITE,
+                edgecolor=Colors.CHART_BLUE,
+            )
+            legend.get_frame().set_alpha(0.95)
+
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
         else:
             ax.text(
                 0.5,
@@ -604,22 +1522,38 @@ class ReportGenerator:
                 transform=ax.transAxes,
                 ha="center",
                 va="center",
+                fontsize=16,
+                color=Colors.CHART_CHARCOAL,
             )
-            ax.set_title("Sector Exposure Over Time (%)", fontsize=14, fontweight="bold")
+            ax.set_title(
+                "Sector Exposure Over Time (%)",
+                fontsize=20,
+                fontweight="bold",
+                color=Colors.CHART_DEEP_BLUE,
+                pad=25,
+            )
 
         plt.tight_layout()
 
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=300, bbox_inches="tight")
+        fig.savefig(
+            buf, format="png", dpi=300, bbox_inches="tight", facecolor="white", edgecolor="none"
+        )
         buf.seek(0)
         plt.close()
 
         return buf
 
     def create_sector_composition_pie(self):
-        """Create pie chart of average sector composition"""
+        """Create pie chart of average sector composition with legend"""
         plt.style.use("default")
-        fig, ax = plt.subplots(figsize=(10, 8))
+        plt.rcParams.update(
+            {
+                "font.family": ["Arial", "Helvetica", "sans-serif"],
+                "font.size": 11,
+            }
+        )
+        fig, ax = plt.subplots(figsize=(10, 7))
 
         if self.holdings_summary["sector_ts"]:
             # Calculate average sector composition
@@ -628,15 +1562,60 @@ class ReportGenerator:
             avg_sector = avg_sector[avg_sector > 0]  # Only non-zero sectors
 
             if len(avg_sector) > 0:
-                colors_list = plt.cm.Set3(np.linspace(0, 1, len(avg_sector)))
+                # Use Goldman Sachs inspired colors for pie chart
+                gs_colors = [
+                    Colors.CHART_NAVY,
+                    Colors.CHART_GOLD,
+                    Colors.CHART_BLUE,
+                    Colors.CHART_GREEN,
+                    Colors.CHART_RED,
+                    Colors.CHART_AMBER,
+                    Colors.CHART_TEAL,
+                    Colors.CHART_CHARCOAL,
+                    Colors.CHART_DARK_GRAY,
+                ]
+                # Cycle through colors if we have more sectors than colors
+                colors_list = [gs_colors[i % len(gs_colors)] for i in range(len(avg_sector))]
+
                 wedges, texts, autotexts = ax.pie(
                     avg_sector.values,
-                    labels=avg_sector.index,
                     autopct="%1.1f%%",
                     colors=colors_list,
                     startangle=90,
+                    pctdistance=0.85,
                 )
-                ax.set_title("Average Sector Composition", fontsize=14, fontweight="bold")
+
+                # Style the percentage text
+                for autotext in autotexts:
+                    autotext.set_color("white")
+                    autotext.set_fontweight("bold")
+                    autotext.set_fontsize(11)
+                    autotext.set_family("Arial")
+
+                # Create legend with sector names
+                ax.legend(
+                    wedges,
+                    avg_sector.index,
+                    title="Sectors",
+                    loc="center left",
+                    bbox_to_anchor=(1, 0, 0.5, 1),
+                    fontsize=11,
+                    title_fontsize=12,
+                    frameon=True,
+                    fancybox=True,
+                    shadow=True,
+                    facecolor=Colors.CHART_WHITE,
+                    edgecolor=Colors.CHART_BLUE,
+                )
+
+                ax.set_title(
+                    "Average Sector Composition",
+                    fontsize=16,
+                    fontweight="bold",
+                    color=Colors.CHART_DEEP_BLUE,
+                    pad=20,
+                    family="Arial",
+                )
             else:
                 ax.text(
                     0.5,
@@ -667,132 +1646,114 @@ class ReportGenerator:
 
         return buf
 
-    def generate_page_2(self, story):
-        """Generate page 2 - Portfolio Compositions"""
-        # Page break and title
-        story.append(PageBreak())
-        title = Paragraph("Portfolio Compositions", self.title_style)
-        story.append(title)
-        story.append(Spacer(1, 30))
+    def create_sector_duration_boxplot(self):
+        """Create box plot showing duration distribution by sector"""
+        plt.style.use("default")
+        fig, ax = plt.subplots(figsize=(10, 6))
 
-        # Holdings Analysis Section
-        story.append(Paragraph("Holdings Analysis", self.block_title_style))
+        if self.holdings_summary["duration_by_ticker"] and self.holdings_summary["sector_ts"]:
 
-        # Holdings count chart
-        holdings_chart = self.create_holdings_analysis_chart()
-        img = Image(holdings_chart, width=6 * inch, height=3.6 * inch)
-        story.append(img)
-        story.append(Spacer(1, 15))
+            # Get duration data
+            duration_df = pd.DataFrame(self.holdings_summary["duration_by_ticker"])
+            duration_df = duration_df.merge(self.portfolio.product_data, on="ticker", how="left")
 
-        # Holdings summary table
-        holdings_table = self.create_holdings_summary_table()
-        if holdings_table:
-            story.append(holdings_table)
-        story.append(Spacer(1, 20))
+            if len(duration_df) > 0:
+                # Create box plot
+                sectors = duration_df["sector"].unique()
+                sector_data = [
+                    duration_df[duration_df["sector"] == sector]["duration"] for sector in sectors
+                ]
 
-        # Holding duration summary table
-        duration_summary_table = self.create_holding_duration_summary_table()
-        if duration_summary_table:
-            story.append(Paragraph("Holding Duration Summary", self.block_title_style))
-            story.append(duration_summary_table)
-            story.append(Spacer(1, 20))
+                box_plot = ax.boxplot(sector_data, labels=sectors, patch_artist=True)
 
-        # Top duration tables
-        longest_table, shortest_table = self.create_top_duration_tables()
-        if longest_table and shortest_table:
-            story.append(Paragraph("Top Duration Holdings", self.block_title_style))
+                # Color the boxes
+                colors = plt.cm.Set3(np.linspace(0, 1, len(sectors)))
+                for patch, color in zip(box_plot["boxes"], colors):
+                    patch.set_facecolor(color)
+                    patch.set_alpha(0.7)
 
-            # Arrange duration tables side-by-side
-            duration_tables_data = [
-                [
-                    Paragraph("Top 5 Longest Hold", self.normal_style),
-                    Paragraph("Top 5 Shortest Hold", self.normal_style),
-                ],
-                [longest_table, shortest_table],
-            ]
-
-            combined_duration_table = Table(
-                duration_tables_data, colWidths=[3.25 * inch, 3.25 * inch]
-            )
-            combined_duration_table.setStyle(
-                TableStyle(
-                    [
-                        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                        ("FONTSIZE", (0, 0), (-1, 0), 11),
-                    ]
+                ax.set_title(
+                    "Holding Duration Distribution by Sector", fontsize=14, fontweight="bold"
                 )
+                ax.set_xlabel("Sector", fontsize=12)
+                ax.set_ylabel("Duration (Days)", fontsize=12)
+                ax.grid(True, alpha=0.3)
+                plt.xticks(rotation=45, ha="right")
+            else:
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No sector-duration mapping available",
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="center",
+                )
+                ax.set_title(
+                    "Holding Duration Distribution by Sector", fontsize=14, fontweight="bold"
+                )
+        else:
+            ax.text(
+                0.5,
+                0.5,
+                "No duration or sector data available",
+                transform=ax.transAxes,
+                ha="center",
+                va="center",
             )
-            story.append(combined_duration_table)
-        story.append(Spacer(1, 30))
+            ax.set_title("Holding Duration Distribution by Sector", fontsize=14, fontweight="bold")
 
-        # Sector Exposure Section
-        story.append(Paragraph("Sector Exposure", self.block_title_style))
+        plt.tight_layout()
 
-        # Sector exposure multiline chart
-        sector_chart = self.create_sector_exposure_chart()
-        img = Image(sector_chart, width=7 * inch, height=4.8 * inch)
-        story.append(img)
-        story.append(Spacer(1, 20))
+        buf = BytesIO()
+        fig.savefig(buf, format="png", dpi=300, bbox_inches="tight")
+        buf.seek(0)
+        plt.close()
 
-        # Sector composition pie chart
-        pie_chart = self.create_sector_composition_pie()
-        img = Image(pie_chart, width=6 * inch, height=4.8 * inch)
-        story.append(img)
-        story.append(Spacer(1, 25))
+        return buf
 
     def create_trading_metrics_table(self):
-        """Create trading metrics summary table"""
-        total_buy_trades = sum(
-            trade_data["buy"] for trade_data in self.holdings_summary["trades_ts"]
+        trades_df = pd.DataFrame(self.holdings_summary["trades_ts"])
+        trades_df["total"] = trades_df.sum(axis=1)
+        trades_df[["buy_pct", "sell_pct"]] = trades_df[["buy", "sell"]].div(
+            trades_df["total"], axis=0
         )
-        total_sell_trades = sum(
-            trade_data["sell"] for trade_data in self.holdings_summary["trades_ts"]
-        )
-        total_trading_days = len(self.portfolio.trades_history)
+        trades_df.fillna(0, inplace=True)
 
-        executed_days = sum(
-            1 for status in self.portfolio.trades_status.values() if status == "executed"
-        )
-        cancelled_days = sum(
-            1 for status in self.portfolio.trades_status.values() if status == "cancelled"
-        )
-        execution_rate = (
-            executed_days / (executed_days + cancelled_days)
-            if (executed_days + cancelled_days) > 0
-            else 0
-        )
+        count = Counter(self.portfolio.trades_status.values())
+        executed = count.get(1, 0)
+        cancelled = count.get(0, 0)
+        total_trading_days = executed + cancelled
 
         trading_data = [
             ["Trading Metric", "Value"],
             ["Total Trading Days", f"{total_trading_days}"],
-            ["Total Buy Trades", f"{total_buy_trades}"],
-            ["Total Sell Trades", f"{total_sell_trades}"],
+            ["Avg. Buy Trades per day", f"{trades_df['buy'].mean():.1f}"],
+            ["Avg. Sell Trades per day", f"{trades_df['sell'].mean():.1f}"],
             [
-                "Avg Trades per Day",
-                (
-                    f"{(total_buy_trades + total_sell_trades) / total_trading_days:.1f}"
-                    if total_trading_days > 0
-                    else "N/A"
-                ),
+                "Trade Execution Rate",
+                f"{executed / total_trading_days if total_trading_days > 0 else 0:.2%}",
             ],
-            ["Trade Execution Rate", f"{execution_rate:.2%}"],
-            ["Cancelled Trades", f"{self.holdings_summary['cancelled_trades_count']}"],
+            ["Cancelled Trades", f"{cancelled}"],
         ]
 
-        table = Table(trading_data, colWidths=[3 * inch, 2 * inch])
+        table = Table(trading_data, colWidths=[3.5 * inch, 2.5 * inch])
         table.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.darkorange),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("BACKGROUND", (0, 0), (-1, 0), Colors.GOLD),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), Colors.WHITE),
                     ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
                     ("FONTSIZE", (0, 0), (-1, 0), 12),
-                    ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
-                    ("BACKGROUND", (0, 1), (-1, -1), colors.lightyellow),
-                    ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                    ("FONTSIZE", (0, 1), (-1, -1), 11),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 10),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                    ("BACKGROUND", (0, 1), (-1, -1), Colors.LIGHT_GRAY),
+                    ("LINEBELOW", (0, 0), (-1, -1), 1, Colors.MEDIUM_GRAY),
+                    ("BOX", (0, 0), (-1, -1), 1.5, Colors.GOLD),
                 ]
             )
         )
@@ -800,10 +1761,10 @@ class ReportGenerator:
         return table
 
     def create_trading_activity_chart(self):
-        """Create trading activity bar chart with buy/sell bars and net trades"""
+        """Create trading activity bar chart with buy/sell bars and second chart with total/net trades lines"""
         plt.style.use("default")
         fig, (ax1, ax2) = plt.subplots(
-            2, 1, figsize=(12, 10), gridspec_kw={"height_ratios": [3, 1]}, sharex=True
+            2, 1, figsize=(10, 7.5), gridspec_kw={"height_ratios": [2, 1]}, sharex=True
         )
 
         if self.holdings_summary["trades_ts"] and self.holdings_summary["holdings_count"]:
@@ -817,7 +1778,7 @@ class ReportGenerator:
             trades_df["net_trades"] = trades_df["buy"] - trades_df["sell"]
             trades_df["total_trades"] = trades_df["buy"] + trades_df["sell"]
 
-            # Main chart - Buy/Sell bars with total trades line
+            # Main chart - Buy/Sell bars only
             bar_width = 0.8
             ax1.bar(
                 trades_df["Date"],
@@ -836,43 +1797,37 @@ class ReportGenerator:
                 width=bar_width,
             )
 
-            # Overlay total trades line
-            ax1_twin = ax1.twinx()
-            ax1_twin.plot(
+            ax1.set_title("Trading Activity Over Time", fontsize=14, fontweight="bold")
+            ax1.set_ylabel("Number of Trades (Buy +, Sell -)")
+            ax1.grid(True, alpha=0.3)
+            ax1.axhline(y=0, color="black", linestyle="-", alpha=0.5)
+            ax1.legend(loc="upper left")
+
+            # Bottom chart - Total trades and net trades as lines
+            ax2.plot(
                 trades_df["Date"],
                 trades_df["total_trades"],
-                color="darkblue",
-                linewidth=3,
-                marker="o",
-                markersize=4,
+                color=Colors.CHART_NAVY,
+                linewidth=1,
                 label="Total Trades",
                 alpha=0.8,
             )
-
-            ax1.set_title("Trading Activity Over Time", fontsize=14, fontweight="bold")
-            ax1.set_ylabel("Number of Trades (Buy +, Sell -)")
-            ax1_twin.set_ylabel("Total Trades", color="darkblue")
-            ax1.grid(True, alpha=0.3)
-            ax1.axhline(y=0, color="black", linestyle="-", alpha=0.5)
-
-            # Combine legends
-            lines1, labels1 = ax1.get_legend_handles_labels()
-            lines2, labels2 = ax1_twin.get_legend_handles_labels()
-            ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
-
-            # Bottom chart - Net trades (like volume)
-            colors_net = ["green" if x >= 0 else "red" for x in trades_df["net_trades"]]
-            ax2.bar(
+            ax2.plot(
                 trades_df["Date"],
                 trades_df["net_trades"],
-                alpha=0.6,
-                color=colors_net,
-                width=bar_width,
+                color=Colors.CHART_GREEN,
+                linewidth=1,
+                label="Net Trades (Buy - Sell)",
+                alpha=0.8,
             )
-            ax2.set_ylabel("Net Trades\n(Buy - Sell)")
+
+            ax2.set_ylabel("Number of Trades")
             ax2.set_xlabel("Date")
+            ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=self.interval))
+            ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
             ax2.grid(True, alpha=0.3)
             ax2.axhline(y=0, color="black", linestyle="-", alpha=0.5)
+            ax2.legend(loc="upper left")
 
             plt.xticks(rotation=45)
         else:
@@ -917,18 +1872,22 @@ class ReportGenerator:
         for _, row in top_bought.iterrows():
             bought_data.append([str(row["ticker"]), str(row["buy"])])
 
-        bought_table = Table(bought_data, colWidths=[1.5 * inch, 1.5 * inch])
+        bought_table = Table(bought_data, colWidths=[1.8 * inch, 1.8 * inch])
         bought_table.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.darkgreen),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("BACKGROUND", (0, 0), (-1, 0), Colors.EMERALD),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), Colors.WHITE),
                     ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
                     ("FONTSIZE", (0, 0), (-1, 0), 12),
-                    ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
-                    ("BACKGROUND", (0, 1), (-1, -1), colors.lightgreen),
-                    ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                    ("FONTSIZE", (0, 1), (-1, -1), 11),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (-1, -1), 8),
+                    ("BACKGROUND", (0, 1), (-1, -1), Colors.LIGHT_GRAY),
+                    ("LINEBELOW", (0, 0), (-1, -1), 1, Colors.MEDIUM_GRAY),
+                    ("BOX", (0, 0), (-1, -1), 1.5, Colors.EMERALD),
                 ]
             )
         )
@@ -939,18 +1898,22 @@ class ReportGenerator:
         for _, row in top_sold.iterrows():
             sold_data.append([str(row["ticker"]), str(row["sell"])])
 
-        sold_table = Table(sold_data, colWidths=[1.5 * inch, 1.5 * inch])
+        sold_table = Table(sold_data, colWidths=[1.8 * inch, 1.8 * inch])
         sold_table.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.darkred),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("BACKGROUND", (0, 0), (-1, 0), Colors.GOLD),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), Colors.WHITE),
                     ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
                     ("FONTSIZE", (0, 0), (-1, 0), 12),
-                    ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
-                    ("BACKGROUND", (0, 1), (-1, -1), colors.lightpink),
-                    ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                    ("FONTSIZE", (0, 1), (-1, -1), 11),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (-1, -1), 8),
+                    ("BACKGROUND", (0, 1), (-1, -1), Colors.LIGHT_GRAY),
+                    ("LINEBELOW", (0, 0), (-1, -1), 1, Colors.MEDIUM_GRAY),
+                    ("BOX", (0, 0), (-1, -1), 1.5, Colors.GOLD),
                 ]
             )
         )
@@ -961,124 +1924,61 @@ class ReportGenerator:
         for _, row in top_traded.iterrows():
             traded_data.append([str(row["ticker"]), str(row["total_trades"])])
 
-        traded_table = Table(traded_data, colWidths=[1.5 * inch, 1.5 * inch])
+        traded_table = Table(traded_data, colWidths=[1.8 * inch, 1.8 * inch])
         traded_table.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.darkblue),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("BACKGROUND", (0, 0), (-1, 0), Colors.NAVY_BLUE),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), Colors.WHITE),
                     ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
                     ("FONTSIZE", (0, 0), (-1, 0), 12),
-                    ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
-                    ("BACKGROUND", (0, 1), (-1, -1), colors.lightblue),
-                    ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                    ("FONTSIZE", (0, 1), (-1, -1), 11),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (-1, -1), 8),
+                    ("BACKGROUND", (0, 1), (-1, -1), Colors.LIGHT_GRAY),
+                    ("LINEBELOW", (0, 0), (-1, -1), 1, Colors.MEDIUM_GRAY),
+                    ("BOX", (0, 0), (-1, -1), 1.5, Colors.NAVY_BLUE),
                 ]
             )
         )
 
         return bought_table, sold_table, traded_table
 
-    def generate_page_3(self, story):
-        """Generate page 3 - Trades Analysis"""
-        # Page break and title
-        story.append(PageBreak())
-        title = Paragraph("Trades Analysis", self.title_style)
-        story.append(title)
-        story.append(Spacer(1, 30))
+    def add_page_header(self, story, section_name=None):
+        """Add section header with divider line to each page"""
+        if section_name:
+            # Create header style for section names
+            header_style = ParagraphStyle(
+                "SectionPageHeader",
+                parent=self.styles["Heading2"],
+                fontName="Helvetica-Bold",
+                fontSize=14,
+                spaceAfter=2,
+                spaceBefore=0,
+                textColor=Colors.NAVY_BLUE,
+                alignment=TA_LEFT,
+                leading=16,
+            )
+            story.append(Paragraph(section_name, header_style))
 
-        # Trading Metrics Table
-        story.append(Paragraph("Trading Metrics Summary", self.block_title_style))
-        story.append(self.create_trading_metrics_table())
-        story.append(Spacer(1, 25))
-
-        # Trading Activity Chart
-        story.append(Paragraph("Trading Activity Over Time", self.block_title_style))
-        trading_chart = self.create_trading_activity_chart()
-        img = Image(trading_chart, width=7 * inch, height=6 * inch)
-        story.append(img)
-        story.append(Spacer(1, 25))
-
-        # Top Tickers Tables
-        story.append(Paragraph("Top Trading Securities", self.block_title_style))
-        bought_table, sold_table, traded_table = self.create_top_tickers_tables()
-
-        if bought_table and sold_table and traded_table:
-            # Arrange tables in a row
-            tables_data = [
-                [
-                    Paragraph("Top 5 Most Bought", self.normal_style),
-                    Paragraph("Top 5 Most Sold", self.normal_style),
-                    Paragraph("Top 5 Most Traded", self.normal_style),
-                ],
-                [bought_table, sold_table, traded_table],
-            ]
-
-            combined_table = Table(tables_data, colWidths=[2.3 * inch, 2.3 * inch, 2.3 * inch])
-            combined_table.setStyle(
+            # Add divider line using a table
+            divider_table = Table([[""]], colWidths=[landscape(A4)[0] - 1.5 * inch])
+            divider_table.setStyle(
                 TableStyle(
                     [
-                        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                        ("FONTSIZE", (0, 0), (-1, 0), 11),
+                        ("LINEBELOW", (0, 0), (-1, -1), 1.5, Colors.NAVY_BLUE),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                        ("TOPPADDING", (0, 0), (-1, -1), 0),
                     ]
                 )
             )
-            story.append(combined_table)
-        story.append(Spacer(1, 25))
-
-    def generate_page_4(self, story):
-        """Generate Page 4: Portfolio Performance"""
-        story.append(PageBreak())
-        story.append(Paragraph("Portfolio Performance", self.title_style))
-        story.append(Spacer(1, 30))
-
-        # Portfolio value over time
-        portfolio_value_chart = self.create_portfolio_value_chart()
-        if portfolio_value_chart:
-            story.append(Paragraph("Portfolio Value Over Time", self.block_title_style))
-            story.append(portfolio_value_chart)
-            story.append(Spacer(1, 20))
-
-        # Returns analysis (daily, monthly, annual, Sharpe)
-        returns_charts = self.create_returns_charts()
-        if returns_charts:
-            story.append(Paragraph("Returns Analysis", self.block_title_style))
-            story.append(returns_charts)
-            story.append(Spacer(1, 20))
-
-        # Return distribution analysis
-        distribution_charts = self.create_return_distribution_charts()
-        if distribution_charts:
-            story.append(Paragraph("Return Distribution Analysis", self.block_title_style))
-            story.append(distribution_charts)
-            story.append(Spacer(1, 30))
-
-    def generate_page_1(self, story):
-        """Generate page 1 with the three specified blocks"""
-        # Title
-        title = Paragraph("Portfolio Analysis Report", self.title_style)
-        story.append(title)
-        story.append(Spacer(1, 30))
-
-        # Block 1: Header Information
-        story.append(Paragraph("Portfolio Information", self.block_title_style))
-        story.append(self.create_header_info_block())
-        story.append(Spacer(1, 25))
-
-        # Block 2: Portfolio Configuration
-        story.append(Paragraph("Portfolio Configuration", self.block_title_style))
-        story.append(self.create_portfolio_config_block())
-        story.append(Spacer(1, 25))
-
-        # Block 3: Key Performance Metrics
-        story.append(Paragraph("Key Performance Metrics", self.block_title_style))
-        story.append(self.create_key_performance_block())
-        story.append(Spacer(1, 25))
+            story.append(divider_table)
+            story.append(Spacer(1, 10))
 
     def generate_report(self, filename=None):
-        """Generate the custom PDF report"""
+        """Generate the restructured PDF report with landscape orientation and page numbers"""
         # Create reports directory if it doesn't exist
         if not os.path.exists("reports"):
             os.makedirs("reports")
@@ -1092,23 +1992,377 @@ class ReportGenerator:
         elif not filename.startswith("reports/"):
             filename = f"reports/{filename}"
 
-        # Create PDF document
-        doc = SimpleDocTemplate(filename, pagesize=A4)
+        # Create PDF document with landscape orientation and page numbering
+        def add_page_number(canvas, doc):
+            """Add page number and footer with portfolio info to each page"""
+            canvas.saveState()
+
+            # Draw footer divider line
+            canvas.setStrokeColor(Colors.MEDIUM_GRAY)
+            canvas.setLineWidth(0.5)
+            canvas.line(0.75 * inch, 0.7 * inch, landscape(A4)[0] - 0.75 * inch, 0.7 * inch)
+
+            # Add portfolio info in footer
+            portfolio_dates = list(self.portfolio.portfolio_value_history.keys())
+            start_date = min(portfolio_dates) if portfolio_dates else "N/A"
+            end_date = max(portfolio_dates) if portfolio_dates else "N/A"
+
+            portfolio_name = self.portfolio.name or "Unnamed Portfolio"
+            benchmark = (
+                self.portfolio.benchmark.value
+                if hasattr(self.portfolio.benchmark, "value")
+                else str(self.portfolio.benchmark)
+            )
+            run_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            period = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+
+            footer_text = f"{portfolio_name} | Benchmark: {benchmark} | Run Date: {run_date} | Period: {period}"
+
+            canvas.setFont("Helvetica", 9)
+            canvas.setFillColor(Colors.CHARCOAL)
+            canvas.drawString(0.75 * inch, 0.5 * inch, footer_text)
+
+            # Add page number (just the number)
+            canvas.drawRightString(landscape(A4)[0] - 0.75 * inch, 0.5 * inch, f"{doc.page}")
+            canvas.restoreState()
+
+        doc = BaseDocTemplate(
+            filename,
+            pagesize=landscape(A4),
+            leftMargin=0.75 * inch,
+            rightMargin=0.75 * inch,
+            topMargin=0.75 * inch,
+            bottomMargin=0.75 * inch,
+        )
+
+        frame = Frame(
+            0.75 * inch,
+            0.75 * inch,
+            landscape(A4)[0] - 1.5 * inch,
+            landscape(A4)[1] - 1.5 * inch,
+            id="normal",
+        )
+
+        template = PageTemplate(id="normal", frames=frame, onPage=add_page_number)
+        doc.addPageTemplates([template])
+
         story = []
 
-        # Generate Page 1
-        self.generate_page_1(story)
+        # TITLE PAGE
+        # Page 1: Title Page with centered portfolio information
+        title_page_content = self.create_title_page()
+        story.extend(title_page_content)
+        story.append(PageBreak())
 
-        # Generate Page 2
-        self.generate_page_2(story)
+        # PORTFOLIO OVERVIEW SECTION
+        # Page 2: Portfolio Configuration and Performance Tables (no header)
 
-        # Generate Page 3
-        self.generate_page_3(story)
+        # Create side-by-side tables with titles and proper margins
+        config_content = self.create_portfolio_config_block()
+        performance_content = self.create_key_performance_block()
 
-        # Generate Page 4
-        self.generate_page_4(story)
+        # Create table containers for side-by-side layout
+        config_container = Table([[content] for content in config_content], colWidths=[3.8 * inch])
+        config_container.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
 
-        # Build PDF
+        performance_container = Table(
+            [[content] for content in performance_content], colWidths=[3.8 * inch]
+        )
+        performance_container.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
+
+        # Combine containers side by side with more space between and less edge margin
+        # Add spacer between tables for better separation
+        spacer_cell = Table([[Spacer(1, 1)]], colWidths=[0.8 * inch])
+        tables_data = [[config_container, spacer_cell, performance_container]]
+        combined_table = Table(tables_data, colWidths=[3.8 * inch, 0.8 * inch, 3.8 * inch])
+        combined_table.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 5),  # Less margin from page edge
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 5),  # Less margin from page edge
+                ]
+            )
+        )
+        story.append(Spacer(1, 0.5 * inch))  # Add top margin
+        story.append(combined_table)
+
+        # Page 3: Portfolio Value Over Time
+        story.append(PageBreak())
+        self.add_page_header(story, section_name="Portfolio Analysis")
+        portfolio_value_chart = self.create_portfolio_value_chart()
+
+        # Handle both successful chart generation (BytesIO) and error cases (Paragraph)
+        if portfolio_value_chart:
+            if isinstance(portfolio_value_chart, BytesIO):
+                # Successful chart generation
+                story.append(Image(portfolio_value_chart, width=8.5 * inch, height=5 * inch))
+            else:
+                # Error case - chart method returned a Paragraph with error message
+                story.append(portfolio_value_chart)
+        else:
+            # Fallback content if chart is None
+            story.append(Paragraph("Portfolio value chart data not available", self.normal_style))
+
+        # RETURN ANALYSIS SECTION TITLE PAGE
+        story.append(PageBreak())
+        return_analysis_title = self.create_section_title_page("Return Analysis")
+        story.extend(return_analysis_title)
+
+        # RETURN ANALYSIS SECTION
+        # Page 4: Return Analysis - Daily Returns
+        story.append(PageBreak())
+        self.add_page_header(story, section_name="Return Analysis")
+        daily_returns_chart = self.create_daily_returns_chart()
+        if daily_returns_chart:
+            if isinstance(daily_returns_chart, BytesIO):
+                story.append(Image(daily_returns_chart, width=8.5 * inch, height=5 * inch))
+            else:
+                story.append(daily_returns_chart)
+
+        # Page 5: Return Analysis - Monthly Returns
+        story.append(PageBreak())
+        self.add_page_header(story, section_name="Return Analysis")
+        monthly_returns_chart = self.create_monthly_returns_chart()
+        if monthly_returns_chart:
+            if isinstance(monthly_returns_chart, BytesIO):
+                story.append(Image(monthly_returns_chart, width=8.5 * inch, height=5 * inch))
+            else:
+                story.append(monthly_returns_chart)
+
+        # Page 6: Return Analysis - Quarterly Returns
+        story.append(PageBreak())
+        self.add_page_header(story, section_name="Return Analysis")
+        quarterly_returns_chart = self.create_quarterly_returns_chart()
+        if quarterly_returns_chart:
+            if isinstance(quarterly_returns_chart, BytesIO):
+                story.append(Image(quarterly_returns_chart, width=8.5 * inch, height=5 * inch))
+            else:
+                story.append(quarterly_returns_chart)
+
+        # Page 7: Return Analysis - Annual Returns
+        story.append(PageBreak())
+        self.add_page_header(story, section_name="Return Analysis")
+        annual_returns_chart = self.create_annual_returns_chart()
+        if annual_returns_chart:
+            if isinstance(annual_returns_chart, BytesIO):
+                story.append(Image(annual_returns_chart, width=8.5 * inch, height=5 * inch))
+            else:
+                story.append(annual_returns_chart)
+
+        # Page 8: Return Analysis - Daily Return Distribution
+        story.append(PageBreak())
+        self.add_page_header(story, section_name="Return Analysis")
+        daily_distribution_chart = self.create_daily_return_distribution_chart()
+        if daily_distribution_chart:
+            if isinstance(daily_distribution_chart, BytesIO):
+                story.append(Image(daily_distribution_chart, width=8.5 * inch, height=5 * inch))
+            else:
+                story.append(daily_distribution_chart)
+
+        # Page 9: Return Analysis - Monthly Return Distribution
+        story.append(PageBreak())
+        self.add_page_header(story, section_name="Return Analysis")
+        monthly_distribution_chart = self.create_monthly_return_distribution_chart()
+        if monthly_distribution_chart:
+            if isinstance(monthly_distribution_chart, BytesIO):
+                story.append(Image(monthly_distribution_chart, width=8.5 * inch, height=5 * inch))
+            else:
+                story.append(monthly_distribution_chart)
+
+        # HOLDINGS ANALYSIS SECTION TITLE PAGE
+        story.append(PageBreak())
+        holdings_analysis_title = self.create_section_title_page("Holdings Analysis")
+        story.extend(holdings_analysis_title)
+
+        # HOLDINGS ANALYSIS SECTION
+        # Page 10: Holdings Analysis - Holdings Summary
+        story.append(PageBreak())
+        self.add_page_header(story, section_name="Holdings Analysis")
+
+        # Add table title
+        table_title = Paragraph("Holdings Summary", self.section_header_style)
+        story.append(table_title)
+        story.append(Spacer(1, 5))
+
+        holdings_table = self.create_holdings_summary_table()
+        if holdings_table:
+            story.append(holdings_table)
+
+        # Page 11: Holdings Analysis - Holdings Over Time
+        story.append(PageBreak())
+        self.add_page_header(story, section_name="Holdings Analysis")
+        holdings_chart = self.create_holdings_analysis_chart()
+        story.append(Image(holdings_chart, width=8.5 * inch, height=5 * inch))
+
+        # Page 12: Holdings Analysis - Duration Summary and Top Durations
+        story.append(PageBreak())
+        self.add_page_header(story, section_name="Holdings Analysis")
+
+        # Add title for duration summary table
+        duration_title = Paragraph("Duration Summary", self.section_header_style)
+        story.append(duration_title)
+        story.append(Spacer(1, 5))
+
+        duration_summary_table = self.create_holding_duration_summary_table()
+        if duration_summary_table:
+            story.append(duration_summary_table)
+            story.append(Spacer(1, 20))  # Add space between sections
+
+        # Add top durations section on the same page
+        story.append(
+            Paragraph("Top 5 Longest Hold, Top 5 Shortest Hold", self.section_header_style)
+        )
+        story.append(Spacer(1, 10))
+        longest_table, shortest_table = self.create_top_duration_tables()
+        if longest_table and shortest_table:
+            # Create titles for the duration tables
+            longest_title = Paragraph("Top 5 Longest Hold", self.section_header_style)
+            shortest_title = Paragraph("Top 5 Shortest Hold", self.section_header_style)
+
+            # Create containers with titles and tables
+            longest_container = Table(
+                [[longest_title], [Spacer(1, 8)], [longest_table]], colWidths=[3.5 * inch]
+            )
+            longest_container.setStyle(
+                TableStyle(
+                    [("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (0, 0), (-1, -1), "CENTER")]
+                )
+            )
+
+            shortest_container = Table(
+                [[shortest_title], [Spacer(1, 8)], [shortest_table]], colWidths=[3.5 * inch]
+            )
+            shortest_container.setStyle(
+                TableStyle(
+                    [("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (0, 0), (-1, -1), "CENTER")]
+                )
+            )
+
+            # Add spacer between the two tables
+            spacer_cell = Table([[Spacer(1, 1)]], colWidths=[1.5 * inch])
+            duration_tables_data = [[longest_container, spacer_cell, shortest_container]]
+            combined_duration_table = Table(
+                duration_tables_data, colWidths=[3.5 * inch, 1.5 * inch, 3.5 * inch]
+            )
+            combined_duration_table.setStyle(
+                TableStyle(
+                    [
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ]
+                )
+            )
+            story.append(combined_duration_table)
+
+        # Page 14: Holdings Analysis - Duration vs Sector
+        story.append(PageBreak())
+        self.add_page_header(story, section_name="Holdings Analysis")
+        sector_duration_chart = self.create_sector_duration_boxplot()
+        story.append(Image(sector_duration_chart, width=8.5 * inch, height=5 * inch))
+
+        # SECTOR ANALYSIS SECTION TITLE PAGE
+        story.append(PageBreak())
+        sector_analysis_title = self.create_section_title_page("Sector Analysis")
+        story.extend(sector_analysis_title)
+
+        # SECTOR ANALYSIS SECTION
+        # Page 15: Sector Analysis - Exposure Over Time
+        story.append(PageBreak())
+        self.add_page_header(story, section_name="Sector Analysis")
+        sector_chart = self.create_sector_exposure_chart()
+        story.append(Image(sector_chart, width=8.5 * inch, height=5 * inch))
+
+        # Page 16: Sector Analysis - Average Sector Overtime
+        story.append(PageBreak())
+        self.add_page_header(story, section_name="Sector Analysis")
+        pie_chart = self.create_sector_composition_pie()
+        story.append(Image(pie_chart, width=7 * inch, height=5 * inch))
+
+        # TRADING ANALYSIS SECTION TITLE PAGE
+        story.append(PageBreak())
+        trading_analysis_title = self.create_section_title_page("Trading Analysis")
+        story.extend(trading_analysis_title)
+
+        # TRADING ANALYSIS SECTION
+        # Page 17: Trading Analysis - Trading Metrics
+        story.append(PageBreak())
+        self.add_page_header(story, section_name="Trading Analysis")
+
+        # Add table title
+        table_title = Paragraph("Trading Metrics", self.section_header_style)
+        story.append(table_title)
+        story.append(Spacer(1, 5))
+
+        trading_table = self.create_trading_metrics_table()
+        story.append(trading_table)
+
+        # Page 18: Trading Analysis - Trading Over Time
+        story.append(PageBreak())
+        self.add_page_header(story, section_name="Trading Analysis")
+        trading_chart = self.create_trading_activity_chart()
+        story.append(Image(trading_chart, width=8.5 * inch, height=5 * inch))
+
+        # Page 19: Trading Analysis - Top 5 Tables
+        story.append(PageBreak())
+        self.add_page_header(story, section_name="Trading Analysis")
+        bought_table, sold_table, traded_table = self.create_top_tickers_tables()
+        if bought_table and sold_table and traded_table:
+            # Create titles for each table
+            bought_title = Paragraph("Top 5 Most Bought Tickers", self.section_header_style)
+            sold_title = Paragraph("Top 5 Most Sold Tickers", self.section_header_style)
+            traded_title = Paragraph("Top 5 Most Traded Tickers", self.section_header_style)
+
+            # Create containers with titles and tables
+            bought_container = Table(
+                [[bought_title], [Spacer(1, 8)], [bought_table]], colWidths=[2.8 * inch]
+            )
+            bought_container.setStyle(
+                TableStyle(
+                    [("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (0, 0), (-1, -1), "CENTER")]
+                )
+            )
+
+            sold_container = Table(
+                [[sold_title], [Spacer(1, 8)], [sold_table]], colWidths=[2.8 * inch]
+            )
+            sold_container.setStyle(
+                TableStyle(
+                    [("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (0, 0), (-1, -1), "CENTER")]
+                )
+            )
+
+            traded_container = Table(
+                [[traded_title], [Spacer(1, 8)], [traded_table]], colWidths=[2.8 * inch]
+            )
+            traded_container.setStyle(
+                TableStyle(
+                    [("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (0, 0), (-1, -1), "CENTER")]
+                )
+            )
+
+            # Arrange three containers side by side with more spacing
+            spacer_cell1 = Table([[Spacer(1, 1)]], colWidths=[0.8 * inch])
+            spacer_cell2 = Table([[Spacer(1, 1)]], colWidths=[0.8 * inch])
+            tables_data = [
+                [bought_container, spacer_cell1, sold_container, spacer_cell2, traded_container]
+            ]
+            three_tables = Table(
+                tables_data, colWidths=[2.8 * inch, 0.8 * inch, 2.8 * inch, 0.8 * inch, 2.8 * inch]
+            )
+            three_tables.setStyle(
+                TableStyle(
+                    [
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ]
+                )
+            )
+            story.append(three_tables)
+
+        # Build PDF with page numbers
         doc.build(story)
         print(f"Custom PDF report saved to: {filename}")
         return filename

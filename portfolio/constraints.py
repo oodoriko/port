@@ -4,8 +4,11 @@ import numpy as np
 class Constraints:
     """dummy dumb dumb bad"""
 
-    def __init__(self, constraints: list[str]):
+    def __init__(self, constraints: dict):
         self.constraints = constraints
+
+    def list_constraints(self):
+        return self.constraints
 
     def evaluate_trades(self, trades_plan: dict[str, int], positions_size: int, max_holdings: int):
         if trades_plan is None or len(trades_plan) == 0:
