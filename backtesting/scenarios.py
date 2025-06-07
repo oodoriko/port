@@ -38,3 +38,27 @@ scenario_1.set_trading_style(
 The portfolio should be traded relatively frequently, with a high turnover rate.
     """
 )
+
+
+# for testing
+scenario_2 = Scenario(
+    name="testing",
+    strategies=[Strategies.MACD_CROSSOVER],
+    start_date="2025-02-01",
+    end_date="2025-06-01",
+    constraints=DEFAULT_BACKTEST_PARAMS["constraints"],
+    additional_setup=INITIAL_SETUP,
+    benchmark=Benchmarks.SP500,
+)
+
+
+# for testing
+scenario_3 = Scenario(
+    name="sp500_3yrs_unconstrained_no_short_macd",
+    strategies=[Strategies.MACD_CROSSOVER],
+    start_date="2022-01-01",
+    end_date="2025-06-01",
+    constraints=DEFAULT_BACKTEST_PARAMS["constraints"],
+    additional_setup=INITIAL_SETUP,
+    benchmark=Benchmarks.SP500,
+)

@@ -205,6 +205,7 @@ class ReportGenerator:
             no_data_message="No holdings data available",
             interval=self.interval,
             normal_style=self.normal_style,
+            graph_type="D",
         )
 
     def create_holdings_summary_table(self):
@@ -324,6 +325,7 @@ class ReportGenerator:
             no_data_message="No portfolio value data available",
             interval=self.interval,
             normal_style=self.normal_style,
+            graph_type="D",
         )
 
     def create_monthly_portfolio_value_chart(self):
@@ -338,6 +340,7 @@ class ReportGenerator:
             no_data_message="No portfolio value data available",
             interval=self.interval,
             normal_style=self.normal_style,
+            graph_type="M",
         )
 
     def create_annual_portfolio_value_chart(self):
@@ -352,6 +355,7 @@ class ReportGenerator:
             no_data_message="No portfolio value data available",
             interval=self.interval,
             normal_style=self.normal_style,
+            graph_type="Y",
         )
 
     def create_daily_returns_chart(self):
@@ -363,9 +367,9 @@ class ReportGenerator:
             date_format="%Y-%m",
             y_label="Return (%)",
             add_zero_line=True,
-            is_annual=False,
             interval=self.interval,
             normal_style=self.normal_style,
+            graph_type="D",
         )
 
     def create_monthly_returns_chart(self):
@@ -377,9 +381,9 @@ class ReportGenerator:
             date_format="%Y-%m",
             y_label="Return (%)",
             add_zero_line=True,
-            is_annual=False,
             interval=self.interval,
             normal_style=self.normal_style,
+            graph_type="M",
         )
 
     def create_quarterly_returns_chart(self):
@@ -391,9 +395,9 @@ class ReportGenerator:
             date_format="%Y-%m",
             y_label="Return (%)",
             add_zero_line=True,
-            is_annual=False,
             interval=self.interval,
             normal_style=self.normal_style,
+            graph_type="Q",
         )
 
     def create_annual_returns_chart(self):
@@ -405,9 +409,9 @@ class ReportGenerator:
             date_format="%Y",
             y_label="Return (%)",
             add_zero_line=True,
-            is_annual=True,
             interval=self.interval,
             normal_style=self.normal_style,
+            graph_type="Y",
         )
 
     def create_daily_return_distribution_chart(self):
@@ -569,7 +573,7 @@ class ReportGenerator:
             header_color=Colors.SLATE_BLUE,
         )
 
-    def create_trading_activity_chart(self, title=None):
+    def create_trading_activity_chart(self, title=None, graph_type="D"):
         """Create trading activity bar chart with buy/sell bars and second chart with total/net trades lines"""
         plt.style.use("default")
         fig, (ax1, ax2) = plt.subplots(
@@ -579,18 +583,25 @@ class ReportGenerator:
         if self.holdings_summary["trades_ts"] and self.holdings_summary["holdings_count"]:
             holdings_dates = list(self.holdings_summary["holdings_count"].keys())
             trades_df = pd.DataFrame(self.holdings_summary["trades_ts"])
-            trades_df["Date"] = pd.to_datetime(holdings_dates)
-            trades_df = trades_df.sort_values("Date")
+            trades_df.index = pd.to_datetime(holdings_dates)
+            trades_df = trades_df.sort_index()
 
             trades_df["buy"] = pd.to_numeric(trades_df["buy"], errors="coerce").fillna(0)
             trades_df["sell"] = pd.to_numeric(trades_df["sell"], errors="coerce").fillna(0)
             trades_df["net_trades"] = trades_df["buy"] - trades_df["sell"]
             trades_df["total_trades"] = trades_df["buy"] + trades_df["sell"]
 
+            if graph_type == "M" and len(trades_df.resample("M").last()) <= 1:
+                trades_df = trades_df.resample("D").last()
+            elif graph_type == "Q" and len(trades_df.resample("Q").last()) <= 1:
+                trades_df = trades_df.resample("M").last()
+            elif graph_type == "Y" and len(trades_df.resample("Y").last()) <= 1:
+                trades_df = trades_df.resample("Q").last()
+
             # Main chart - Buy/Sell bars only
             bar_width = 0.8
             ax1.bar(
-                trades_df["Date"],
+                trades_df.index,
                 trades_df["buy"],
                 alpha=0.7,
                 label="Buy Trades",
@@ -598,7 +609,7 @@ class ReportGenerator:
                 width=bar_width,
             )
             ax1.bar(
-                trades_df["Date"],
+                trades_df.index,
                 -trades_df["sell"],
                 alpha=0.7,
                 label="Sell Trades",
@@ -615,7 +626,7 @@ class ReportGenerator:
 
             # Bottom chart - Total trades and net trades as lines
             ax2.plot(
-                trades_df["Date"],
+                trades_df.index,
                 trades_df["total_trades"],
                 color=Colors.CHART_NAVY,
                 linewidth=1,
@@ -623,7 +634,7 @@ class ReportGenerator:
                 alpha=0.8,
             )
             ax2.plot(
-                trades_df["Date"],
+                trades_df.index,
                 trades_df["net_trades"],
                 color=Colors.CHART_GREEN,
                 linewidth=1,
@@ -632,8 +643,18 @@ class ReportGenerator:
             )
 
             ax2.set_ylabel("Number of Trades")
-            ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=self.interval))
-            ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+            if graph_type in ["D", "M"] and len(trades_df.resample("M").last()) <= 1:
+                ax2.xaxis.set_major_locator(mdates.DayLocator(interval=self.interval))
+                ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+            elif graph_type == "Q" and len(trades_df.resample("Q").last()) <= 1:
+                ax2.xaxis.set_major_locator(mdates.QuarterLocator(interval=self.interval))
+                ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+            elif graph_type == "Y" and len(trades_df.resample("Y").last()) <= 1:
+                ax2.xaxis.set_major_locator(mdates.YearLocator(interval=self.interval))
+                ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%q"))
+            else:
+                ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=self.interval))
+                ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
             ax2.grid(True, alpha=0.3)
             ax2.axhline(y=0, color="black", linestyle="-", alpha=0.5)
             ax2.legend(loc="upper left")
@@ -996,7 +1017,7 @@ class ReportGenerator:
 
         story.append(PageBreak())
         self.add_page_header(story, section_name="Trading Analysis - Trading Over Time")
-        trading_chart = self.create_trading_activity_chart()
+        trading_chart = self.create_trading_activity_chart(graph_type="D")
         story.append(Image(trading_chart, width=10 * inch, height=6.4 * inch))
 
         story.append(PageBreak())

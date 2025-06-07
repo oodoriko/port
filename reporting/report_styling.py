@@ -116,15 +116,14 @@ class ReportStyling:
                 chart_start, chart_end = date_range
                 chart_start = pd.to_datetime(chart_start)
                 chart_end = pd.to_datetime(chart_end)
-
                 # Check if crisis overlaps with chart date range
                 if crisis_end < chart_start or crisis_start > chart_end:
                     continue  # Skip this crisis as it doesn't overlap
 
-            # Add the crisis overlay
+            # Add the crisis overlay - convert to matplotlib date format
             ax.axvspan(
-                crisis_start,
-                crisis_end,
+                mdates.date2num(crisis_start),
+                mdates.date2num(crisis_end),
                 color=crisis["color"],
                 alpha=crisis["alpha"],
                 label=f"{crisis['name']} Crisis",
@@ -231,10 +230,10 @@ class ReportStyling:
         no_data_message="No data available",
         multiply_by_100=False,
         add_zero_line=False,
-        is_annual=False,
         interval=1,
         normal_style=None,
         show_crisis_periods=True,
+        graph_type="D",
     ):
         """
         Unified generic function to create line charts for any time series data
@@ -246,7 +245,6 @@ class ReportStyling:
         - data_key: Key to look up in metrics (for returns data)
         - multiply_by_100: Whether to convert to percentage (for returns)
         - add_zero_line: Whether to add horizontal line at y=0 (for returns)
-        - is_annual: Special handling for annual data
         - interval: Date interval for x-axis formatting
         - show_crisis_periods: Whether to overlay financial crisis periods in background
         """
@@ -272,20 +270,25 @@ class ReportStyling:
                     df.set_index("Date", inplace=True)
                     df = df.sort_index()
 
-                    # Resample if frequency is specified, fallback to daily if results in only one point
+                    # Apply resampling if specified
                     if resample_freq:
-                        df_resampled = df.resample(resample_freq).last()
-
-                        # If resampling results in only 1 point, fallback to daily resampling
-                        if len(df_resampled) <= 1:
-                            df = df.resample("D").last()
-                        else:
-                            df = df_resampled
+                        if resample_freq == "M":  # Monthly
+                            df = df.resample("M").last()
+                            date_format = "%Y-%m"
+                        elif resample_freq == "Q":  # Quarterly
+                            df = df.resample("Q").last()
+                            date_format = "%Y-%q"
+                        elif resample_freq == "Y":  # Yearly
+                            df = df.resample("Y").last()
+                            date_format = "%Y"
 
                     has_data = True
+
+                    # Only switch to daily format if we have very few data points
+                    if graph_type == "D" and len(df) <= 7:  # Less than a week of data
+                        date_format = "%Y-%m-%d"
                 else:
                     has_data = False
-
             elif data_key is not None:
                 # Look up in metrics (returns data)
                 if (
@@ -297,15 +300,17 @@ class ReportStyling:
 
                     # Handle different data structures for returns
                     if hasattr(returns_data, "keys") and hasattr(returns_data, "values"):
-                        if is_annual:
-                            # For annual returns, keys might be years (integers)
+                        # This is a dict-like structure
+                        if graph_type == "Y":
+                            # For yearly returns, keys should be years
                             dates_or_years = list(returns_data.keys())
-                            values = [float(r) * 100 for r in returns_data.values]
                         else:
-                            dates_or_years = pd.to_datetime(list(returns_data.index))
-                            values = [float(r) * 100 for r in returns_data.values]
+                            # For daily/monthly/quarterly returns
+                            dates_or_years = list(returns_data.keys())
+
+                        values = [float(r) * 100 for r in returns_data.values]
                     else:
-                        if is_annual:
+                        if graph_type == "Y":
                             dates_or_years = (
                                 list(returns_data.index) if hasattr(returns_data, "index") else []
                             )
@@ -348,24 +353,53 @@ class ReportStyling:
                 if data_dict is not None:
                     # Regular time series data (portfolio values, holdings)
                     ax.plot(df.index, df["Value"], **plot_kwargs)
+                    date_formatting_needed = True
                 else:
                     # Returns data (already processed dates_or_years and values)
-                    ax.plot(dates_or_years, values, **plot_kwargs)
+                    # Determine if we have datetime data or sequential data
+                    if len(dates_or_years) > 0:
+                        first_item = dates_or_years[0]
+                        # Check if it's integer data (sequential indices)
+                        if isinstance(first_item, (int, np.integer)):
+                            # Plot as sequential data
+                            ax.plot(range(len(values)), values, **plot_kwargs)
+                            ax.set_xlabel("Period", fontsize=14, color=Colors.CHART_CHARCOAL)
+                            date_formatting_needed = False
+                        else:
+                            # Try to convert to datetime if it's not already
+                            try:
+                                if not hasattr(first_item, "year"):  # Not already a datetime
+                                    dates_or_years = pd.to_datetime(dates_or_years)
+                                ax.plot(dates_or_years, values, **plot_kwargs)
+                                date_formatting_needed = True
+                            except:
+                                # If datetime conversion fails, plot as sequential
+                                ax.plot(range(len(values)), values, **plot_kwargs)
+                                ax.set_xlabel("Period", fontsize=14, color=Colors.CHART_CHARCOAL)
+                                date_formatting_needed = False
+                    else:
+                        # Empty data
+                        date_formatting_needed = False
 
                 # Add zero line for returns charts
                 if add_zero_line:
                     ax.axhline(y=0, color=Colors.CHART_CHARCOAL, linestyle="--", alpha=0.5)
 
-                # Add financial crisis overlays if requested
+                    # Add financial crisis overlays if requested
                 crisis_overlays = []
-                if show_crisis_periods and not is_annual:
+                if show_crisis_periods and graph_type != "Y" and date_formatting_needed:
                     # Determine date range for filtering relevant crises
+                    date_range = None
                     if data_dict is not None:
                         date_range = (df.index.min(), df.index.max())
                     else:
-                        date_range = (min(dates_or_years), max(dates_or_years))
+                        # Only create date range if we have actual datetime objects
+                        if len(dates_or_years) > 0 and hasattr(dates_or_years[0], "year"):
+                            date_range = (min(dates_or_years), max(dates_or_years))
 
-                    crisis_overlays = self.add_crisis_overlays(ax, date_range)
+                    # Only add overlays if we have a valid date range
+                    if date_range is not None:
+                        crisis_overlays = self.add_crisis_overlays(ax, date_range)
 
                 # Set y-axis label and formatting
                 ax.set_ylabel(y_label, fontsize=14, color=Colors.CHART_CHARCOAL)
@@ -373,21 +407,37 @@ class ReportStyling:
                 if y_formatter and data_dict is not None:
                     ax.yaxis.set_major_formatter(y_formatter)
 
-                # Date formatting
-                if data_dict is not None:
-                    # Regular time series formatting
+                # Date formatting - only apply if we have actual dates
+                if data_dict is not None or (data_key is not None and date_formatting_needed):
                     if date_format == "%Y":
+                        # For annual data, show every year if there are few years
+                        if data_dict is not None:
+                            years_span = (df.index.max() - df.index.min()).days / 365.25
+                        else:
+                            years_span = len(dates_or_years) if len(dates_or_years) < 20 else 20
+                        year_interval = max(1, int(years_span / 10)) if years_span > 10 else 1
+                        ax.xaxis.set_major_locator(mdates.YearLocator(base=year_interval))
                         ax.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
-                    else:
+                    elif date_format == "%Y-%m":
                         ax.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
                         ax.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
-                else:
-                    # Returns data formatting
-                    if not is_annual:
-                        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
+                    elif date_format in ["%Y-%q", "%Y-Q%q"]:  # Handle quarterly format
+                        ax.xaxis.set_major_locator(
+                            mdates.MonthLocator(bymonth=[1, 4, 7, 10], interval=interval)
+                        )
+
+                        # Use quarterly months formatter - will show as Q1, Q2, Q3, Q4
+                        def quarter_formatter(x, pos):
+                            date = mdates.num2date(x)
+                            quarter = (date.month - 1) // 3 + 1
+                            return f"{date.year}-Q{quarter}"
+
+                        ax.xaxis.set_major_formatter(plt.FuncFormatter(quarter_formatter))
+                    elif date_format == "%Y-%m-%d":
+                        ax.xaxis.set_major_locator(mdates.DayLocator(interval=interval))
                         ax.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
 
-                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+                    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
                 # Legend only if there are crisis overlays (legend entries)
                 if crisis_overlays:
@@ -451,10 +501,11 @@ class ReportStyling:
             return buffer
         except Exception as e:
             plt.close()
+            chart_name = title.lower() if title else "chart"
             if normal_style:
-                return Paragraph(f"Error creating {title.lower()}: {str(e)}", normal_style)
+                return Paragraph(f"Error creating {chart_name}: {str(e)}", normal_style)
             else:
-                return f"Error creating {title.lower()}: {str(e)}"
+                return f"Error creating {chart_name}: {str(e)}"
 
     def create_generic_distribution_chart(
         self,
@@ -590,10 +641,11 @@ class ReportStyling:
             return buffer
         except Exception as e:
             plt.close()
+            chart_name = title.lower() if title else "chart"
             if normal_style:
-                return Paragraph(f"Error creating {title.lower()}: {str(e)}", normal_style)
+                return Paragraph(f"Error creating {chart_name}: {str(e)}", normal_style)
             else:
-                return f"Error creating {title.lower()}: {str(e)}"
+                return f"Error creating {chart_name}: {str(e)}"
 
     def create_table_title(self, title_text, color=None, base_title_style=None):
         """Create a table title paragraph with custom color"""
@@ -734,10 +786,11 @@ class ReportStyling:
             return buffer
         except Exception as e:
             plt.close()
+            chart_name = title.lower() if title else "chart"
             if normal_style:
-                return Paragraph(f"Error creating {title.lower()}: {str(e)}", normal_style)
+                return Paragraph(f"Error creating {chart_name}: {str(e)}", normal_style)
             else:
-                return f"Error creating {title.lower()}: {str(e)}"
+                return f"Error creating {chart_name}: {str(e)}"
 
     def create_generic_multiline_chart(
         self,
@@ -775,7 +828,6 @@ class ReportStyling:
             enhanced_figsize = (figsize[0], figsize[1] + 1) if len(figsize) == 2 else (10, 6)
             fig, ax = plt.subplots(figsize=enhanced_figsize)
             fig.patch.set_facecolor("white")
-
             if data_df is not None and len(data_df) > 0 and len(data_df.columns) > 0:
                 # Use multi-color theme for better visual distinction
                 colors = self.multi_color_theme(np.linspace(0, 1, len(data_df.columns)))
@@ -798,8 +850,33 @@ class ReportStyling:
                         color=Colors.CHART_DEEP_BLUE,
                         pad=25,
                     )
-                ax.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
-                ax.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
+
+                # Adapt date format based on data density
+                if date_format == "%Y-%m" and len(data_df) <= 7:  # Less than a week of data
+                    date_format = "%Y-%m-%d"
+                    ax.xaxis.set_major_locator(mdates.DayLocator(interval=interval))
+                elif date_format == "%Y-%q" and len(data_df.resample("Q").last()) <= 1:
+                    date_format = "%Y-%m"
+                    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
+                elif date_format == "%Y" and len(data_df.resample("Y").last()) <= 1:
+                    date_format = "%Y-%q"
+                    ax.xaxis.set_major_locator(
+                        mdates.MonthLocator(bymonth=[1, 4, 7, 10], interval=interval)
+                    )
+                else:
+                    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
+
+                # Handle quarterly format properly
+                if date_format == "%Y-%q":
+
+                    def quarter_formatter_multi(x, pos):
+                        date = mdates.num2date(x)
+                        quarter = (date.month - 1) // 3 + 1
+                        return f"{date.year}-Q{quarter}"
+
+                    ax.xaxis.set_major_formatter(plt.FuncFormatter(quarter_formatter_multi))
+                else:
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
                 ax.set_ylabel(y_label, fontsize=14, color=Colors.CHART_CHARCOAL)
 
                 # Professional styling
@@ -859,10 +936,11 @@ class ReportStyling:
             return buffer
         except Exception as e:
             plt.close()
+            chart_name = title.lower() if title else "chart"
             if normal_style:
-                return Paragraph(f"Error creating {title.lower()}: {str(e)}", normal_style)
+                return Paragraph(f"Error creating {chart_name}: {str(e)}", normal_style)
             else:
-                return f"Error creating {title.lower()}: {str(e)}"
+                return f"Error creating {chart_name}: {str(e)}"
 
     def create_generic_boxplot(
         self,
@@ -936,10 +1014,11 @@ class ReportStyling:
             return buffer
         except Exception as e:
             plt.close()
+            chart_name = title.lower() if title else "chart"
             if normal_style:
-                return Paragraph(f"Error creating {title.lower()}: {str(e)}", normal_style)
+                return Paragraph(f"Error creating {chart_name}: {str(e)}", normal_style)
             else:
-                return f"Error creating {title.lower()}: {str(e)}"
+                return f"Error creating {chart_name}: {str(e)}"
 
     def create_formatted_list(self, data_dict, title):
         """Create a formatted list from dictionary data with title"""
@@ -964,11 +1043,6 @@ class ReportStyling:
                 formatted_value = ", ".join(str(v) for v in value) if value else "None"
             elif key == "allow_short":
                 formatted_value = "Not allowed" if not value else "Allowed"
-            elif key in ["max_short_count", "min_short_count", "max_long_count"]:
-                formatted_value = str(int(value)) if value is not None else "None"
-            elif key in ["total_return", "annualized_return"]:
-                # These values are already in percentage form, just add % symbol
-                formatted_value = f"{value:.2f}%" if value is not None else "None"
             elif key in ["min_market_cap", "max_market_cap", "initial_capital"]:
                 if key == "max_market_cap" and value == np.inf:
                     formatted_value = "Uncapped"
@@ -976,18 +1050,12 @@ class ReportStyling:
                     formatted_value = f"${value:,.0f}"
                 else:
                     formatted_value = "None"
-            elif (
-                isinstance(value, (int, float))
-                and 0 <= value <= 1
-                and key
-                not in [
-                    "initial_capital",
-                    "min_market_cap",
-                    "max_market_cap",
-                    "total_return",
-                    "annualized_return",
-                ]
-            ):
+            elif isinstance(value, (int, float)) and key not in [
+                "initial_capital",
+                "min_market_cap",
+                "max_market_cap",
+                "Overall Sharpe Ratio",
+            ]:
                 formatted_value = f"{value:.2%}"
             elif isinstance(value, (int, float)):
                 formatted_value = f"{value:,.2f}"

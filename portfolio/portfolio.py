@@ -132,8 +132,8 @@ class Portfolio:
         sell_positions = actions[-1]
         buy_positions = actions[1]
 
-        sell_proceed = self.calculate_sell_proceed(sell_positions, date)
-        buy_cost = self.calculate_buy_cost(buy_positions, date)
+        # sell_proceed = self.calculate_sell_proceed(sell_positions, date)
+        # buy_cost = self.calculate_buy_cost(buy_positions, date)
 
         # update portfolio
         new_holdings = [
@@ -146,7 +146,7 @@ class Portfolio:
 
         self.trades_status[date] = 1
         self.trades_history[date] = trades_plan
-        self.portfolio_value = self.calculate_portfolio_value(sell_proceed - buy_cost)
+        self.portfolio_value = self.calculate_portfolio_value(date)
         self.portfolio_value_history[date] = self.portfolio_value
 
     def calculate_sell_proceed(self, sell_positions, date):
@@ -170,8 +170,15 @@ class Portfolio:
         buy_cost = prices[buy_positions].iloc[0].sum() * (1 + transaction_cost)
         return buy_cost
 
-    def calculate_portfolio_value(self, incremental):
-        return self.portfolio_value + incremental
+    def calculate_portfolio_value(self, date):
+        prices = self.get_prices_by_dates(
+            "open", start_date=date, end_date=date, lookahead_window=1
+        )  # today open price
+        if prices.empty:
+            return 0
+
+        portfolio_value = prices[np.unique(self.holdings)].iloc[0].sum()
+        return portfolio_value
 
     def generate_analytics(self, rf=0.02, bmk_returns=0.1):
         self.analytics = PortfolioAnalytics(
