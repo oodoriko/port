@@ -1,13 +1,14 @@
+import hashlib
 import json
 import os
 import pickle
 from datetime import datetime
-from typing import Any, Dict, Optional
 
 import pandas as pd
 
 from backtesting.backtest import Backtest
-from config import INITIAL_SETUP, Benchmarks, Strategies
+from config import Benchmarks, StrategyTypes
+from portfolio.constraints import Constraints
 from portfolio.portfolio import Portfolio
 
 
@@ -49,14 +50,14 @@ class PortfolioCache:
         with open(self.metadata_file, "w") as f:
             json.dump(self.metadata, f, indent=2, default=str)
 
-    def _generate_cache_key(
+    def _generate_long_name(
         self,
         portfolio_name: str,
         benchmark: Benchmarks,
-        start_date: str,
-        end_date: str,
-        strategies: list,
-        constraints: dict = None,
+        start_date: str = "",
+        end_date: str = "",
+        strategies: list[StrategyTypes] = [],
+        constraints: Constraints = None,
         setup: dict = None,
     ) -> str:
         """Generate a unique cache key for the portfolio configuration"""
@@ -65,7 +66,9 @@ class PortfolioCache:
         config_str += f"_{'_'.join([s.value for s in strategies])}"
 
         if constraints:
-            config_str += f"_constraints_{hash(str(sorted(constraints.items())))}"
+            config_str += (
+                f"_constraints_{hash(str(sorted(constraints.list_constraints().items())))}"
+            )
         if setup:
             config_str += f"_setup_{hash(str(sorted(setup.items())))}"
 
@@ -76,22 +79,14 @@ class PortfolioCache:
         portfolio: Portfolio,
         portfolio_name: str,
         benchmark: Benchmarks,
-        start_date: str,
-        end_date: str,
-        strategies: list,
         constraints: dict = None,
         setup: dict = None,
         description: str = "",
     ) -> str:
-        """
-        Save a portfolio object to cache
-
-        Returns:
-            str: The cache key used to save the portfolio
-        """
-        cache_key = self._generate_cache_key(
-            portfolio_name, benchmark, start_date, end_date, strategies, constraints, setup
+        portfolio_long_name = self._generate_long_name(
+            portfolio_name, benchmark, constraints, setup
         )
+        cache_key = hashlib.sha256(portfolio_long_name.encode()).hexdigest()[:10]
 
         cache_file = os.path.join(self.cache_dir, f"{cache_key}.pkl")
 
@@ -103,9 +98,9 @@ class PortfolioCache:
         self.metadata[cache_key] = {
             "portfolio_name": portfolio_name,
             "benchmark": benchmark.value,
-            "start_date": start_date,
-            "end_date": end_date,
-            "strategies": [s.value for s in strategies],
+            "start_date": "",
+            "end_date": "",
+            "strategies": [],
             "constraints": constraints,
             "setup": setup,
             "description": description,
@@ -121,8 +116,53 @@ class PortfolioCache:
 
         return cache_key
 
-    def load_portfolio(self, cache_key: str) -> Portfolio:
-        """Load a portfolio object from cache"""
+    def save_backtest(
+        self,
+        backtest: Backtest,
+        description: str = "",
+    ) -> str:
+        portfolio = backtest.get_portfolio()
+        portfolio_name = portfolio.name
+        benchmark = portfolio.benchmark
+        start_date = backtest.start_date
+        end_date = backtest.end_date
+        strategies = backtest.strategies
+        constraints = portfolio.constraints
+        setup = portfolio.setup
+        portfolio_long_name = self._generate_long_name(
+            portfolio_name, benchmark, start_date, end_date, strategies, constraints, setup
+        )
+        cache_key = hashlib.sha256(portfolio_long_name.encode()).hexdigest()[:10]
+
+        cache_file = os.path.join(self.cache_dir, f"{cache_key}.pkl")
+
+        # Save the portfolio object
+        with open(cache_file, "wb") as f:
+            pickle.dump(backtest, f)
+
+        # Update metadata
+        self.metadata[cache_key] = {
+            "portfolio_name": portfolio_name,
+            "benchmark": benchmark.value,
+            "start_date": start_date,
+            "end_date": end_date,
+            "strategies": [s.value for s in strategies],
+            "constraints": constraints,
+            "setup": portfolio.setup,
+            "description": description,
+            "created_at": datetime.now().isoformat(),
+            "file_path": cache_file,
+            "file_size_mb": round(os.path.getsize(cache_file) / (1024 * 1024), 2),
+        }
+
+        self._save_metadata()
+
+        print(f"Backtest saved to cache with key: {cache_key}")
+        print(f"File size: {self.metadata[cache_key]['file_size_mb']} MB")
+
+        return cache_key
+
+    def load_cache(self, cache_key: str) -> Portfolio | Backtest:
         if cache_key not in self.metadata:
             raise KeyError(
                 f"Cache key '{cache_key}' not found. Available keys: {list(self.metadata.keys())}"
@@ -134,15 +174,15 @@ class PortfolioCache:
             raise FileNotFoundError(f"Cache file not found: {cache_file}")
 
         with open(cache_file, "rb") as f:
-            portfolio = pickle.load(f)
+            cached_object = pickle.load(f)
 
-        print(f"Portfolio loaded from cache: {cache_key}")
-        return portfolio
+        print(f"Loaded from cache: {cache_key}")
+        return cached_object
 
-    def list_cached_portfolios(self) -> pd.DataFrame:
-        """List all cached portfolios with their metadata"""
+    def list_cached_objects(self) -> pd.DataFrame:
+        """List all cached objects with their metadata"""
         if not self.metadata:
-            print("No cached portfolios found.")
+            print("No cached objects found.")
             return pd.DataFrame()
 
         df = pd.DataFrame.from_dict(self.metadata, orient="index")
@@ -150,7 +190,7 @@ class PortfolioCache:
         return df
 
     def delete_cache(self, cache_key: str):
-        """Delete a specific cached portfolio"""
+        """Delete a specific cached object"""
         if cache_key not in self.metadata:
             raise KeyError(f"Cache key '{cache_key}' not found")
 
@@ -164,82 +204,49 @@ class PortfolioCache:
         print(f"Deleted cache: {cache_key}")
 
     def clear_all_cache(self):
-        """Clear all cached portfolios"""
+        """Clear all cached objects"""
         for cache_key in list(self.metadata.keys()):
             self.delete_cache(cache_key)
         print("All cache cleared.")
 
     def get_cache_info(self, cache_key: str) -> dict:
-        """Get detailed information about a cached portfolio"""
+        """Get detailed information about a cached object"""
         if cache_key not in self.metadata:
             raise KeyError(f"Cache key '{cache_key}' not found")
 
         return self.metadata[cache_key]
 
 
-def create_and_cache_portfolio(
-    portfolio_name: str,
-    benchmark: Benchmarks,
-    start_date: str,
-    end_date: str,
-    strategies: list,
-    constraints: dict = None,
-    setup: dict = None,
+def cache_portfolio(
+    portfolio: Portfolio,
     description: str = "",
     cache_dir: str = None,
 ) -> tuple[Portfolio, str]:
-    """
-    Create a portfolio, run backtest, and cache it
+    print(f"Caching portfolio: {portfolio.name}")
+    cache = PortfolioCache(cache_dir)
 
-    Returns:
-        tuple: (Portfolio object, cache_key)
-    """
-    print(f"Creating portfolio: {portfolio_name}")
-    print(f"Benchmark: {benchmark.value}")
-    print(f"Date range: {start_date} to {end_date}")
-    print(f"Strategies: {[s.value for s in strategies]}")
+    cache_key = cache.save_portfolio(portfolio, description)
+    print(f"Cached portfolio with key: {cache_key}")
+    return cache_key
 
-    # Create portfolio
-    portfolio = Portfolio(
-        name=portfolio_name,
-        benchmark=benchmark,
-        constraints=constraints or {},
-        additional_setup=setup or INITIAL_SETUP,
-    )
 
-    # Run backtest
-    backtest = Backtest(
-        portfolio=portfolio, start_date=start_date, end_date=end_date, strategies=strategies
-    )
-
-    backtest.run()
-
-    # Generate metrics
-    portfolio.generate_analytics()
-
+def cache_backtest(
+    backtest: Backtest,
+    description: str = "",
+    cache_dir: str = None,
+) -> tuple[Portfolio, str]:
     # Cache the portfolio
     cache = PortfolioCache(cache_dir)
-    cache_key = cache.save_portfolio(
-        portfolio=portfolio,
-        portfolio_name=portfolio_name,
-        benchmark=benchmark,
-        start_date=start_date,
-        end_date=end_date,
-        strategies=strategies,
-        constraints=constraints,
-        setup=setup,
-        description=description,
-    )
-
-    return portfolio, cache_key
+    cache_key = cache.save_backtest(backtest, description)
+    print(f"Cached backtest with key: {cache_key}")
+    return cache_key
 
 
-def load_cached_portfolio(cache_key: str, cache_dir: str = None) -> Portfolio:
-    """
-    Load a cached portfolio by cache key
-
-    Returns:
-        Portfolio: The loaded portfolio object
-    """
+def load_cached_object(cache_key: str, cache_dir: str = None) -> Portfolio | Backtest:
     cache = PortfolioCache(cache_dir)
-    return cache.load_portfolio(cache_key)
+    return cache.load_cache(cache_key)
+
+
+def list_cached_objects(cache_dir: str = None) -> pd.DataFrame:
+    cache = PortfolioCache(cache_dir)
+    return cache.list_cached_objects()

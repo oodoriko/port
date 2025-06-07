@@ -10,10 +10,12 @@ class Constraints:
     def list_constraints(self):
         return self.constraints
 
-    def evaluate_trades(self, trades_plan: dict[str, int], positions_size: int, max_holdings: int):
-        if trades_plan is None or len(trades_plan) == 0:
+    def evaluate_trades(self, trades: list[int], positions_size: int, max_holdings: int):
+        if self.constraints is None or len(self.constraints) == 0:
             return True
-        value, count = np.unique(list(trades_plan.values()), return_counts=True)
+        if trades is None or len(trades) == 0:
+            return True
+        value, count = np.unique(trades, return_counts=True)
 
         max_short_count = max(
             max_holdings / 2, self.constraints["max_short_count"] * positions_size

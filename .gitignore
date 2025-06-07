@@ -5,6 +5,5 @@ data/
 backtesting/portfolio_cache/
 reports/
 temp/
-workbook.ipynb
 .DS_Store
-.gitignore
+gitignore

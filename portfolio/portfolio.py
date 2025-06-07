@@ -18,46 +18,34 @@ class Portfolio:
         constraints={},
         additional_setup=INITIAL_SETUP,
     ):
-        self.benchmark = benchmark
         self.name = name
+        self.benchmark = benchmark
         self.setup = additional_setup
-        self.set_up_constraints(constraints)
-        self.transaction_cost = additional_setup.get("transaction_cost", 0.001)
-        self.allow_short = False
+        self.constraints = Constraints(constraints)
 
+        self.transaction_cost = additional_setup.get("transaction_cost", 0.001)
+        self.allow_short = additional_setup.get("allow_short", False)
         self.portfolio_value = additional_setup.get("initial_capital", 0)
         self.holdings = additional_setup.get("initial_holdings", [])
         # self.capital = additional_setup.get("initial_capital", 0), going to assume i have unlimited capital
-        self.populate_universe()
+
+        self.universe, self.product_data = self.get_universe_data()
+        self.watchlist = [ticker for ticker in self.universe if ticker not in self.holdings]
         self.populate_prices()
 
-        self.watchlist = [ticker for ticker in self.universe if ticker not in self.holdings]
-
         self.holdings_history = {}
-        self.trades_history = (
-            {}
-        )  # weights and trades are the same thing here, dict with keyed by date, value the plan
+        self.trades_history = {}  # weights and trades are the same thing here {key: [plan1, plan2]}
         self.portfolio_value_history = {}
 
-        """use this status to keep track of unexecuted trades plan,
-        only needed bc current trades are buy all or sell all and signals are
-        all technical. there is chance of selling the whole portfolio or buying
-        the whole benchmark in a extended bull/bear market.
-        
-        when i have more strategies e.g. fundamental and trades on weights diff, i do not
-        have to use this keep track of trades status, weights are automatically adjusted by
-        constraints"""
+        # hard constraint to avoid selling all positions or buying the benchmark
         self.trades_status = {}
 
+        # for reporting
         self.analytics = None
         self.metrics = {}
         self.holdings_summary = {}
 
-    def set_up_constraints(self, constraints):
-        if constraints is not None:
-            self.constraints = Constraints(constraints)
-
-    def populate_universe(self):
+    def get_universe_data(self):
         tickers = BenchmarkData().get_constituents(self.benchmark)
         product_data = ProductData().get_data(tickers)
 
@@ -71,8 +59,9 @@ class Portfolio:
             & (product_data.marketCap <= INITIAL_SETUP["max_market_cap"])
             & (product_data.country.isin(include_countries_str))
         )
-        self.product_data = product_data[filter]
-        self.universe = self.product_data.ticker.tolist()
+        product_data = product_data[filter]
+        universe = product_data.ticker.tolist()
+        return universe, product_data
 
     def populate_prices(self):
         prices = PriceData().get_data(self.universe)
@@ -122,19 +111,21 @@ class Portfolio:
         return prices[(prices.index >= start_date) & (prices.index <= end_date)]
 
     # operational
-    def trade(self, date, trades_plan: dict[str, int]):
+    def trade(self, date, trades: list[int], trades_plan: dict[str, int]):
         execute_trades = self.constraints.evaluate_trades(
-            trades_plan,
+            trades,
             positions_size=len(self.universe) if len(self.holdings) == 0 else len(self.holdings),
             max_holdings=len(self.universe),  # because we started with no holdings
         )
         if not execute_trades:
+            print(f"Trades not executed for {date} because of constraints")
             self.trades_status[date] = 0
             return
 
         actions = defaultdict(list)
         for ticker, signal in trades_plan.items():
             if not self.allow_short and signal == -1 and ticker not in self.holdings:  # no shorting
+                trades_plan[ticker] = 0
                 continue
             actions[signal].append(ticker)
 
@@ -155,7 +146,8 @@ class Portfolio:
 
         self.trades_status[date] = 1
         self.trades_history[date] = trades_plan
-        self.portfolio_value_history[date] = self.calculate_portfolio_value(sell_proceed - buy_cost)
+        self.portfolio_value = self.calculate_portfolio_value(sell_proceed - buy_cost)
+        self.portfolio_value_history[date] = self.portfolio_value
 
     def calculate_sell_proceed(self, sell_positions, date):
         prices = self.get_prices_by_dates(

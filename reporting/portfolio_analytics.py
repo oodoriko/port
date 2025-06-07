@@ -174,8 +174,17 @@ class PortfolioAnalytics:
             "dates": dates,
         }
 
-    @staticmethod
-    def get_trades_details(portfolio) -> dict:
+    def advanced_duration_analysis(self):
+        trades_details = self.get_trades_details(self.portfolio)
+        # more duration analysis
+        pass
+
+
+class AdvancedPortfolioAnalytics:
+    def __init__():
+        pass
+
+    def get_trades_details(self, portfolio) -> dict:
         # more advance analysis, time consuming, not run unless needed
         price = portfolio.open_prices
         trades = portfolio.trades_history
@@ -194,7 +203,7 @@ def _get_trades_details(trades: pd.Series) -> list[dict]:
     for t, price in trades.items():
         if price < 0:  # a sell trade -> a buy and hold and sell trade is completed
             if cum_cost == 0 or earliest_trade_date is None or buy_count == 0:
-                # print(f"{trades.name} has a short trade on {t.date()}")
+                print(f"{trades.name} has a short trade on {t.date()}")
                 continue
             duration = (t - earliest_trade_date).days
             avg_cost = cum_cost / buy_count

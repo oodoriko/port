@@ -1,5 +1,7 @@
 from enum import Enum
 
+import numpy as np
+
 START_DATE = "2014-01-01"
 END_DATE = "2025-06-01"
 
@@ -51,15 +53,11 @@ INITIAL_SETUP = {  # no holdings scenario for now!
     "initial_holdings": [],
     "transaction_cost": 0.001,
     ## to filter benchmark tickers to get the watch list for trading
-    "exclude_sectors": [
-        YF_SECTORS.ConsumerDefensive,
-        YF_SECTORS.BasicMaterials,
-        YF_SECTORS.RealEstate,
-        YF_SECTORS.Utilities,
-    ],
-    "min_market_cap": 1e7,  # $10M
-    "max_market_cap": 1e13,  # $10T, incredible we have companies > 1T now
+    "exclude_sectors": [],
+    "min_market_cap": 0,  # $10M
+    "max_market_cap": np.inf,  # $10T, incredible we have companies > 1T now
     "include_countries": [YF_COUNTRIES.UnitedStates],
+    "allow_short": False,
 }
 # may be i need target as well... for weights and exposure -> nvm
 DEFAULT_CONSTRAINTS = {
