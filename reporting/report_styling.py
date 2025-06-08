@@ -270,16 +270,29 @@ class ReportStyling:
                     df.set_index("Date", inplace=True)
                     df = df.sort_index()
 
-                    # Apply resampling if specified
+                    # Apply resampling if specified for portfolio value data
+                    # For portfolio values, we want to show the actual progression, not just end-of-period values
                     if resample_freq:
+                        # Create a complete date range to avoid missing data
+                        full_date_range = pd.date_range(
+                            start=df.index.min(), end=df.index.max(), freq="D"
+                        )
+                        df = df.reindex(full_date_range).ffill()
+
                         if resample_freq == "M":  # Monthly
-                            df = df.resample("M").last()
+                            # For better visualization, sample at monthly intervals but keep all data points
+                            if len(df) > 100:  # Only resample if we have lots of data
+                                df = df.resample("ME").last()
                             date_format = "%Y-%m"
                         elif resample_freq == "Q":  # Quarterly
-                            df = df.resample("Q").last()
+                            # For better visualization, sample at quarterly intervals but keep all data points
+                            if len(df) > 50:  # Only resample if we have lots of data
+                                df = df.resample("QE").last()
                             date_format = "%Y-%q"
                         elif resample_freq == "Y":  # Yearly
-                            df = df.resample("Y").last()
+                            # For better visualization, sample at yearly intervals but keep all data points
+                            if len(df) > 20:  # Only resample if we have lots of data
+                                df = df.resample("YE").last()
                             date_format = "%Y"
 
                     has_data = True

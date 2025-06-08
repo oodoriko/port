@@ -7,10 +7,10 @@ class Constraints:
     def __init__(self, constraints: dict):
         self.constraints = constraints
 
-    def list_constraints(self):
+    def list_constraints(self) -> dict:
         return self.constraints
 
-    def evaluate_trades(self, trades: list[int], positions_size: int, max_holdings: int):
+    def evaluate_trades(self, trades: list[int], positions_size: int, max_holdings: int) -> bool:
         if self.constraints is None or len(self.constraints) == 0:
             return True
         if trades is None or len(trades) == 0:

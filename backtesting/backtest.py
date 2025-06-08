@@ -22,7 +22,7 @@ class Backtest:
         self.trading_dates = pd.bdate_range(start=start_date, end=end_date, freq="B")
 
     @classmethod
-    def from_scenario(cls, scenario: Scenario):
+    def from_scenario(cls, scenario: Scenario) -> "Backtest":
         portfolio = Portfolio(
             name=scenario.name,
             benchmark=scenario.benchmark,
@@ -58,7 +58,7 @@ class Backtest:
                 price_type = strategy.price_type
                 min_window = strategy.min_window
                 prices = self.portfolio.get_prices_by_dates(
-                    price_type, date=date, lookback_window=min_window
+                    price_type, end_date=date, lookback_window=min_window
                 )
                 signal = strategy.generate_signals_single(prices.loc[:, universe])
                 signals[strategy.name.value] = signal
@@ -72,11 +72,11 @@ class Backtest:
         self.portfolio.generate_analytics()
         return self.portfolio.generate_report(rf=rf, bmk_returns=bmk_returns, filename=filename)
 
-    def get_portfolio(self):
+    def get_portfolio(self) -> Portfolio:
         return self.portfolio
 
-    def get_trading_dates(self):
+    def get_trading_dates(self) -> pd.DatetimeIndex:
         return self.trading_dates
 
-    def get_strategies(self):
+    def get_strategies(self) -> list[StrategyTypes]:
         return [strategy.name for strategy in self.strategies]

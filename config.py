@@ -50,8 +50,7 @@ class StrategyTypes(Enum):
 
 INITIAL_SETUP = {  # no holdings scenario for now!
     "initial_capital": 100000,
-    "initial_holdings": [],
-    "transaction_cost": 0.001,
+    "initial_holdings": {},
     ## to filter benchmark tickers to get the watch list for trading
     "exclude_sectors": [],
     "min_market_cap": 0,  # $10M

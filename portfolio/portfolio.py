@@ -6,6 +6,7 @@ import pandas as pd
 from config import INITIAL_SETUP, Benchmarks
 from data.data import BenchmarkData, PriceData, ProductData
 from portfolio.constraints import Constraints
+from portfolio.cost import TransactionCost
 from reporting.portfolio_analytics import PortfolioAnalytics
 from reporting.report_generator import generate_report
 
@@ -22,20 +23,22 @@ class Portfolio:
         self.benchmark = benchmark
         self.setup = additional_setup
         self.constraints = Constraints(constraints)
+        self.cost = TransactionCost()
 
-        self.transaction_cost = additional_setup.get("transaction_cost", 0.001)
         self.allow_short = additional_setup.get("allow_short", False)
         self.portfolio_value = additional_setup.get("initial_capital", 0)
-        self.holdings = additional_setup.get("initial_holdings", [])
+        initial_holdings = additional_setup.get("initial_holdings", {})
+        self.holdings = {k: v for k, v in initial_holdings.items()}
         # self.capital = additional_setup.get("initial_capital", 0), going to assume i have unlimited capital
 
         self.universe, self.product_data = self.get_universe_data()
-        self.watchlist = [ticker for ticker in self.universe if ticker not in self.holdings]
         self.populate_prices()
 
         self.holdings_history = {}
         self.trades_history = {}  # weights and trades are the same thing here {key: [plan1, plan2]}
         self.portfolio_value_history = {}
+        self.transaction_cost_history = {}
+        self.pnl_history = {}
 
         # hard constraint to avoid selling all positions or buying the benchmark
         self.trades_status = {}
@@ -45,7 +48,7 @@ class Portfolio:
         self.metrics = {}
         self.holdings_summary = {}
 
-    def get_universe_data(self):
+    def get_universe_data(self) -> tuple[list[str], pd.DataFrame]:
         tickers = BenchmarkData().get_constituents(self.benchmark)
         product_data = ProductData().get_data(tickers)
 
@@ -63,7 +66,7 @@ class Portfolio:
         universe = product_data.ticker.tolist()
         return universe, product_data
 
-    def populate_prices(self):
+    def populate_prices(self) -> None:
         prices = PriceData().get_data(self.universe)
         self.open_prices = prices["open"]
         self.close_prices = prices["close"]
@@ -74,10 +77,10 @@ class Portfolio:
         self.volumes.set_index(pd.to_datetime(self.volumes.Date), inplace=True)
 
     # getters
-    def get_universe(self):
+    def get_universe(self) -> list[str]:
         return self.universe
 
-    def get_prices(self, type: str):
+    def get_prices(self, type: str) -> pd.DataFrame:
         if type not in ["open", "close", "volume"]:
             raise ValueError(f"Invalid price type: {type}, available types: open, close, volume")
         if type == "open":
@@ -90,7 +93,6 @@ class Portfolio:
     def get_prices_by_dates(
         self,
         type: str,
-        date: str = None,
         end_date: str = None,
         start_date: str = None,
         lookback_window: int = np.inf,
@@ -102,16 +104,16 @@ class Portfolio:
 
         # window is easier bc i don't have to get exchange open dates
         # exclude current day to avoid lookahead bias
-        if start_date is None and end_date is None:
+        if lookback_window != np.inf or lookahead_window != np.inf:
             if lookback_window != np.inf:
-                return prices[prices.index < date].iloc[-lookback_window:]
+                return prices[prices.index < end_date].iloc[-lookback_window:]
             elif lookahead_window != np.inf:
-                return prices[prices.index > date].iloc[:lookahead_window]
+                return prices[prices.index > start_date].iloc[:lookahead_window]
             return prices
         return prices[(prices.index >= start_date) & (prices.index <= end_date)]
 
     # operational
-    def trade(self, date, trades: list[int], trades_plan: dict[str, int]):
+    def trade(self, date, trades: list[int], trades_plan: dict[str, int]) -> None:
         execute_trades = self.constraints.evaluate_trades(
             trades,
             positions_size=len(self.universe) if len(self.holdings) == 0 else len(self.holdings),
@@ -122,65 +124,56 @@ class Portfolio:
             self.trades_status[date] = 0
             return
 
-        actions = defaultdict(list)
+        today_open_prices = self.get_prices_by_dates("open", start_date=date, end_date=date)
+        shares = {}
         for ticker, signal in trades_plan.items():
-            if not self.allow_short and signal == -1 and ticker not in self.holdings:  # no shorting
-                trades_plan[ticker] = 0
+            # always sell all, buy 1, never short
+            if not self.allow_short and signal == -1 and ticker not in self.holdings.keys():
+                trades_plan[ticker] = -1
                 continue
-            actions[signal].append(ticker)
+            if signal == 1:
+                shares[ticker] = 1
+                self.holdings[ticker] = self.holdings.get(ticker, 0) + 1
+            if signal == -1:
+                shares[ticker] = -1 * self.holdings[ticker]
+                del self.holdings[ticker]
 
-        sell_positions = actions[-1]
-        buy_positions = actions[1]
-
-        # sell_proceed = self.calculate_sell_proceed(sell_positions, date)
-        # buy_cost = self.calculate_buy_cost(buy_positions, date)
+        # calculate pnl and transaction cost
+        pnl = self.calculate_pnl(today_open_prices, shares)
+        transaction_cost = self.cost.calculate_transaction_costs(
+            shares,
+            volume=self.get_prices_by_dates("volume", end_date=date, lookback_window=1),
+            price=self.get_prices_by_dates("open", start_date=date, end_date=date),
+        )
+        self.portfolio_value = self.calculate_portfolio_value(today_open_prices)
 
         # update portfolio
-        new_holdings = [
-            ticker for ticker in self.holdings if ticker not in sell_positions
-        ] + buy_positions
-        self.holdings = np.unique(new_holdings)
-        self.holdings_history[date] = self.holdings
-
-        self.watchlist = [ticker for ticker in self.universe if ticker not in new_holdings]
-
-        self.trades_status[date] = 1
+        self.holdings_history[date] = list(self.holdings.keys())
+        self.trades_status[date] = 1 if not len(shares) > 0 else 0
         self.trades_history[date] = trades_plan
-        self.portfolio_value = self.calculate_portfolio_value(date)
         self.portfolio_value_history[date] = self.portfolio_value
+        self.transaction_cost_history[date] = transaction_cost
+        self.pnl_history[date] = pnl
 
-    def calculate_sell_proceed(self, sell_positions, date):
-        prices = self.get_prices_by_dates(
-            "open", start_date=date, end_date=date, lookahead_window=1
-        )  # today open price
-
-        transaction_cost = self.transaction_cost
-        if prices.empty:
-            return 0
-        sell_proceed = prices[sell_positions].iloc[0].sum() * (1 - transaction_cost)
-        return sell_proceed
-
-    def calculate_buy_cost(self, buy_positions, date):
-        prices = self.get_prices_by_dates(
-            "open", start_date=date, end_date=date, lookahead_window=1
-        )  # today open price
-        transaction_cost = self.transaction_cost
-        if prices.empty:
-            return 0
-        buy_cost = prices[buy_positions].iloc[0].sum() * (1 + transaction_cost)
-        return buy_cost
-
-    def calculate_portfolio_value(self, date):
-        prices = self.get_prices_by_dates(
-            "open", start_date=date, end_date=date, lookahead_window=1
-        )  # today open price
+    def calculate_pnl(self, prices: pd.DataFrame, shares: dict[str, float]) -> float:
         if prices.empty:
             return 0
 
-        portfolio_value = prices[np.unique(self.holdings)].iloc[0].sum()
-        return portfolio_value
+        pnl = sum([val * prices[ticker] for ticker, val in shares.items()])
+        if isinstance(pnl, pd.Series):
+            return pnl.values[0]
+        return 0
 
-    def generate_analytics(self, rf=0.02, bmk_returns=0.1):
+    def calculate_portfolio_value(self, prices: pd.DataFrame) -> float:
+        if prices.empty:
+            return 0
+
+        portfolio_value = sum([val * prices[ticker] for ticker, val in self.holdings.items()])
+        if isinstance(portfolio_value, pd.Series):
+            return portfolio_value.values[0]
+        return 0
+
+    def generate_analytics(self, rf=0.02, bmk_returns=0.1) -> None:
         self.analytics = PortfolioAnalytics(
             self.portfolio_value_history,
             self.trades_history,
@@ -191,7 +184,7 @@ class Portfolio:
         self.metrics = self.analytics.performance(rf=rf, bmk_returns=bmk_returns)
         self.holdings_summary = self.analytics.holdings()
 
-    def generate_report(self, rf=0.02, bmk_returns=0.1, filename=None):
+    def generate_report(self, rf=0.02, bmk_returns=0.1, filename=None) -> str:
         if self.analytics is None:
             self.generate_analytics(rf=rf, bmk_returns=bmk_returns)
         return generate_report(self, rf=rf, bmk_returns=bmk_returns, filename=filename)

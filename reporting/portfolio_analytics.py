@@ -24,11 +24,17 @@ class PortfolioAnalytics:
         portfolio_value.index = pd.to_datetime(portfolio_value.index)
         portfolio_value.sort_index(inplace=True)
 
-        # returns
-        daily_returns = portfolio_value.resample("D").last().pct_change().dropna()
-        monthly_returns = portfolio_value.resample("M").last().pct_change().dropna()
-        quarterly_returns = portfolio_value.resample("Q").last().pct_change().dropna()
-        annual_returns = portfolio_value.resample("Y").last().pct_change().dropna()
+        # returns - fill gaps to avoid losing data
+        # First fill missing dates with forward fill to ensure continuity
+        full_date_range = pd.date_range(
+            start=portfolio_value.index.min(), end=portfolio_value.index.max(), freq="D"
+        )
+        portfolio_value_filled = portfolio_value.reindex(full_date_range).ffill()
+
+        daily_returns = portfolio_value_filled.pct_change().dropna()
+        monthly_returns = portfolio_value_filled.resample("ME").last().pct_change().dropna()
+        quarterly_returns = portfolio_value_filled.resample("QE").last().pct_change().dropna()
+        annual_returns = portfolio_value_filled.resample("YE").last().pct_change().dropna()
 
         # annualized return
         values = list(self.portfolio_value_history.values())
@@ -160,13 +166,14 @@ class PortfolioAnalytics:
                     "sell": trade_signals.count(-1),
                 }
             )
-
+        trades_status_count = Counter(self.trades_status.values())
         return {
             "holdings_count": {
                 d: len(np.unique(holdings)) for d, holdings in self.holdings_history.items()
             },
-            "cancelled_trades_count": len(self.trades_status)
-            - np.sum(list(self.trades_status.values())),
+            "cancelled_trades_count": trades_status_count[0],
+            "no_trades_count": trades_status_count[1],
+            "successful_trades_count": trades_status_count[2],
             "sector_ts": sector_ts,
             "trades_ts": trades_ts,
             "duration_by_ticker": duration_by_ticker,

@@ -50,6 +50,36 @@ class PortfolioCache:
         with open(self.metadata_file, "w") as f:
             json.dump(self.metadata, f, indent=2, default=str)
 
+    def _serialize_constraints(self, constraints):
+        """Properly serialize constraints object to dict"""
+        if constraints is None:
+            return None
+        if isinstance(constraints, Constraints):
+            return constraints.list_constraints()
+        return constraints
+
+    def _serialize_setup(self, setup):
+        """Properly serialize setup dict, converting enum objects to strings"""
+        if setup is None:
+            return None
+
+        serialized_setup = {}
+        for key, value in setup.items():
+            if hasattr(value, "value"):  # Handle enum objects
+                if isinstance(value, list):
+                    serialized_setup[key] = [
+                        item.value if hasattr(item, "value") else item for item in value
+                    ]
+                else:
+                    serialized_setup[key] = value.value
+            elif isinstance(value, list):
+                serialized_setup[key] = [
+                    item.value if hasattr(item, "value") else item for item in value
+                ]
+            else:
+                serialized_setup[key] = value
+        return serialized_setup
+
     def _generate_long_name(
         self,
         portfolio_name: str,
@@ -66,25 +96,31 @@ class PortfolioCache:
         config_str += f"_{'_'.join([s.value for s in strategies])}"
 
         if constraints:
-            config_str += (
-                f"_constraints_{hash(str(sorted(constraints.list_constraints().items())))}"
-            )
+            constraints_dict = self._serialize_constraints(constraints)
+            config_str += f"_constraints_{hash(str(sorted(constraints_dict.items())))}"
         if setup:
-            config_str += f"_setup_{hash(str(sorted(setup.items())))}"
+            setup_dict = self._serialize_setup(setup)
+            config_str += f"_setup_{hash(str(sorted(setup_dict.items())))}"
 
         return config_str.replace("-", "_").replace(":", "_")
 
     def save_portfolio(
         self,
         portfolio: Portfolio,
-        portfolio_name: str,
-        benchmark: Benchmarks,
+        portfolio_name: str = None,
+        benchmark: Benchmarks = None,
         constraints: dict = None,
         setup: dict = None,
         description: str = "",
     ) -> str:
+        # Extract data from portfolio if not provided
+        portfolio_name = portfolio_name or portfolio.name
+        benchmark = benchmark or portfolio.benchmark
+        constraints = constraints or portfolio.constraints
+        setup = setup or portfolio.setup
+
         portfolio_long_name = self._generate_long_name(
-            portfolio_name, benchmark, constraints, setup
+            portfolio_name, benchmark, "", "", [], constraints, setup
         )
         cache_key = hashlib.sha256(portfolio_long_name.encode()).hexdigest()[:10]
 
@@ -94,15 +130,15 @@ class PortfolioCache:
         with open(cache_file, "wb") as f:
             pickle.dump(portfolio, f)
 
-        # Update metadata
+        # Update metadata with properly serialized data
         self.metadata[cache_key] = {
             "portfolio_name": portfolio_name,
             "benchmark": benchmark.value,
             "start_date": "",
             "end_date": "",
             "strategies": [],
-            "constraints": constraints,
-            "setup": setup,
+            "constraints": self._serialize_constraints(constraints),
+            "setup": self._serialize_setup(setup),
             "description": description,
             "created_at": datetime.now().isoformat(),
             "file_path": cache_file,
@@ -129,6 +165,7 @@ class PortfolioCache:
         strategies = backtest.strategies
         constraints = portfolio.constraints
         setup = portfolio.setup
+
         portfolio_long_name = self._generate_long_name(
             portfolio_name, benchmark, start_date, end_date, strategies, constraints, setup
         )
@@ -136,19 +173,19 @@ class PortfolioCache:
 
         cache_file = os.path.join(self.cache_dir, f"{cache_key}.pkl")
 
-        # Save the portfolio object
+        # Save the backtest object
         with open(cache_file, "wb") as f:
             pickle.dump(backtest, f)
 
-        # Update metadata
+        # Update metadata with properly serialized data
         self.metadata[cache_key] = {
             "portfolio_name": portfolio_name,
             "benchmark": benchmark.value,
             "start_date": start_date,
             "end_date": end_date,
             "strategies": [s.value for s in strategies],
-            "constraints": constraints,
-            "setup": portfolio.setup,
+            "constraints": self._serialize_constraints(constraints),
+            "setup": self._serialize_setup(setup),
             "description": description,
             "created_at": datetime.now().isoformat(),
             "file_path": cache_file,
@@ -216,6 +253,37 @@ class PortfolioCache:
 
         return self.metadata[cache_key]
 
+    def repair_metadata(self):
+        """Repair metadata entries that have improperly serialized constraints"""
+        updated = False
+        for cache_key, metadata in self.metadata.items():
+            if (
+                isinstance(metadata.get("constraints"), str)
+                and "object at" in metadata["constraints"]
+            ):
+                # Try to load the actual object and re-serialize constraints
+                try:
+                    cached_object = self.load_cache(cache_key)
+                    if hasattr(cached_object, "get_portfolio"):
+                        # It's a backtest
+                        portfolio = cached_object.get_portfolio()
+                    else:
+                        # It's a portfolio
+                        portfolio = cached_object
+
+                    metadata["constraints"] = self._serialize_constraints(portfolio.constraints)
+                    metadata["setup"] = self._serialize_setup(portfolio.setup)
+                    updated = True
+                    print(f"Repaired metadata for cache key: {cache_key}")
+                except Exception as e:
+                    print(f"Could not repair cache key {cache_key}: {e}")
+
+        if updated:
+            self._save_metadata()
+            print("Metadata repair completed.")
+        else:
+            print("No metadata repairs needed.")
+
 
 def cache_portfolio(
     portfolio: Portfolio,
@@ -250,3 +318,9 @@ def load_cached_object(cache_key: str, cache_dir: str = None) -> Portfolio | Bac
 def list_cached_objects(cache_dir: str = None) -> pd.DataFrame:
     cache = PortfolioCache(cache_dir)
     return cache.list_cached_objects()
+
+
+def repair_cache_metadata(cache_dir: str = None) -> None:
+    """Utility function to repair cache metadata with improperly serialized constraints"""
+    cache = PortfolioCache(cache_dir)
+    cache.repair_metadata()
