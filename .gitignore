@@ -1,7 +1,7 @@
 __pycache__/
 .venv/
 .vscode/
-data/
+data_cache/
 backtesting/portfolio_cache/
 reports/
 temp/
