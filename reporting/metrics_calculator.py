@@ -52,4 +52,8 @@ def get_return(data: pd.Series, annualized=False, freq="M"):
         annualized_return = (1 + total_return) ** (252 / len(vals)) - 1 if len(vals) > 1 else 0
         return total_return, annualized_return
 
+    # Use updated pandas frequency aliases
+    freq_mapping = {"M": "ME", "Q": "QE", "Y": "YE"}
+    freq = freq_mapping.get(freq, freq)
+
     return data.resample(freq).last().pct_change().dropna()

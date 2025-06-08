@@ -25,7 +25,7 @@ class Colors:
     CORAL = colors.HexColor("#E53E3E")  # Professional red
 
     # Neutral colors for ReportLab (PDF elements)
-    CHARCOAL = colors.HexColor("#2D3748")  # Professional dark gray
+    CHARCOAL = colors.HexColor("#1A202C")  # Darker, more visible gray
     LIGHT_GRAY = colors.HexColor("#F7FAFC")  # Very light gray
     MEDIUM_GRAY = colors.HexColor("#E2E8F0")  # Medium gray
     DARK_GRAY = colors.HexColor("#4A5568")  # Darker gray
@@ -40,7 +40,7 @@ class Colors:
     CHART_AMBER = "#FF8C00"  # Darker gold
     CHART_TEAL = "#2C7A7B"  # Professional teal
     CHART_DEEP_BLUE = "#001a33"  # Darker navy
-    CHART_CHARCOAL = "#2D3748"  # Professional dark gray
+    CHART_CHARCOAL = "#1A202C"  # Darker, more visible gray
     CHART_LIGHT_GRAY = "#F7FAFC"  # Very light gray
     CHART_MEDIUM_GRAY = "#E2E8F0"  # Medium gray
     CHART_DARK_GRAY = "#4A5568"  # Darker gray
@@ -96,16 +96,20 @@ class ReportStyling:
             },
         ]
 
-    def add_crisis_overlays(self, ax, date_range=None):
+    def add_crisis_overlays(self, ax, date_range=None, add_legend=False):
         """
         Add financial crisis period overlays to a chart
 
         Parameters:
         - ax: matplotlib axes object
         - date_range: tuple of (start_date, end_date) to filter relevant crises
+        - add_legend: whether to add crisis legend to this axes object
+
+        Returns:
+        - list of crisis patches for custom legend handling
         """
         # Convert string dates to datetime for comparison
-        crisis_overlays = []
+        crisis_patches = []
 
         for crisis in self.crisis_periods:
             crisis_start = pd.to_datetime(crisis["start"])
@@ -121,17 +125,19 @@ class ReportStyling:
                     continue  # Skip this crisis as it doesn't overlap
 
             # Add the crisis overlay - convert to matplotlib date format
-            ax.axvspan(
+            patch = ax.axvspan(
                 mdates.date2num(crisis_start),
                 mdates.date2num(crisis_end),
                 color=crisis["color"],
                 alpha=crisis["alpha"],
-                label=f"{crisis['name']} Crisis",
+                label=f"{crisis['name']}" if add_legend else "",
                 zorder=0,  # Send to background
             )
-            crisis_overlays.append(crisis["name"])
+            crisis_patches.append(
+                {"patch": patch, "name": crisis["name"], "color": crisis["color"]}
+            )
 
-        return crisis_overlays
+        return crisis_patches
 
     def setup_matplotlib_style(self, legend_fontsize=12):
         """Setup consistent matplotlib styling for all charts"""
@@ -965,47 +971,50 @@ class ReportStyling:
         normal_style=None,
     ):
         """
-        Generic function to create box plots
+        Create a generic box plot chart
 
         Parameters:
-        - data_dict: Dictionary with category names as keys and lists of values as values
+        - data_dict: Dictionary where keys are categories and values are lists of data points
         - title: Chart title
-        - figsize: Figure size
+        - figsize: Figure size tuple
         - y_label: Y-axis label
-        - no_data_message: Message when no data
-        - normal_style: Style for error paragraphs
+        - no_data_message: Message to display when no data is available
+        - normal_style: Text style for error messages
         """
         try:
-            plt.style.use("default")
-            # Increase height slightly for better utilization
-            enhanced_figsize = (figsize[0], figsize[1] + 1) if len(figsize) == 2 else (10, 7)
-            fig, ax = plt.subplots(figsize=enhanced_figsize)
+            self.setup_matplotlib_style()
+            fig, ax = plt.subplots(figsize=figsize)
 
-            if data_dict and len(data_dict) > 0:
-                categories = list(data_dict.keys())
-                data_lists = list(data_dict.values())
+            if data_dict and any(len(values) > 0 for values in data_dict.values()):
+                # Filter out empty data
+                filtered_data = {k: v for k, v in data_dict.items() if len(v) > 0}
 
-                # Filter out empty lists
-                filtered_data = [
-                    (cat, data) for cat, data in zip(categories, data_lists) if len(data) > 0
-                ]
+                if filtered_data:
+                    # Create box plot
+                    box_data = list(filtered_data.values())
+                    box_labels = list(filtered_data.keys())
 
-                if len(filtered_data) > 0:
-                    categories, data_lists = zip(*filtered_data)
+                    bp = ax.boxplot(
+                        box_data,
+                        labels=box_labels,
+                        patch_artist=True,
+                        boxprops=dict(facecolor=Colors.CHART_BLUE, alpha=0.7),
+                        medianprops=dict(color=Colors.CHART_GOLD, linewidth=2),
+                        whiskerprops=dict(color=Colors.CHART_NAVY),
+                        capprops=dict(color=Colors.CHART_NAVY),
+                        flierprops=dict(
+                            marker="o", markerfacecolor=Colors.CHART_RED, markersize=6, alpha=0.5
+                        ),
+                    )
 
-                    box_plot = ax.boxplot(data_lists, labels=categories, patch_artist=True)
+                    ax.set_ylabel(y_label, fontsize=14, fontweight="bold")
+                    ax.tick_params(axis="x", rotation=45)
 
-                    # Color the boxes using multi-color theme
-                    colors = self.multi_color_theme(np.linspace(0, 1, len(categories)))
-                    for patch, color in zip(box_plot["boxes"], colors):
-                        patch.set_facecolor(color)
-                        patch.set_alpha(0.7)
+                    # Add grid
+                    ax.grid(True, alpha=0.3)
 
                     if title:
-                        ax.set_title(title, fontsize=14, fontweight="bold")
-                    ax.set_ylabel(y_label, fontsize=12)
-                    ax.grid(True, alpha=0.3)
-                    plt.xticks(rotation=45, ha="right")
+                        ax.set_title(title, fontsize=16, fontweight="bold", pad=20)
                 else:
                     ax.text(
                         0.5, 0.5, no_data_message, transform=ax.transAxes, ha="center", va="center"
@@ -1032,6 +1041,344 @@ class ReportStyling:
                 return Paragraph(f"Error creating {chart_name}: {str(e)}", normal_style)
             else:
                 return f"Error creating {chart_name}: {str(e)}"
+
+    def create_generic_dual_axis_chart(
+        self,
+        data_dict_left=None,
+        data_dict_right=None,
+        data_key_left=None,
+        data_key_right=None,
+        metrics=None,
+        title=None,
+        left_y_label="Left Y-axis",
+        right_y_label="Right Y-axis",
+        left_color=Colors.CHARCOAL,
+        right_color=Colors.CHARCOAL,
+        left_linestyle="-",
+        right_linestyle="-",
+        left_linewidth=1,
+        right_linewidth=1,
+        left_marker="",
+        right_marker="",
+        figsize=(10, 6),
+        resample_freq=None,
+        date_format="%Y-%m",
+        no_data_message="No data available",
+        normal_style=None,
+        show_crisis_periods=True,
+        interval=1,
+        graph_type="D",
+        # Bar chart parameters
+        bar_data_dict=None,
+        bar_label="Bar Data",
+        bar_color="lightgray",
+        bar_alpha=0.7,
+        bar_width=25,
+        bar_position_ratio=0.80,  # Position bars at 80% of bottom value
+        bar_height_ratio=0.15,  # Bars take 15% of chart height
+        right_axis_zero_line=False,  # Add horizontal line at 0 for right axis
+    ):
+        """
+        Create a generic dual y-axis line chart with optional bar chart below
+
+        Parameters:
+        - data_dict_left/right: Dictionary with datetime keys and numeric values for left/right axis
+        - data_key_left/right: Key to extract from metrics dictionary for left/right axis
+        - metrics: Metrics object containing the data
+        - title: Chart title
+        - left/right_y_label: Y-axis labels
+        - left/right_color: Line colors
+        - left/right_linestyle: Line styles ('-', '--', '-.', ':')
+        - left/right_linewidth: Line widths
+        - left/right_marker: Marker styles ('o', 's', '^', etc.)
+        - figsize: Figure size tuple
+        - resample_freq: Frequency for resampling ('D', 'M', 'Q', 'Y')
+        - date_format: Format for date labels
+        - no_data_message: Message when no data available
+        - normal_style: Text style for error messages
+        - show_crisis_periods: Whether to show crisis overlays
+        - interval: Interval for date labels
+        - graph_type: Graph type for date formatting
+        - bar_data_dict: Dictionary with datetime keys and numeric values for bar chart
+        - bar_label: Label for bar chart in legend
+        - bar_color: Color for bars
+        - bar_alpha: Transparency for bars (0.0 to 1.0)
+        - bar_width: Width of bars
+        - bar_position_ratio: Position bars at this ratio of bottom chart value
+        - bar_height_ratio: Bar height as ratio of chart height
+        - right_axis_zero_line: Add horizontal line at 0 for right axis (useful for returns)
+        """
+        try:
+            self.setup_matplotlib_style()
+            fig, ax1 = plt.subplots(figsize=figsize)
+
+            # Prepare data for left axis
+            left_data = None
+            if data_dict_left:
+                left_data = data_dict_left
+            elif metrics and data_key_left:
+                left_data = getattr(metrics, data_key_left, {})
+
+            # Prepare data for right axis
+            right_data = None
+            if data_dict_right:
+                right_data = data_dict_right
+            elif metrics and data_key_right:
+                right_data = getattr(metrics, data_key_right, {})
+
+            # Check if we have any data
+            has_left_data = left_data and len(left_data) > 0
+            has_right_data = right_data and len(right_data) > 0
+
+            if not has_left_data and not has_right_data:
+                ax1.text(
+                    0.5, 0.5, no_data_message, transform=ax1.transAxes, ha="center", va="center"
+                )
+                if title:
+                    ax1.set_title(title, fontsize=16, fontweight="bold", pad=20)
+                plt.tight_layout()
+                buffer = BytesIO()
+                fig.savefig(buffer, format="png", dpi=self.dpi, bbox_inches="tight")
+                buffer.seek(0)
+                plt.close()
+                return buffer
+
+            # Create second y-axis
+            ax2 = ax1.twinx()
+
+            # Plot left axis data
+            if has_left_data:
+                df_left = pd.DataFrame(list(left_data.items()), columns=["date", "value"])
+                df_left["date"] = pd.to_datetime(
+                    df_left["date"], format="%Y-%m-%d", errors="coerce"
+                )
+                df_left = df_left.dropna(subset=["date"])  # Remove any failed conversions
+                df_left = df_left.sort_values("date")
+                df_left.set_index("date", inplace=True)
+
+                # Resample if requested
+                if resample_freq:
+                    if resample_freq == "M":
+                        df_left = df_left.resample("ME").last()
+                    elif resample_freq == "Q":
+                        df_left = df_left.resample("QE").last()
+                    elif resample_freq == "Y":
+                        df_left = df_left.resample("YE").last()
+
+                line1 = ax1.plot(
+                    df_left.index,
+                    df_left["value"],
+                    color=left_color,
+                    linestyle=left_linestyle,
+                    linewidth=left_linewidth,
+                    marker=left_marker,
+                    label=left_y_label,
+                )
+                ax1.set_ylabel(left_y_label, color=left_color, fontsize=14, fontweight="bold")
+                ax1.tick_params(axis="y", labelcolor=left_color)
+
+            # Plot right axis data
+            if has_right_data:
+                df_right = pd.DataFrame(list(right_data.items()), columns=["date", "value"])
+                df_right["date"] = pd.to_datetime(
+                    df_right["date"], format="%Y-%m-%d", errors="coerce"
+                )
+                df_right = df_right.dropna(subset=["date"])  # Remove any failed conversions
+                df_right = df_right.sort_values("date")
+                df_right.set_index("date", inplace=True)
+
+                # Resample if requested
+                if resample_freq:
+                    if resample_freq == "M":
+                        df_right = df_right.resample("ME").last()
+                    elif resample_freq == "Q":
+                        df_right = df_right.resample("QE").last()
+                    elif resample_freq == "Y":
+                        df_right = df_right.resample("YE").last()
+
+                line2 = ax2.plot(
+                    df_right.index,
+                    df_right["value"],
+                    color=right_color,
+                    linestyle=right_linestyle,
+                    linewidth=right_linewidth,
+                    marker=right_marker,
+                    label=right_y_label,
+                )
+                ax2.set_ylabel(right_y_label, color=right_color, fontsize=14, fontweight="bold")
+                ax2.tick_params(axis="y", labelcolor=right_color)
+
+            # Format x-axis
+            if has_left_data or has_right_data:
+                # Get the data range for crisis overlays
+                all_dates = []
+                if has_left_data:
+                    all_dates.extend(df_left.index.tolist())
+                if has_right_data:
+                    all_dates.extend(df_right.index.tolist())
+
+                if all_dates:
+                    date_range = (min(all_dates), max(all_dates))
+
+                    # Add crisis overlays
+                    crisis_patches = []
+                    if show_crisis_periods:
+                        crisis_patches = self.add_crisis_overlays(ax1, date_range, add_legend=False)
+
+                    # Format dates
+                    if graph_type == "M":
+                        ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
+                        ax1.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
+                    elif graph_type == "Q":
+                        ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=3 * interval))
+                        ax1.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
+                    elif graph_type == "Y":
+                        ax1.xaxis.set_major_locator(mdates.YearLocator(interval=interval))
+                        ax1.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
+                    else:  # Daily
+                        ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
+                        ax1.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
+
+            # Add right axis zero line if requested
+            if right_axis_zero_line and has_right_data:
+                ax2.axhline(y=0, color=right_color, linestyle="-", alpha=0.3)
+
+            # Add bar chart if provided
+            if bar_data_dict and len(bar_data_dict) > 0:
+                # Prepare bar data
+                df_bar = pd.DataFrame(list(bar_data_dict.items()), columns=["date", "value"])
+                df_bar["date"] = pd.to_datetime(df_bar["date"], format="%Y-%m-%d", errors="coerce")
+                df_bar = df_bar.dropna(subset=["date"])
+                df_bar = df_bar.sort_values("date")
+                df_bar.set_index("date", inplace=True)
+
+                # Resample if requested (same as other data)
+                if resample_freq:
+                    if resample_freq == "M":
+                        df_bar = df_bar.resample("ME").mean()  # Use mean for bar data
+                    elif resample_freq == "Q":
+                        df_bar = df_bar.resample("QE").mean()
+                    elif resample_freq == "Y":
+                        df_bar = df_bar.resample("YE").mean()
+
+                # Calculate bar positioning
+                if has_left_data:
+                    left_values = df_left["value"].values
+                    bar_bottom = min(left_values) * bar_position_ratio
+                    bar_height_scale = (max(left_values) - min(left_values)) * bar_height_ratio
+                else:
+                    # Fallback positioning if no left axis data
+                    bar_bottom = 0
+                    bar_height_scale = max(df_bar["value"].values) * bar_height_ratio
+
+                # Normalize and position bars
+                if len(df_bar) > 0 and not df_bar["value"].isna().all():
+                    max_bar_value = df_bar["value"].max()
+                    min_bar_value = df_bar["value"].min()
+
+                    if max_bar_value > 0:
+                        normalized_bars = (df_bar["value"] / max_bar_value) * bar_height_scale
+                        bar_legend_label = (
+                            f"{bar_label} (Min: {int(min_bar_value)}, Max: {int(max_bar_value)})"
+                        )
+
+                        bars = ax1.bar(
+                            df_bar.index,
+                            normalized_bars,
+                            bottom=bar_bottom,
+                            color=bar_color,
+                            alpha=bar_alpha,
+                            width=bar_width,
+                            label=bar_legend_label,
+                            zorder=1,  # Behind lines but above grid
+                        )
+                    else:
+                        bar_legend_label = f"{bar_label} (No data)"
+                else:
+                    bar_legend_label = f"{bar_label} (No data)"
+
+            # Set title
+            if title:
+                ax1.set_title(title, fontsize=16, fontweight="bold", pad=20)
+
+            # Create main legend for data (left side)
+            lines1, labels1 = ax1.get_legend_handles_labels()
+            lines2, labels2 = ax2.get_legend_handles_labels()
+            if lines1 or lines2:
+                ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=12)
+
+            # Create separate crisis legend (right side) if we have crisis overlays
+            if show_crisis_periods and "crisis_patches" in locals() and crisis_patches:
+                import matplotlib.patches as mpatches
+
+                crisis_handles = []
+                crisis_labels = []
+
+                for crisis_info in crisis_patches:
+                    # Create a patch for the legend
+                    legend_patch = mpatches.Patch(
+                        color=crisis_info["color"],
+                        alpha=0.5,  # Slightly more opaque for legend visibility
+                        label=crisis_info["name"],
+                    )
+                    crisis_handles.append(legend_patch)
+                    crisis_labels.append(crisis_info["name"])
+
+                if crisis_handles:
+                    # Add crisis legend in upper right corner
+                    crisis_legend = ax1.legend(
+                        crisis_handles,
+                        crisis_labels,
+                        loc="upper right",
+                        fontsize=10,
+                        title="Financial Events",
+                        title_fontsize=11,
+                        framealpha=0.8,
+                    )
+                    # Add the main legend back (since ax1.legend overwrites the previous one)
+                    if lines1 or lines2:
+                        main_legend = ax1.legend(
+                            lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=12
+                        )
+                        ax1.add_artist(main_legend)  # Keep both legends
+
+            # Format dates on x-axis
+            plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, ha="right")
+
+            # Add grid
+            ax1.grid(True, alpha=0.3)
+
+            plt.tight_layout()
+
+            buffer = BytesIO()
+            fig.savefig(buffer, format="png", dpi=self.dpi, bbox_inches="tight")
+            buffer.seek(0)
+            plt.close()
+
+            return buffer
+
+        except Exception as e:
+            plt.close()
+            # Create a simple error chart instead of returning text
+            fig, ax = plt.subplots(figsize=figsize)
+            ax.text(
+                0.5,
+                0.5,
+                f"Error creating chart: {str(e)}",
+                transform=ax.transAxes,
+                ha="center",
+                va="center",
+                fontsize=12,
+            )
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.axis("off")
+
+            buffer = BytesIO()
+            fig.savefig(buffer, format="png", dpi=self.dpi, bbox_inches="tight")
+            buffer.seek(0)
+            plt.close()
+            return buffer
 
     def create_formatted_list(self, data_dict, title):
         """Create a formatted list from dictionary data with title"""

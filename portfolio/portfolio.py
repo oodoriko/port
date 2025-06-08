@@ -96,6 +96,7 @@ class Portfolio:
             return
 
         shares = {}
+        new_holdings = self.holdings.copy()
         for ticker, signal in trading_plan.items():
             # always sell all, buy 1, never short
             if not self.allow_short and signal == -1 and ticker not in self.holdings.keys():
@@ -103,12 +104,12 @@ class Portfolio:
                 continue
             if signal == 1:
                 shares[ticker] = 1
-                self.holdings[ticker] = self.holdings.get(ticker, 0) + 1
+                new_holdings[ticker] = new_holdings.get(ticker, 0) + 1
             if signal == -1:
-                shares[ticker] = -1 * self.holdings[ticker]
-                del self.holdings[ticker]
+                shares[ticker] = -1 * new_holdings[ticker]
+                del new_holdings[ticker]
 
         self.trading_status[date] = 1 if len(shares) > 0 else 0
         self.trading_history[date] = trading_plan
         self.transaction_history[date] = shares
-        self.holdings_history[date] = self.holdings
+        self.holdings_history[date] = new_holdings

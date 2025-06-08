@@ -2,7 +2,8 @@ from collections import Counter, defaultdict
 
 import numpy as np
 import pandas as pd
-from metrics_calculator import calculate_ir, calculate_sharpe, get_return
+
+from reporting.metrics_calculator import calculate_ir, calculate_sharpe, get_return
 
 
 class PortfolioAnalytics:
@@ -27,14 +28,14 @@ class PortfolioAnalytics:
         self.end_date = end_date
         self.rf = rf
         self.bmk_returns = bmk_returns
-        self.process_trades_data()
-        self.process_ticker_level_trades_data()
+        self.pnl_details_history = None
 
-    def process_trades_data(self) -> dict:
         self.portfolio_value_history = self.calculate_portfolio_value()
         self.cashflow_history = self.calculate_cashflow()
         self.transaction_cost_history = self.calculate_cost()
         self.pnl_history = self.calculate_pnl()
+        self.pnl_details_history = self.calculate_daily_pnl()
+        self.ticker_analysis = self.process_ticker_level_trades_data()
 
     def process_ticker_level_trades_data(self):
         if self.pnl_details_history is None:
@@ -60,7 +61,7 @@ class PortfolioAnalytics:
                 "total_long_trades": total_long_trades,
                 "total_short_trade": total_short_trade,
             }
-        self.ticker_analysis = ticker_analysis
+        return ticker_analysis
 
     def calculate_cashflow(self):
         cashflow_history = {}
@@ -152,11 +153,7 @@ class PortfolioAnalytics:
         return pnl_details_history
 
     def holdings_metrics(self):
-        return {
-            "holdings_count": {
-                d: len(np.unique(holdings)) for d, holdings in self.holdings_history.items()
-            },
-        }
+        return {d: len(holdings) for d, holdings in self.portfolio.holdings_history.items()}
 
     def performance_metrics(self, rf=0.02, bmk_returns=0.1):
         portfolio_value = pd.Series(self.portfolio_value_history)
@@ -172,19 +169,19 @@ class PortfolioAnalytics:
         # Vol for sharpe and ir
         annualized_vol = daily_returns.std() * np.sqrt(252)
 
-        # Sharpe Ratios
+        # Sharpe Ratios - pass daily returns and let function handle time grouping
         annualized_sharpe = (annualized_return - rf) / annualized_vol if annualized_vol != 0 else 0
         annual_sharpe = calculate_sharpe(daily_returns, "year", 30, rf)
-        monthly_sharpe = calculate_sharpe(monthly_returns, "month", 3, rf)
-        quarterly_sharpe = calculate_sharpe(quarterly_returns, "quarter", 1, rf)
+        monthly_sharpe = calculate_sharpe(daily_returns, "month", 10, rf)  # min 10 days per month
+        quarterly_sharpe = calculate_sharpe(daily_returns, "quarter", 30, rf)
 
-        # Information Ratios
+        # Information Ratios - pass daily returns and let function handle time grouping
         annualized_ir = (
             (annualized_return - bmk_returns) / annualized_vol if annualized_vol != 0 else 0
         )
         annual_ir = calculate_ir(daily_returns, "year", 30, bmk_returns)
-        monthly_ir = calculate_ir(monthly_returns, "month", 3, bmk_returns)
-        quarterly_ir = calculate_ir(quarterly_returns, "quarter", 1, bmk_returns)
+        monthly_ir = calculate_ir(daily_returns, "month", 10, bmk_returns)  # min 10 days per month
+        quarterly_ir = calculate_ir(daily_returns, "quarter", 30, bmk_returns)
 
         # Win Rate
         positive_days = (daily_returns > 0).sum()
@@ -256,7 +253,7 @@ class PortfolioAnalytics:
 
     def sector_metrics(self):
         total_unique_holdings = set(
-            holding for holdings in self.trades_history.values() for holding in holdings
+            holding for holdings in self.portfolio.holdings_history.values() for holding in holdings
         )
         filtered_product_data = self.product_data[
             self.product_data.ticker.isin(total_unique_holdings)
@@ -264,7 +261,7 @@ class PortfolioAnalytics:
         # Sector
         sector_ts = []
         sectors = filtered_product_data.sector.unique()
-        for holdings in self.holdings_history.values():
+        for holdings in self.portfolio.holdings_history.values():
             prd = filtered_product_data[filtered_product_data.ticker.isin(holdings)]
             sector_counts = prd.groupby("sector").size()
             sectors_dict = {sector: sector_counts.get(sector, 0) for sector in sectors}
