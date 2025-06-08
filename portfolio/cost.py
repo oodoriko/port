@@ -19,29 +19,40 @@ class TransactionCost:
         self,
         shares: dict[str, float],
         execution_time_days: float = 1.0,
-        volume: pd.DataFrame = None,
-        price: pd.DataFrame = None,
+        volume: pd.DataFrame = None,  # single date
+        price: pd.DataFrame = None,  # single date
     ) -> dict[str, float]:
         if len(shares) == 0:
             return 0
 
         cost_multiple = self.get_cost_multiple(volume, shares, execution_time_days)
-        total_cost = {
-            ticker: val * price[ticker] * cost_multiple[ticker] for ticker, val in shares.items()
-        }
-        return list(total_cost.values())[0]
+        total_cost = sum(
+            [abs(val) * price[ticker] * cost_multiple[ticker] for ticker, val in shares.items()]
+        )
+        return total_cost
 
     def get_cost_multiple(
         self,
         volume: pd.DataFrame,
-        shares: dict[str, float],
+        shares: dict[str, float],  # tickers: shares
         execution_time_days: float = 1.0,
     ) -> dict[str, float]:
-        volume = volume[shares.keys()].T
-        volume.columns = ["volume"]
-        volume["shares"] = shares
-        volume["participation_rate"] = volume["shares"] / volume["volume"]
+        if len(volume) != len(shares):
+            volume = volume[shares.keys()]
+        participation_rate = list(shares.values()) / volume
+        liquidity_factor = volume.apply(self.get_liquidity_factor)
+        temporary_impact = (
+            (participation_rate.abs() / execution_time_days) ** self.beta
+        ) * self.eta
 
+        timing_cost = 0.5 * np.sqrt(execution_time_days)
+
+        total_cost_multiple = (
+            liquidity_factor + temporary_impact + timing_cost
+        ) * self.base_volatility
+        return total_cost_multiple.to_dict()
+
+    def get_liquidity_factor(self, volume):
         # Static liquidity factor based on volume levels
         volume_liquidity_map = {
             (0, 100_000): 2.0,
@@ -51,20 +62,7 @@ class TransactionCost:
             (5_000_000, float("inf")): 0.8,
         }
 
-        def get_liquidity_factor(volume):
-            for (min_vol, max_vol), factor in volume_liquidity_map.items():
-                if min_vol <= volume < max_vol:
-                    return factor
-            return 1.0
-
-        volume["liquidity_factor"] = volume["volume"].apply(get_liquidity_factor)
-        volume["temporary_impact"] = (
-            (volume["participation_rate"].abs() / execution_time_days) ** self.beta
-        ) * self.eta
-
-        volume["timing_cost"] = self.timing_factor * np.sqrt(execution_time_days)
-
-        volume["total_cost_multiple"] = (
-            volume["liquidity_factor"] + volume["temporary_impact"] + volume["timing_cost"]
-        ) * self.base_volatility
-        return volume["total_cost_multiple"].to_dict()
+        for (min_vol, max_vol), factor in volume_liquidity_map.items():
+            if min_vol <= volume < max_vol:
+                return factor
+        return 1.0

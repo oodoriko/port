@@ -1,9 +1,12 @@
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
 from backtesting.scenarios import Scenario
 from config import DEFAULT_BACKTEST_PARAMS, StrategyTypes
 from portfolio.portfolio import Portfolio
+from reporting.portfolio_analytics import PortfolioAnalytics
+from reporting.report_generator import generate_report
 from strategies.strategy import Strategy, plurality_voting_batch
 
 
@@ -19,7 +22,9 @@ class Backtest:
         self.start_date = start_date
         self.end_date = end_date
         self.strategies = strategies
-        self.trading_dates = pd.bdate_range(start=start_date, end=end_date, freq="B")
+        self.trading_dates = list(
+            np.intersect1d(portfolio.open_prices.index, pd.date_range(start_date, end_date))
+        )
 
     @classmethod
     def from_scenario(cls, scenario: Scenario) -> "Backtest":
@@ -40,6 +45,15 @@ class Backtest:
         instance.scenario = scenario
         return instance
 
+    def get_portfolio(self) -> Portfolio:
+        return self.portfolio
+
+    def get_trading_dates(self) -> pd.DatetimeIndex:
+        return self.trading_dates
+
+    def get_strategies(self) -> list[StrategyTypes]:
+        return [strategy.name for strategy in self.strategies]
+
     def run(self):
         print(f"Backtest starting... whomp whomp!")
         print(
@@ -48,7 +62,7 @@ class Backtest:
 
         # get data
         universe = self.portfolio.get_universe()
-
+        count = 0
         for date in tqdm(self.trading_dates, desc="Backtesting", unit="day"):
             signals = {}
 
@@ -57,7 +71,7 @@ class Backtest:
                 strategy = Strategy.create(strategy_name)
                 price_type = strategy.price_type
                 min_window = strategy.min_window
-                prices = self.portfolio.get_prices_by_dates(
+                prices = self.portfolio.get_prices(
                     price_type, end_date=date, lookback_window=min_window
                 )
                 signal = strategy.generate_signals_single(prices.loc[:, universe])
@@ -68,15 +82,21 @@ class Backtest:
 
         print("Ding ding ding! Backtest completed!")
 
+    def run_batch(self):
+        """for some strategies, signals can be generated in batches"""
+        pass
+
+    def generate_analytics(self, rf=0.02, bmk_returns=0.1):
+        return PortfolioAnalytics(
+            self.portfolio,
+            self.start_date,
+            self.end_date,
+            rf=rf,
+            bmk_returns=bmk_returns,
+        )
+        # self.metrics = self.analytics.calculate_metrics()
+        # self.holdings_summary = self.analytics.holdings()
+
     def generate_report(self, rf=0.02, bmk_returns=0.1, filename=None):
-        self.portfolio.generate_analytics()
-        return self.portfolio.generate_report(rf=rf, bmk_returns=bmk_returns, filename=filename)
-
-    def get_portfolio(self) -> Portfolio:
-        return self.portfolio
-
-    def get_trading_dates(self) -> pd.DatetimeIndex:
-        return self.trading_dates
-
-    def get_strategies(self) -> list[StrategyTypes]:
-        return [strategy.name for strategy in self.strategies]
+        analytics = self.generate_analytics(rf=rf, bmk_returns=bmk_returns)
+        return generate_report(self, rf=rf, bmk_returns=bmk_returns, filename=filename)

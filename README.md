@@ -26,5 +26,6 @@ A portfolio is defined by:
 
 TODO:
 
-1. A cost model dependent on prev day volume
-2. Shares
+1. A cost model dependent on prev day volume -> done
+2. Shares -> done
+3. add capital, fracitional shares (divide capital across shares)

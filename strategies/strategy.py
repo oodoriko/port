@@ -15,7 +15,7 @@ class Strategy:
 
     def __init__(self, name: Strategies):
         self.name = name
-        self.price_type = "close"
+        self.price_type = "open"
         self.min_window = 60
 
     @classmethod
@@ -31,10 +31,10 @@ class Strategy:
         else:
             raise ValueError(f"Invalid strategy name: {strategy_name}")
 
-    def generate_signals_batch(self, data: pd.DataFrame) -> pd.DataFrame:
+    def generate_signals_batch(self) -> pd.DataFrame:
         pass
 
-    def generate_signals_single(self, data: pd.DataFrame) -> dict[str, int]:
+    def generate_signals_single(self) -> dict[str, int]:
         pass
 
 
