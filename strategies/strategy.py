@@ -31,12 +31,6 @@ class Strategy:
         else:
             raise ValueError(f"Invalid strategy name: {strategy_name}")
 
-    def generate_signals_batch(self) -> pd.DataFrame:
-        pass
-
-    def generate_signals_single(self) -> dict[str, int]:
-        pass
-
 
 class MomentumStrategy(Strategy):
     def __init__(self, name: StrategyTypes):
@@ -71,56 +65,41 @@ class MACD(MomentumStrategy):
         self.signal_period = signal_period
         self.min_window = max(200, slow_period * 4)  # 200 periods or 4x slow period 
 
-    def rules(self, prev: float, current: float) -> int:
+    def get_signal(self, arr: np.ndarray) -> int:
+        prev, current = TechnicalIndicators.macd(
+                    arr, self.fast_period, self.slow_period, self.signal_period
+                )
         if prev <= 0 and current > 0:
             return 1
         elif prev >= 0 and current < 0:
             return -1
         else:
             return 0
+
         
-    def generate_signals_batch(self, data: pd.DataFrame) -> pd.DataFrame:
-        """data: row is keyed by date, column is ticker, value is close price"""
-        """Returns dataframe with same structure containing MACD histogram values"""
-        result = pd.DataFrame(index=data.index, columns=data.columns)
-        if len(data) < self.min_window:
-            print(f"Not enough data to calculate MACD for {data.columns}")
-            return result
-       
-        for ticker in data.columns:
-            histogram = TechnicalIndicators.macd(
-                data[ticker], self.fast_period, self.slow_period, self.signal_period
-            )
-            print(ticker)
-            return histogram
-    
+    def generate_signals_batch(self, data: pd.DataFrame, run_start_index: int) -> pd.DataFrame:
+        """data: row is keyed by date, column is ticker, value is close price, full history of data"""
+        """Returns dataframe with same structure containing trading signals (-1, 0, 1)"""
+
+        data_arr = data.to_numpy()
+        signals = [
+            np.apply_along_axis(self.get_signal, arr=data_arr[:i, :], axis=0)
+                for i in range(run_start_index, len(data_arr))
+                ]
+        return pd.DataFrame(signals, index=data.index[run_start_index:], columns=data.columns)  
 
 
-    def generate_signals_single(self, data: pd.DataFrame) -> dict[str, int]:
+
+    def generate_signals_single_date(self, data: pd.DataFrame) -> dict[str, int]:
+        """data only up to run date"""
         """most feasible for live trading, assumes the data passed is in right dates range"""
         if len(data) < self.slow_period + self.signal_period:
             return {ticker: 0 for ticker in data.columns}
 
-        results = []
-        for ticker in data.columns:
-            histogram = TechnicalIndicators.macd(
-                data[ticker], self.fast_period, self.slow_period, self.signal_period
-            )
-            return histogram
-        #     current = histogram.iloc[-1]
-        #     previous = histogram.iloc[-2]
-
-        #     if len(histogram) < 2:
-        #         results[ticker] = 0
-        #         continue
-
-        #     if previous <= 0 and current > 0:
-        #         results[ticker] = 1
-        #     elif previous >= 0 and current < 0:
-        #         results[ticker] = -1
-        #     else:
-        #         results[ticker] = 0
-        # return results
+        data_arr = data.to_numpy()
+        signals = np.apply_along_axis(self.get_signal, arr=data_arr[:-1], axis=0)  # exclude current day price
+        return {ticker: signal for ticker, signal in zip(data.columns, signals)}
+   
 
 
 class RSI(MomentumStrategy):
@@ -131,35 +110,24 @@ class RSI(MomentumStrategy):
         self.period = period
         self.min_window = (period // 10 + 1) * 10
 
-    def generate_signals_batch(self, data: pd.DataFrame) -> pd.DataFrame:
-        results = {}
-        for ticker in data.columns:
-            rsi = TechnicalIndicators.rsi(data[ticker], self.period)
-            signals = np.where(
-                rsi < 30,
-                1,  # buy
-                np.where(rsi > 70, -1, 0),  # sell  # hold
-            )
-            results[ticker] = signals
-        return pd.DataFrame(results, index=data.index)
+    def get_signals(self, prices: np.ndarray) -> np.ndarray:
+        rsi = TechnicalIndicators.rsi(prices, self.period)
+        return np.where(
+            rsi < 30,
+            1,  # buy
+            np.where(rsi > 70, -1, 0),  # sell  # hold
+        )
+    def generate_signals_batch(self, data: pd.DataFrame, start_index: int) -> pd.DataFrame:
+        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[start_index:]
+        return pd.DataFrame(results, index=data.index[start_index:], columns=data.columns)
+    
 
-    def generate_signals_single(self, data: pd.DataFrame) -> dict[str, int]:
+    def generate_signals_single_date(self, data: pd.DataFrame) -> dict[str, int]:
         """most feasible for live trading, assumes the data passed is in right dates range"""
         if len(data) < self.period:
             return {ticker: 0 for ticker in data.columns}
-
-        results = {}
-        for ticker in data.columns:
-            rsi = TechnicalIndicators.rsi(data[ticker], self.period)
-            current = rsi.iloc[-1]
-
-            if current < 30:
-                results[ticker] = 1
-            elif current > 70:
-                results[ticker] = -1
-            else:
-                results[ticker] = 0
-        return results
+        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[-1]
+        return dict(zip(data.columns, results))
 
 
 class BollingerBands(VolatilityStrategy):
@@ -171,40 +139,23 @@ class BollingerBands(VolatilityStrategy):
         self.std_dev = std_dev
         self.min_window = (period // 10 + 1) * 10
 
-    def generate_signals_batch(self, data: pd.DataFrame) -> pd.DataFrame:
-        results = {}
-        for ticker in data.columns:
-            upper, _, lower = TechnicalIndicators.bollinger_bands(
-                data[ticker], self.period, self.std_dev
-            )
-            signals = np.where(
-                data[ticker] > upper,
-                1,  # buy
-                np.where(data[ticker] < lower, -1, 0),  # sell  # hold
-            )
-            results[ticker] = signals
-        return pd.DataFrame(results, index=data.index)
-
-    def generate_signals_single(self, data: pd.DataFrame) -> dict[str, int]:
+    def get_signals(self, prices: np.ndarray) -> np.ndarray:
+        upper, _, lower = TechnicalIndicators.bollinger_bands(prices, self.period, self.std_dev)
+        return np.where(
+            prices > upper,
+            1,  # buy
+            np.where(prices < lower, -1, 0),  # sell  # hold
+        )
+    def generate_signals_batch(self, data: pd.DataFrame, start_index: int) -> pd.DataFrame:
+        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[start_index:]
+        return pd.DataFrame(results, index=data.index[start_index:], columns=data.columns)
+    
+    def generate_signals_single_date(self, data: pd.DataFrame) -> dict[str, int]:
         """most feasible for live trading, assumes the data passed is in right dates range"""
         if len(data) < self.period:
             return {ticker: 0 for ticker in data.columns}
-
-        results = {}
-        for ticker in data.columns:
-            upper, _, lower = TechnicalIndicators.bollinger_bands(
-                data[ticker], self.period, self.std_dev
-            )
-            current = data[ticker].iloc[-1]
-
-            if current > upper.iloc[-1]:
-                results[ticker] = 1
-            elif current < lower.iloc[-1]:
-                results[ticker] = -1
-            else:
-                results[ticker] = 0
-        return results
-
+        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[-1]
+        return dict(zip(data.columns, results))
 
 class ZScoreMeanReversion(MeanReversionStrategy):
     def __init__(
@@ -219,55 +170,27 @@ class ZScoreMeanReversion(MeanReversionStrategy):
         self.exit_threshold = exit_threshold
         self.min_window = (lookback_period // 10 + 1) * 10
 
-    def generate_signals_batch(self, data: pd.DataFrame) -> pd.DataFrame:
-        results = {}
-        for ticker in data.columns:
-            z_scores = TechnicalIndicators.zscore(data[ticker], self.lookback_period)
-            signals = np.where(
-                z_scores > self.entry_threshold,
-                -1,
-                np.where(
-                    z_scores < -self.entry_threshold,
-                    1,
-                    np.where(
-                        np.abs(z_scores) < self.exit_threshold,
-                        0,
-                        np.nan,
-                    ),
-                ),
-            )
-            signals = pd.Series(signals, index=data.index).fillna(method="ffill").fillna(0)
-            results[ticker] = signals.values
-
-        return pd.DataFrame(results, index=data.index)
-
-    def generate_signals_single(self, data: pd.DataFrame) -> dict[str, int]:
+    def get_signals(self, prices: np.ndarray) -> np.ndarray:
+        z_scores = TechnicalIndicators.zscore(prices, self.lookback_period)
+        return np.where(
+            z_scores > self.entry_threshold,
+            -1,
+            np.where(z_scores < -self.entry_threshold, 1, 0),
+        )   
+    def generate_signals_batch(self, data: pd.DataFrame, start_index: int) -> pd.DataFrame:
+        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[start_index:]
+        return pd.DataFrame(results, index=data.index[start_index:], columns=data.columns)
+    
+    def generate_signals_single_date(self, data: pd.DataFrame) -> dict[str, int]:
         """most feasible for live trading, assumes the data passed is in right dates range"""
         if len(data) < self.lookback_period:
             return {ticker: 0 for ticker in data.columns}
-
-        results = {}
-        for ticker in data.columns:
-            z_scores = TechnicalIndicators.zscore(data[ticker], self.lookback_period)
-            current_zscore = z_scores.iloc[-1]
-
-            if pd.isna(current_zscore):
-                results[ticker] = 0
-                continue
-
-            if current_zscore > self.entry_threshold:
-                results[ticker] = -1  # sell
-            elif current_zscore < -self.entry_threshold:
-                results[ticker] = 1  # buy
-            elif abs(current_zscore) < self.exit_threshold:
-                results[ticker] = 0  # neutral/exit
-            else:
-                results[ticker] = 0
-
-        return results
+        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[-1]
+        return dict(zip(data.columns, results))
 
 
-def plurality_voting_single(strategies: list[int], tie_breaker=0) -> int:
+
+def plurality_voting_single_date(strategies: list[int], tie_breaker=0) -> int:
     """strategies: list of ints, each int is a signal for the SAME ticker from different strategies"""
     counts = Counter(strategies)
     most_common = counts.most_common()
@@ -282,7 +205,7 @@ def plurality_voting_single(strategies: list[int], tie_breaker=0) -> int:
 
 def plurality_voting_batch(strategies: pd.DataFrame, tie_breaker=0) -> pd.DataFrame:
     strategies["Signal"] = strategies.apply(
-        lambda x: plurality_voting_single(x, tie_breaker=tie_breaker), axis=1
+        lambda x: plurality_voting_single_date(x, tie_breaker=tie_breaker), axis=1
     )
     return strategies
 
@@ -300,7 +223,7 @@ def plurality_voting_batch_batch(strategies: list[pd.DataFrame], tie_breaker=0) 
     # vectorize
     stacked = np.stack([df.values for df in strategies], axis=2)
     flat_stacked = stacked.reshape(-1, stacked.shape[2])
-    flat_result = np.array([plurality_voting_single(row.tolist(), tie_breaker) 
+    flat_result = np.array([plurality_voting_single_date(row.tolist(), tie_breaker) 
                            for row in flat_stacked])
     result_values = flat_result.reshape(stacked.shape[:2])
     result = pd.DataFrame(result_values, index=common_index, columns=common_columns)

@@ -143,7 +143,7 @@ class PortfolioAnalytics:
                                 "cost_basis": existing_holding.get("cost_basis"),
                                 "sell_price": price,
                                 "profit": profit,
-                                "total_long_trades": existing_holding.get("total_long"),
+                                "total_long_trades": existing_holding.get("total_long") + 1,
                                 "return": profit / buy_cost,
                             }
                         }

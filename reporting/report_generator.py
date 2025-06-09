@@ -272,7 +272,7 @@ class ReportGenerator:
         avg_duration = durations.mean()
 
         duration_data = [
-            ["Duration Metric", "Value (Days)"],
+            ["Duration Metric", "Days"],
             ["Maximum Duration", f"{max_duration}"],
             ["Minimum Duration", f"{min_duration}"],
             ["Average Duration", f"{avg_duration:.1f}"],
@@ -717,7 +717,7 @@ class ReportGenerator:
         )
         trades_df.fillna(0, inplace=True)
 
-        count = Counter(self.portfolio.trades_status.values())
+        count = Counter(self.portfolio.trading_status.values())
         executed = count.get(1, 0)
         cancelled = count.get(0, 0)
         no_trades = count.get(2, 0)
@@ -750,6 +750,71 @@ class ReportGenerator:
             column_widths=[3.5 * inch, 2.5 * inch],
             header_color=Colors.SLATE_BLUE,
         )
+
+    def create_trading_analysis_summary_table(self) -> Table:
+        """Create Trading Analysis Summary table with key trading metrics"""
+        try:
+            # Extract trading metrics directly from portfolio analytics
+            # This method assumes the portfolio has trading_metrics available
+            if hasattr(self.portfolio, 'portfolio_analytics'):
+                trading_metrics = self.portfolio.portfolio_analytics.trading_metrics()
+                trades_ts = trading_metrics["trades_ts"]
+                trades_by_ticker = trading_metrics["trades_by_ticker"]
+            else:
+                # Fallback to existing holdings_summary structure
+                trades_ts = self.holdings_summary.get("trades_ts", {})
+                trades_by_ticker = self.holdings_summary.get("trades_by_ticker", pd.DataFrame())
+            
+            # Convert trades_ts to DataFrame for analysis
+            if isinstance(trades_ts, dict):
+                trades_df = pd.DataFrame(list(trades_ts.values()))
+            else:
+                trades_df = pd.DataFrame(trades_ts) if trades_ts else pd.DataFrame()
+            
+            # Calculate basic metrics
+            total_trading_days = len(trades_df) if not trades_df.empty else 0
+            avg_buy_trades_per_day = trades_df["buy"].mean() if not trades_df.empty and "buy" in trades_df.columns else 0
+            avg_sell_trades_per_day = trades_df["sell"].mean() if not trades_df.empty and "sell" in trades_df.columns else 0
+            
+            # Calculate sell trade returns
+            if not trades_by_ticker.empty and "return" in trades_by_ticker.columns:
+                positive_return_sell_trades = trades_by_ticker[trades_by_ticker["return"] > 0]["sell"].sum()
+                avg_return_all_sell_trades = trades_by_ticker["return"].mean()
+            else:
+                positive_return_sell_trades = 0
+                avg_return_all_sell_trades = 0
+            
+            # Create table data
+            summary_data = [
+                ["Trading Summary Metric", "Value"],
+                ["Total Trading Days", f"{total_trading_days}"],
+                ["Average Buy Trades per Day", f"{avg_buy_trades_per_day:.2f}"],
+                ["Average Sell Trades per Day", f"{avg_sell_trades_per_day:.2f}"],
+                ["Sell Trades with Positive Return", f"{positive_return_sell_trades}"],
+                ["Average Return of All Sell Trades", f"{avg_return_all_sell_trades:.2%}"],
+            ]
+
+            return self.styling.create_styled_table(
+                data=summary_data,
+                column_widths=[4.0 * inch, 2.5 * inch],
+                header_color=Colors.EMERALD,
+            )
+        except Exception as e:
+            # If there's any error, create a simple error message table
+            error_data = [
+                ["Trading Summary Metric", "Value"],
+                ["Error", f"Could not generate trading summary: {str(e)}"],
+                ["Total Trading Days", "N/A"],
+                ["Average Buy Trades per Day", "N/A"],
+                ["Average Sell Trades per Day", "N/A"],
+                ["Sell Trades with Positive Return", "N/A"],
+                ["Average Return of All Sell Trades", "N/A"],
+            ]
+            return self.styling.create_styled_table(
+                data=error_data,
+                column_widths=[4.0 * inch, 2.5 * inch],
+                header_color=Colors.EMERALD,
+            )
 
     def create_trading_activity_chart(self, title: str = None, graph_type: str = "D") -> BytesIO:
         """Create trading activity bar chart with buy/sell bars and second chart with total/net trades lines"""
@@ -1238,6 +1303,11 @@ class ReportGenerator:
 
         # TRADING ANALYSIS SECTION
         story.append(PageBreak())
+        self.add_page_header(story, section_name="Trading Analysis - Summary")
+        trading_summary_table = self.create_trading_analysis_summary_table()
+        story.append(trading_summary_table)
+
+        story.append(PageBreak())
         self.add_page_header(story, section_name="Trading Analysis - Key Metrics")
         trading_table = self.create_trading_metrics_table()
         story.append(trading_table)
@@ -1308,7 +1378,7 @@ class ReportGenerator:
 
 
 def generate_report(
-    portfolio,
+    backtest_or_portfolio,
     rf=0.02,
     bmk_returns=0.1,
     filename=None,
@@ -1317,13 +1387,35 @@ def generate_report(
     include_quarterly=True,
     include_annual=True,
 ) -> str:
-    if not hasattr(portfolio, "metrics") or not hasattr(portfolio, "holdings_summary"):
-        portfolio.generate_analytics(rf=rf, bmk_returns=bmk_returns)
+    # Handle both Backtest and Portfolio objects
+    if hasattr(backtest_or_portfolio, 'generate_analytics'):
+        # This is a Backtest object
+        analytics = backtest_or_portfolio.generate_analytics(rf=rf, bmk_returns=bmk_returns)
+        portfolio = backtest_or_portfolio.portfolio
+        
+        # Store analytics on portfolio for access in report generator
+        portfolio.portfolio_analytics = analytics
+        
+        # Generate required data structures
+        metrics = analytics.performance_metrics(rf=rf, bmk_returns=bmk_returns)
+        trading_metrics = analytics.trading_metrics()
+        holdings_summary = {
+            "holdings_count": analytics.holdings_metrics(),
+            "trades_ts": list(trading_metrics["trades_ts"].values()),
+            "trades_by_ticker": trading_metrics["trades_by_ticker"],
+        }
+    else:
+        # This is a Portfolio object (legacy support)
+        portfolio = backtest_or_portfolio
+        if not hasattr(portfolio, "metrics") or not hasattr(portfolio, "holdings_summary"):
+            raise ValueError("Portfolio object must have metrics and holdings_summary attributes")
+        metrics = portfolio.metrics
+        holdings_summary = portfolio.holdings_summary
 
     generator = ReportGenerator(
         portfolio,
-        portfolio.metrics,
-        portfolio.holdings_summary,
+        metrics,
+        holdings_summary,
         dpi=dpi,
         include_monthly=include_monthly,
         include_quarterly=include_quarterly,

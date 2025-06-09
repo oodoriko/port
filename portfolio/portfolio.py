@@ -121,7 +121,9 @@ class Portfolio:
 
     def trade_batch(self, trading_plan: pd.DataFrame) -> None:
         for date in trading_plan.index:
-            date_signals = trading_plan.loc[date] 
+            date_signals = trading_plan.loc[date]
             trading_plan_dict = {ticker: signal for ticker, signal in date_signals.items()}
             trades = date_signals.tolist()
             self.trade(date, trades, trading_plan_dict)
+
+

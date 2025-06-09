@@ -57,23 +57,30 @@ class Backtest:
     def run(self):
         print(f"Backtest starting... whomp whomp!")
         print(
-            f"Total trading days: {len(self.trading_dates)}\nUniverse size: {len(self.portfolio.get_universe())}\n Starting in {self.start_date}\n Ending in {self.end_date}"
+            f"Total trading days: {len(self.trading_dates)}\n"
+            f"Universe size: {len(self.portfolio.get_universe())}\n"
+            f"Total strategies: {len(self.strategies)}\n"
+            f"Starting in {self.start_date}\n"
+            f"Ending in {self.end_date}"
         )
 
         # get data
         universe = self.portfolio.get_universe()
         strategies = [Strategy.create(s) for s in self.strategies]
         max_lookback = max(strategy.min_window for strategy in strategies)
-        for date in tqdm(self.trading_dates, desc="Backtesting", unit="day"):
+        data_start_date = pd.Timestamp(self.start_date) - pd.Timedelta(days=max_lookback)
+
+        for date in tqdm(self.trading_dates, desc="Backtesting by date x strategy", unit="day"):
             signals = {}
 
             # get trading plan
             for strategy in strategies:
                 price_type = strategy.price_type
+                # price include today's price, make sure to exclude it in signal generation
                 prices = self.portfolio.get_prices(
-                    price_type, end_date=date, lookback_window=max_lookback # uses prev close price
+                    price_type, end_date=date, start_date=data_start_date
                 )
-                signal = strategy.generate_signals_single(prices.loc[:, universe])
+                signal = strategy.generate_signals_single_date(prices.loc[:, universe])
                 signals[strategy.name.value] = signal
             trades = plurality_voting_batch(pd.DataFrame(signals)).Signal.tolist()
             trading_plan = dict(zip(universe, trades))
@@ -82,43 +89,37 @@ class Backtest:
         print("Ding ding ding! Backtest completed!")
 
     def run_batch(self):
-        """
-        Batch version of run() that produces identical results.
-        Currently uses date-by-date processing to ensure correctness.
-        Future optimization: modify generate_signals_batch methods to handle chronological windowing.
-        """
         print(f"Backtest starting... swoosh!")
         print(
-            f"Total trading days: {len(self.trading_dates)}\nUniverse size: {len(self.portfolio.get_universe())}\n Starting in {self.start_date}\n Ending in {self.end_date}"
+            f"Universe size: {len(self.portfolio.get_universe())}\n"
+            f"Total trading days: {len(self.trading_dates)}\n"
+            f"Total strategies: {len(self.strategies)}\n"
+            f"Starting in {self.start_date}\n"
+            f"Ending in {self.end_date}"
         )
-
         universe = self.portfolio.get_universe()
         strategies = [Strategy.create(s) for s in self.strategies]
         price_type = "close"  # Use close price for all strategies in batch mode
         
         # Generate signals for all dates
-        all_trading_plans = {}
-        
-        for date in self.trading_dates:
-            # Generate signals for this date using the same logic as run()
-            signals = {}
-            for strategy in strategies:
-                prices = self.portfolio.get_prices(
-                    price_type, end_date=date, lookback_window=strategy.min_window
-                ).loc[:, universe]
-                signal = strategy.generate_signals_single(prices)
-                signals[strategy.name.value] = signal
-            
-            # Apply plurality voting and create trading plan
-            trades = plurality_voting_batch(pd.DataFrame(signals)).Signal.tolist()
-            trading_plan = dict(zip(universe, trades))
-            all_trading_plans[date] = trading_plan
-        
-        # Convert to DataFrame and execute batch trading
-        trading_plan_df = pd.DataFrame.from_dict(all_trading_plans, orient='index')
-        trading_plan_df.index = pd.to_datetime(trading_plan_df.index)
-        
-        self.portfolio.trade_batch(trading_plan_df)
+        max_lookback = max(strategy.min_window for strategy in strategies)
+        data_start_date = pd.Timestamp(self.start_date) - pd.Timedelta(days=max_lookback)
+
+        # price include today's price, make sure to exclude it in signal generation
+        prices = self.portfolio.get_prices(price_type, start_date=data_start_date, end_date=self.end_date)[universe]
+
+        run_start_date = prices.loc[self.start_date:, :].index[0] # start date may fall on a weekend, we find the closest biz date that has price data as run start date
+        data_r = prices.reset_index()
+        run_start_index = data_r[data_r["Date"] == run_start_date].index[0]
+        del data_r
+
+        signals = []
+        for strategy in tqdm(strategies, desc="Backtesting by strategy", unit="strategy"):
+            signal = strategy.generate_signals_batch(prices, run_start_index)
+            signals.append(signal)
+        trading_plan= plurality_voting_batch_batch(signals)
+
+        self.portfolio.trade_batch(trading_plan)
         print("Backtest completed!")
 
     def generate_analytics(self, rf=0.02, bmk_returns=0.1):
@@ -129,8 +130,6 @@ class Backtest:
             rf=rf,
             bmk_returns=bmk_returns,
         )
-        # self.metrics = self.analytics.calculate_metrics()
-        # self.holdings_summary = self.analytics.holdings()
 
     def generate_report(self, rf=0.02, bmk_returns=0.1, filename=None):
         # analytics = self.generate_analytics(rf=rf, bmk_returns=bmk_returns)

@@ -392,7 +392,7 @@ class SimpleReportGenerator:
         avg_duration = durations.mean()
 
         duration_data = [
-            ["Duration Metric", "Value (Days)", ""],
+            ["Duration Metric", "Days", ""],
             ["Maximum Duration", f"{max_duration:.1f}", ""],
             ["Minimum Duration", f"{min_duration:.1f}", ""],
             ["Average Duration", f"{avg_duration:.1f}", ""],
@@ -405,7 +405,7 @@ class SimpleReportGenerator:
         )
 
     def create_holdings_analysis_chart(self) -> BytesIO:
-        """Create holdings over time chart"""
+        """Create holdings over time chart with maximum possible holdings reference line"""
         # Calculate interval for chart formatting
         interval = (
             1
@@ -418,69 +418,545 @@ class SimpleReportGenerator:
             )
         )
         
-        return self.styling.create_generic_line_chart(
-            data_dict=self.holdings_summary,
-            color=Colors.CHART_NAVY,
+        return self.styling.create_generic_dual_axis_chart(
+            data_dict_left=self.holdings_summary,
+            left_y_label="Number of Holdings",
+            left_color=Colors.CHART_NAVY,
+            left_linewidth=1,
+            figsize=(10, 6),
             resample_freq=None,
-            date_format="%Y-%m",
-            y_label="Number of Holdings",
-            y_formatter=plt.FuncFormatter(lambda x, p: f"{x:,.0f}"),
             no_data_message="No holdings data available",
-            interval=interval,
             normal_style=self.normal_style,
+            show_crisis_periods=True,
+            interval=interval,
             graph_type="D",
         )
 
     def create_top_duration_tables(self) -> tuple[Table, Table]:
-        """Create tables for top 10 longest and shortest hold tickers with professional styling"""
-        # Get duration data from trading metrics
-        trading_metrics = self.analytics.trading_metrics()
-        trades_by_ticker = trading_metrics["trades_by_ticker"]
-        
-        if trades_by_ticker.empty:
+        """Create tables for top 10 longest and shortest durations with professional styling"""
+        if not hasattr(self.analytics, 'ticker_analysis') or not self.analytics.ticker_analysis:
             return None, None
 
-        # Common custom styles for smaller padding
-        custom_padding_styles = [
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 8),
-        ]
-
-        # Top 10 longest hold
-        top_longest = trades_by_ticker.nlargest(10, "duration")[["ticker", "duration"]]
+        duration_data = []
+        for ticker, data in self.analytics.ticker_analysis.items():
+            duration_data.append({
+                'ticker': ticker,
+                'duration': data.get('average_holding_period', 0),
+                'return': data.get('average_return', 0),
+                'profit': data.get('average_profit', 0)
+            })
+        
+        if not duration_data:
+            return None, None
+            
+        duration_df = pd.DataFrame(duration_data)
+        
+        # Top 10 longest durations
+        longest_durations = duration_df.nlargest(10, 'duration')[['ticker', 'duration']]
         longest_data = [["Ticker", "Duration (Days)"]]
-        for _, row in top_longest.iterrows():
-            duration_str = f"{row['duration']:.1f}" if pd.notna(row['duration']) else "N/A"
-            longest_data.append([str(row["ticker"]), duration_str])
+        for _, row in longest_durations.iterrows():
+            longest_data.append([str(row['ticker']), f"{row['duration']:.1f}"])
 
         longest_table = self.styling.create_styled_table(
             data=longest_data,
             column_widths=[1.8 * inch, 1.8 * inch],
             header_color=Colors.SLATE_BLUE,
-            custom_styles=custom_padding_styles,
+            custom_styles=[
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ]
         )
 
-        # Top 10 shortest hold
-        top_shortest = trades_by_ticker.nsmallest(10, "duration")[["ticker", "duration"]]
+        # Top 10 shortest durations  
+        shortest_durations = duration_df.nsmallest(10, 'duration')[['ticker', 'duration']]
         shortest_data = [["Ticker", "Duration (Days)"]]
-        for _, row in top_shortest.iterrows():
-            duration_str = f"{row['duration']:.1f}" if pd.notna(row['duration']) else "N/A"
-            shortest_data.append([str(row["ticker"]), duration_str])
+        for _, row in shortest_durations.iterrows():
+            shortest_data.append([str(row['ticker']), f"{row['duration']:.1f}"])
 
         shortest_table = self.styling.create_styled_table(
             data=shortest_data,
             column_widths=[1.8 * inch, 1.8 * inch],
             header_color=Colors.EMERALD,
-            custom_styles=custom_padding_styles,
+            custom_styles=[
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ]
         )
 
         return longest_table, shortest_table
+
+    def create_trading_analysis_summary_table(self) -> Table:
+        """Create Trading Analysis Summary table with key trading metrics"""
+        try:
+            # Get trading metrics from analytics
+            trading_metrics = self.analytics.trading_metrics()
+            trades_ts = trading_metrics["trades_ts"]
+            trades_by_ticker = trading_metrics["trades_by_ticker"]
+            
+            # Convert trades_ts to DataFrame for analysis
+            if isinstance(trades_ts, dict):
+                trades_df = pd.DataFrame(list(trades_ts.values()))
+            else:
+                trades_df = pd.DataFrame(trades_ts) if trades_ts else pd.DataFrame()
+            
+            # Calculate basic metrics
+            total_trading_days = len(trades_df) if not trades_df.empty else 0
+            avg_buy_trades_per_day = trades_df["buy"].mean() if not trades_df.empty and "buy" in trades_df.columns else 0
+            avg_sell_trades_per_day = trades_df["sell"].mean() if not trades_df.empty and "sell" in trades_df.columns else 0
+            
+            # Calculate sell trade returns
+            pnl = np.array([list(trade.values())[0]['return'] for daily_trades in self.analytics.pnl_details_history.values() for trade in daily_trades])
+            positive_return_sell_trades =len(pnl[pnl > 0]) / len(pnl)
+            avg_return_all_sell_trades = pnl.mean()
+            
+            # Calculate trading status percentages
+            cancelled_trades_count = trading_metrics.get("cancelled_trades_count", 0)
+            no_trades_count = trading_metrics.get("no_trades_count", 0)
+            successful_trades_count = trading_metrics.get("successful_trades_count", 0)
+            total_trade_attempts = cancelled_trades_count + no_trades_count + successful_trades_count
+            
+            cancelled_trade_pct = cancelled_trades_count / total_trade_attempts if total_trade_attempts > 0 else 0
+            no_trade_pct = no_trades_count / total_trade_attempts if total_trade_attempts > 0 else 0
+            
+            # Create table data
+            summary_data = [
+                ["Trading Summary Metric", "Value"],
+                ["Total Trading Days", f"{total_trading_days}"],
+                ["Average Buy Trades per Day", f"{avg_buy_trades_per_day:.2f}"],
+                ["Average Sell Trades per Day", f"{avg_sell_trades_per_day:.2f}"],
+                ["Sell Trades with Positive Return", f"{positive_return_sell_trades:.2%}"],
+                ["Average Return of All Sell Trades", f"{avg_return_all_sell_trades:.2%}"],
+                ["Cancelled Trade %", f"{cancelled_trade_pct:.2%}"],
+                ["No Trade %", f"{no_trade_pct:.2%}"],
+            ]
+
+            return self.styling.create_styled_table(
+                data=summary_data,
+                column_widths=[4.0 * inch, 2.5 * inch],
+                header_color=Colors.SLATE_BLUE,
+            )
+        except Exception as e:
+            # If there's any error, create a simple error message table
+            error_data = [
+                ["Trading Summary Metric", "Value"],
+                ["Error", f"Could not generate trading summary: {str(e)}"],
+                ["Total Trading Days", "N/A"],
+                ["Average Buy Trades per Day", "N/A"],
+                ["Average Sell Trades per Day", "N/A"],
+                ["Sell Trades with Positive Return", "N/A"],
+                ["Average Return of All Sell Trades", "N/A"],
+                ["Cancelled Trade %", "N/A"],
+                ["No Trade %", "N/A"],
+            ]
+            return self.styling.create_styled_table(
+                data=error_data,
+                column_widths=[4.0 * inch, 2.5 * inch],
+                header_color=Colors.SLATE_BLUE,
+            )
 
     def add_page_header(self, story: list, section_name: str = None) -> None:
         """Add page header with section name"""
         if section_name:
             story.append(Paragraph(section_name, self.section_header_style))
             story.append(Spacer(1, 20))
+
+    def create_trading_activity_chart(self, title: str = None, graph_type: str = "D") -> BytesIO:
+        """Create trading activity bar chart with buy/sell bars and second chart with total/net trades lines"""
+        plt.style.use("default")
+        fig, (ax1, ax2) = plt.subplots(
+            2, 1, figsize=(10, 7.5), gridspec_kw={"height_ratios": [2, 1]}, sharex=True
+        )
+
+        try:
+            # Get trading metrics from analytics
+            trading_metrics = self.analytics.trading_metrics()
+            trades_ts = trading_metrics["trades_ts"]
+            
+            if trades_ts:
+                # Convert trades_ts to DataFrame for analysis
+                if isinstance(trades_ts, dict):
+                    trades_df = pd.DataFrame(list(trades_ts.values()))
+                    trades_df.index = pd.to_datetime(list(trades_ts.keys()))
+                else:
+                    trades_df = pd.DataFrame(trades_ts)
+                    # Use holdings history dates as index
+                    holdings_dates = list(self.analytics.holdings_metrics().keys())
+                    trades_df.index = pd.to_datetime(holdings_dates[:len(trades_df)])
+                
+                trades_df = trades_df.sort_index()
+
+                trades_df["buy"] = pd.to_numeric(trades_df["buy"], errors="coerce").fillna(0)
+                trades_df["sell"] = pd.to_numeric(trades_df["sell"], errors="coerce").fillna(0)
+                trades_df["net_trades"] = trades_df["buy"] - trades_df["sell"]
+                trades_df["total_trades"] = trades_df["buy"] + trades_df["sell"]
+
+                # Calculate interval for chart formatting
+                interval = (
+                    1
+                    if len(trades_df) // 365 <= 2
+                    else (
+                        3
+                        if len(trades_df) // 365 > 2 and len(trades_df) // 365 <= 5
+                        else 4
+                    )
+                )
+
+                if graph_type == "M" and len(trades_df.resample("M").last()) <= 1:
+                    trades_df = trades_df.resample("D").last()
+                elif graph_type == "Q" and len(trades_df.resample("Q").last()) <= 1:
+                    trades_df = trades_df.resample("M").last()
+                elif graph_type == "Y" and len(trades_df.resample("Y").last()) <= 1:
+                    trades_df = trades_df.resample("Q").last()
+
+                # Main chart - Buy/Sell bars only
+                bar_width = 0.8
+                ax1.bar(
+                    trades_df.index,
+                    trades_df["buy"],
+                    alpha=0.7,
+                    label="Buy Trades",
+                    color="green",
+                    width=bar_width,
+                )
+                ax1.bar(
+                    trades_df.index,
+                    -trades_df["sell"],
+                    alpha=0.7,
+                    label="Sell Trades",
+                    color="red",
+                    width=bar_width,
+                )
+
+                if title:
+                    ax1.set_title(title, fontsize=14, fontweight="bold")
+                ax1.set_ylabel("Number of Trades (Buy +, Sell -)")
+                ax1.grid(True, alpha=0.3)
+                ax1.axhline(y=0, color="black", linestyle="-", alpha=0.5)
+                ax1.legend(loc="upper left")
+
+                # Bottom chart - Total trades and net trades as lines
+                ax2.plot(
+                    trades_df.index,
+                    trades_df["total_trades"],
+                    color=Colors.CHART_NAVY,
+                    linewidth=1,
+                    label="Total Trades",
+                    alpha=0.8,
+                )
+                ax2.plot(
+                    trades_df.index,
+                    trades_df["net_trades"],
+                    color=Colors.CHART_GREEN,
+                    linewidth=1,
+                    label="Net Trades (Buy - Sell)",
+                    alpha=0.8,
+                )
+
+                ax2.set_ylabel("Number of Trades")
+                if graph_type in ["D", "M"] and len(trades_df.resample("M").last()) <= 1:
+                    ax2.xaxis.set_major_locator(mdates.DayLocator(interval=interval))
+                    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+                elif graph_type == "Q" and len(trades_df.resample("Q").last()) <= 1:
+                    ax2.xaxis.set_major_locator(mdates.QuarterLocator(interval=interval))
+                    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+                elif graph_type == "Y" and len(trades_df.resample("Y").last()) <= 1:
+                    ax2.xaxis.set_major_locator(mdates.YearLocator(interval=interval))
+                    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%q"))
+                else:
+                    ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
+                    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+                ax2.grid(True, alpha=0.3)
+                ax2.axhline(y=0, color="black", linestyle="-", alpha=0.5)
+                ax2.legend(loc="upper left")
+
+                plt.xticks(rotation=45)
+            else:
+                # No trading data available
+                ax1.text(
+                    0.5,
+                    0.5,
+                    "No trading data available",
+                    transform=ax1.transAxes,
+                    ha="center",
+                    va="center",
+                )
+                if title:
+                    ax1.set_title(title, fontsize=14, fontweight="bold")
+                ax2.text(
+                    0.5,
+                    0.5,
+                    "No trading data available",
+                    transform=ax2.transAxes,
+                    ha="center",
+                    va="center",
+                )
+        except Exception as e:
+            # Error handling - show error message on chart
+            ax1.text(
+                0.5,
+                0.5,
+                f"Error generating trading chart: {str(e)}",
+                transform=ax1.transAxes,
+                ha="center",
+                va="center",
+            )
+            if title:
+                ax1.set_title(title, fontsize=14, fontweight="bold")
+            ax2.text(
+                0.5,
+                0.5,
+                "Error generating trading data",
+                transform=ax2.transAxes,
+                ha="center",
+                va="center",
+            )
+
+        plt.tight_layout()
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=self.dpi, bbox_inches="tight")
+        buf.seek(0)
+        plt.close()
+
+        return buf
+
+    def create_cashflow_over_time_chart(self, title: str = None, graph_type: str = "D") -> BytesIO:
+        """Create cashflow over time chart with cashflow/transaction costs in top panel and net cashflow in bottom panel"""
+        plt.style.use("default")
+        fig, (ax1, ax2) = plt.subplots(
+            2, 1, figsize=(10, 7.5), gridspec_kw={"height_ratios": [2, 1]}, sharex=True
+        )
+
+        try:
+            # Get cashflow and transaction cost data from analytics
+            cashflow_history = self.analytics.cashflow_history
+            transaction_cost_history = self.analytics.transaction_cost_history
+            
+            if cashflow_history and transaction_cost_history:
+                # Convert to DataFrame for analysis
+                cashflow_df = pd.Series(cashflow_history)
+                transaction_cost_df = pd.Series(transaction_cost_history)
+                
+                # Ensure both have the same index
+                common_dates = cashflow_df.index.intersection(transaction_cost_df.index)
+                cashflow_df = cashflow_df[common_dates]
+                transaction_cost_df = transaction_cost_df[common_dates]
+                
+                # Convert index to datetime
+                cashflow_df.index = pd.to_datetime(cashflow_df.index)
+                transaction_cost_df.index = pd.to_datetime(transaction_cost_df.index)
+                
+                # Sort by date
+                cashflow_df = cashflow_df.sort_index()
+                transaction_cost_df = transaction_cost_df.sort_index()
+                
+                # Calculate net cashflow (cashflow - transaction costs, since costs are typically positive)
+                net_cashflow = cashflow_df - transaction_cost_df
+
+                # Calculate interval for chart formatting
+                interval = (
+                    1
+                    if len(cashflow_df) // 365 <= 2
+                    else (
+                        3
+                        if len(cashflow_df) // 365 > 2 and len(cashflow_df) // 365 <= 5
+                        else 4
+                    )
+                )
+
+                # Resample if needed based on graph_type
+                if graph_type == "M" and len(cashflow_df.resample("M").last()) <= 1:
+                    cashflow_df = cashflow_df.resample("D").last()
+                    transaction_cost_df = transaction_cost_df.resample("D").last()
+                    net_cashflow = net_cashflow.resample("D").last()
+                elif graph_type == "Q" and len(cashflow_df.resample("Q").last()) <= 1:
+                    cashflow_df = cashflow_df.resample("M").last()
+                    transaction_cost_df = transaction_cost_df.resample("M").last()
+                    net_cashflow = net_cashflow.resample("M").last()
+                elif graph_type == "Y" and len(cashflow_df.resample("Y").last()) <= 1:
+                    cashflow_df = cashflow_df.resample("Q").last()
+                    transaction_cost_df = transaction_cost_df.resample("Q").last()
+                    net_cashflow = net_cashflow.resample("Q").last()
+
+                # Main chart - Cashflow and Transaction Cost lines
+                ax1.plot(
+                    cashflow_df.index,
+                    cashflow_df.values,
+                    color=Colors.CHART_NAVY,
+                    linewidth=1,
+                    label="Cashflow",
+                    alpha=0.8,
+                )
+                ax1.plot(
+                    transaction_cost_df.index,
+                    transaction_cost_df.values,
+                    color=Colors.CHART_RED,
+                    linewidth=1,
+                    label="Transaction Costs",
+                    alpha=0.8,
+                )
+
+                if title:
+                    ax1.set_title(title, fontsize=14, fontweight="bold")
+                ax1.set_ylabel("Amount ($)")
+                ax1.grid(True, alpha=0.3)
+                ax1.axhline(y=0, color="black", linestyle="-", alpha=0.5)
+                ax1.legend(loc="upper left")
+
+                # Bottom chart - Net Cashflow
+                ax2.plot(
+                    net_cashflow.index,
+                    net_cashflow.values,
+                    color=Colors.CHART_GREEN,
+                    linewidth=1,
+                    label="Net Cashflow (Cashflow - Transaction Costs)",
+                    alpha=0.8,
+                )
+
+                ax2.set_ylabel("Net Cashflow ($)")
+                if graph_type in ["D", "M"] and len(cashflow_df.resample("M").last()) <= 1:
+                    ax2.xaxis.set_major_locator(mdates.DayLocator(interval=interval))
+                    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+                elif graph_type == "Q" and len(cashflow_df.resample("Q").last()) <= 1:
+                    ax2.xaxis.set_major_locator(mdates.QuarterLocator(interval=interval))
+                    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+                elif graph_type == "Y" and len(cashflow_df.resample("Y").last()) <= 1:
+                    ax2.xaxis.set_major_locator(mdates.YearLocator(interval=interval))
+                    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%q"))
+                else:
+                    ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
+                    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+                ax2.grid(True, alpha=0.3)
+                ax2.axhline(y=0, color="black", linestyle="-", alpha=0.5)
+                ax2.legend(loc="upper left")
+
+                plt.xticks(rotation=45)
+            else:
+                # No cashflow data available
+                ax1.text(
+                    0.5,
+                    0.5,
+                    "No cashflow data available",
+                    transform=ax1.transAxes,
+                    ha="center",
+                    va="center",
+                )
+                if title:
+                    ax1.set_title(title, fontsize=14, fontweight="bold")
+                ax2.text(
+                    0.5,
+                    0.5,
+                    "No cashflow data available",
+                    transform=ax2.transAxes,
+                    ha="center",
+                    va="center",
+                )
+        except Exception as e:
+            # Error handling - show error message on chart
+            ax1.text(
+                0.5,
+                0.5,
+                f"Error generating cashflow chart: {str(e)}",
+                transform=ax1.transAxes,
+                ha="center",
+                va="center",
+            )
+            if title:
+                ax1.set_title(title, fontsize=14, fontweight="bold")
+            ax2.text(
+                0.5,
+                0.5,
+                "Error generating cashflow data",
+                transform=ax2.transAxes,
+                ha="center",
+                va="center",
+            )
+
+        plt.tight_layout()
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=self.dpi, bbox_inches="tight")
+        buf.seek(0)
+        plt.close()
+
+        return buf
+
+    def create_top_traded_tables(self) -> tuple[Table, Table, Table]:
+        """Create tables for top 10 most bought, most sold, and most traded tickers"""
+        if not hasattr(self.analytics, 'ticker_analysis') or not self.analytics.ticker_analysis:
+            return None, None, None
+
+        # Prepare data for analysis
+        trading_data = []
+        for ticker, data in self.analytics.ticker_analysis.items():
+            total_long = data.get('total_long_trades', 0)
+            total_short = data.get('total_short_trade', 0)  # Note: it's 'total_short_trade' not 'total_short_trades'
+            total_trades = total_long + total_short
+            
+            trading_data.append({
+                'ticker': ticker,
+                'total_long_trades': total_long,
+                'total_short_trades': total_short,
+                'total_trades': total_trades,
+                'avg_return': data.get('average_return', 0),
+                'avg_profit': data.get('average_profit', 0)
+            })
+        
+        if not trading_data:
+            return None, None, None
+            
+        trading_df = pd.DataFrame(trading_data)
+
+        # Top 10 Most Bought (by total_long_trades)
+        most_bought = trading_df.nlargest(10, 'total_long_trades')
+        most_bought_data = [["Ticker", "Buy", "Avg Return"]]
+        for _, row in most_bought.iterrows():
+            most_bought_data.append([
+                row['ticker'],
+                f"{int(row['total_long_trades'])}",
+                f"{row['avg_return']:.2%}"
+            ])
+
+        # Top 10 Most Sold (by total_short_trades)
+        most_sold = trading_df.nlargest(10, 'total_short_trades')
+        most_sold_data = [["Ticker", "Sell", "Avg Return"]]
+        for _, row in most_sold.iterrows():
+            most_sold_data.append([
+                row['ticker'],
+                f"{int(row['total_short_trades'])}",
+                f"{row['avg_return']:.2%}"
+            ])
+        
+        # Top 10 Most Traded (by total_trades)
+        most_traded = trading_df.nlargest(10, 'total_trades')
+        most_traded_data = [["Ticker", "Total", "Avg Return"]]
+        for _, row in most_traded.iterrows():
+            most_traded_data.append([
+                row['ticker'],
+                f"{int(row['total_trades'])}",
+                f"{row['avg_return']:.2%}"
+            ])
+
+        # Create the three tables with wider column widths
+        most_bought_table = self.styling.create_styled_table(
+            data=most_bought_data,
+            column_widths=[1.3 * inch, 0.8 * inch, 1.1 * inch],
+            header_color=Colors.SLATE_BLUE,
+        )
+        
+        most_sold_table = self.styling.create_styled_table(
+            data=most_sold_data,
+            column_widths=[1.3 * inch, 0.8 * inch, 1.1 * inch],
+            header_color=Colors.EMERALD,
+        )
+        
+        most_traded_table = self.styling.create_styled_table(
+            data=most_traded_data,
+            column_widths=[1.3 * inch, 0.8 * inch, 1.1 * inch],
+            header_color=Colors.CHART_RED,
+        )
+
+        return most_bought_table, most_sold_table, most_traded_table
 
     def generate_report(self, filename: str = None) -> str:
         """Generate the complete 5-page report"""
@@ -692,6 +1168,81 @@ class SimpleReportGenerator:
                 )
             )
             story.append(combined_duration_table)
+
+        story.append(PageBreak())
+
+        # TRADING ANALYSIS SECTION TITLE PAGE
+        trading_analysis_title = self.create_section_title_page("Trading Analysis")
+        story.extend(trading_analysis_title)
+        story.append(PageBreak())
+
+        # Page 10: Trading Analysis - Summary
+        self.add_page_header(story, section_name="Trading Analysis - Summary")
+        trading_summary_table = self.create_trading_analysis_summary_table()
+        story.append(trading_summary_table)
+
+        story.append(PageBreak())
+
+        # Page 11: Trading Analysis - Trading Over Time
+        self.add_page_header(story, section_name="Trading Analysis - Trading Over Time")
+        trading_activity_chart = self.create_trading_activity_chart(graph_type="D")
+        story.append(Image(trading_activity_chart, width=10 * inch, height=6.4 * inch))
+
+        story.append(PageBreak())
+
+        # Page 12: Trading Analysis - Cashflow Over Time
+        self.add_page_header(story, section_name="Trading Analysis - Cashflow Over Time")
+        cashflow_chart = self.create_cashflow_over_time_chart(graph_type="D")
+        story.append(Image(cashflow_chart, width=10 * inch, height=6.4 * inch))
+
+        # Page 13: Trading Analysis - Top 10 Most Traded
+        self.add_page_header(story, section_name="Trading Analysis - Top 10 Most Traded")
+        most_bought_table, most_sold_table, most_traded_table = self.create_top_traded_tables()
+        
+        if most_bought_table and most_sold_table and most_traded_table:
+            # Create titles for the top traded tables
+            most_bought_title = self.styling.create_table_title("Top 10 Most Bought Tickers", Colors.SLATE_BLUE)
+            most_sold_title = self.styling.create_table_title("Top 10 Most Sold Tickers", Colors.EMERALD)
+            most_traded_title = self.styling.create_table_title("Top 10 Most Traded Tickers", Colors.CHART_RED)
+
+            # Create containers with titles and tables
+            style = TableStyle(
+                [("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (0, 0), (-1, -1), "CENTER")]
+            )
+            
+            most_bought_container = Table(
+                [[most_bought_title], [Spacer(1, 8)], [most_bought_table]], colWidths=[3.6 * inch]
+            )
+            most_bought_container.setStyle(style)
+
+            most_sold_container = Table(
+                [[most_sold_title], [Spacer(1, 8)], [most_sold_table]], colWidths=[3.6 * inch]
+            )
+            most_sold_container.setStyle(style)
+
+            most_traded_container = Table(
+                [[most_traded_title], [Spacer(1, 8)], [most_traded_table]], colWidths=[3.6 * inch]
+            )
+            most_traded_container.setStyle(style)
+
+            # Layout: All three tables horizontally
+            spacer_cell = Table([[Spacer(1, 1)]], colWidths=[0.3 * inch])
+            
+            # Single row: All three tables side by side
+            all_tables_data = [[most_bought_container, spacer_cell, most_sold_container, spacer_cell, most_traded_container]]
+            all_tables_table = Table(
+                all_tables_data, colWidths=[3.6 * inch, 0.3 * inch, 3.6 * inch, 0.3 * inch, 3.6 * inch]
+            )
+            all_tables_table.setStyle(
+                TableStyle([
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ])
+            )
+            story.append(all_tables_table)
+
+        story.append(PageBreak())
 
         # Build PDF with page numbers
         doc.build(story)
