@@ -458,18 +458,37 @@ class ReportStyling:
 
                     plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
-                # Legend only if there are crisis overlays (legend entries)
+                # Create crisis legend if we have crisis overlays
                 if crisis_overlays:
-                    legend = ax.legend(
-                        frameon=True,
-                        fancybox=True,
-                        shadow=True,
-                        facecolor=Colors.CHART_WHITE,
-                        edgecolor=Colors.CHART_BLUE,
-                        loc="best",
-                        fontsize=10,
-                    )
-                    legend.get_frame().set_alpha(0.9)
+                    import matplotlib.patches as mpatches
+
+                    crisis_handles = []
+                    crisis_labels = []
+
+                    for crisis_info in crisis_overlays:
+                        # Create a patch for the legend
+                        legend_patch = mpatches.Patch(
+                            color=crisis_info["color"],
+                            alpha=0.5,  # Slightly more opaque for legend visibility
+                            label=crisis_info["name"],
+                        )
+                        crisis_handles.append(legend_patch)
+                        crisis_labels.append(crisis_info["name"])
+
+                    if crisis_handles:
+                        # Add crisis legend in upper right corner with consistent styling
+                        crisis_legend = ax.legend(
+                            crisis_handles,
+                            crisis_labels,
+                            loc="upper right",
+                            fontsize=12,  # Match other legends
+                            title="Financial Events",
+                            title_fontsize=12,  # Match other legends
+                            framealpha=1.0,  # Match other legends
+                            frameon=True,
+                            fancybox=False,  # Match other legends
+                            shadow=False,  # Match other legends
+                        )
             else:
                 # No data available
                 if data_key is not None:
@@ -563,6 +582,13 @@ class ReportStyling:
                 else:
                     returns = [float(r) * 100 for r in returns_data]
 
+                # Calculate statistics
+                mean_val = np.mean(returns)
+                median_val = np.median(returns)
+                std_val = np.std(returns)
+                skew_val = pd.Series(returns).skew()
+                kurt_val = pd.Series(returns).kurtosis()
+
                 ax.hist(
                     returns,
                     bins=bins,
@@ -571,19 +597,21 @@ class ReportStyling:
                     edgecolor=Colors.CHART_CHARCOAL,
                     linewidth=0.5,
                 )
+                
+                # Add vertical lines for mean and median
                 ax.axvline(
-                    np.mean(returns),
+                    mean_val,
                     color=Colors.CHART_RED,
                     linestyle="--",
                     linewidth=3,
-                    label=f"Mean: {np.mean(returns):.2f}%",
+                    label=f"Mean: {mean_val:.2f}%",
                 )
                 ax.axvline(
-                    np.median(returns),
+                    median_val,
                     color=median_color,
                     linestyle="--",
                     linewidth=3,
-                    label=f"Median: {np.median(returns):.2f}%",
+                    label=f"Median: {median_val:.2f}%",
                 )
 
                 # Format axis labels based on data type
@@ -594,31 +622,30 @@ class ReportStyling:
                 ax.grid(True, alpha=0.3, color=Colors.CHART_MEDIUM_GRAY)
                 ax.set_facecolor(Colors.CHART_LIGHT_GRAY)
 
-                # Enhanced legend
-                legend = ax.legend(
-                    frameon=True,
-                    fancybox=True,
-                    shadow=True,
-                    facecolor=Colors.CHART_WHITE,
-                    edgecolor=Colors.CHART_BLUE,
-                )
-                legend.get_frame().set_alpha(0.9)
+                # Create custom legend entries for statistics
+                import matplotlib.patches as mpatches
+                
+                # Create invisible patches for statistics in legend
+                std_patch = mpatches.Patch(color='none', label=f"Std Dev: {std_val:.2f}%")
+                skew_patch = mpatches.Patch(color='none', label=f"Skewness: {skew_val:.2f}")
+                kurt_patch = mpatches.Patch(color='none', label=f"Kurtosis: {kurt_val:.2f}")
 
-                # Add statistics text with better styling
-                stats_text = f"Std Dev: {np.std(returns):.2f}%\nSkewness: {pd.Series(returns).skew():.2f}\nKurtosis: {pd.Series(returns).kurtosis():.2f}"
-                ax.text(
-                    0.02,
-                    0.98,
-                    stats_text,
-                    transform=ax.transAxes,
-                    fontsize=12,
-                    verticalalignment="top",
-                    bbox=dict(
-                        boxstyle="round,pad=0.5",
-                        facecolor=Colors.CHART_WHITE,
-                        alpha=0.9,
-                        edgecolor=Colors.CHART_BLUE,
-                    ),
+                # Get existing legend handles and labels
+                handles, labels = ax.get_legend_handles_labels()
+                
+                # Add statistics to legend
+                handles.extend([std_patch, skew_patch, kurt_patch])
+                labels.extend([f"Std Dev: {std_val:.2f}%", f"Skewness: {skew_val:.2f}", f"Kurtosis: {kurt_val:.2f}"])
+
+                # Enhanced legend with all statistics
+                legend = ax.legend(
+                    handles,
+                    labels,
+                    frameon=True,
+                    fancybox=False,  # Match other legends
+                    shadow=False,   # Match other legends
+                    fontsize=12,    # Match other legends
+                    loc='best'
                 )
             else:
                 no_data_message = f"No {data_key.replace('_', ' ')} data available"
@@ -1052,8 +1079,8 @@ class ReportStyling:
         title=None,
         left_y_label="Left Y-axis",
         right_y_label="Right Y-axis",
-        left_color=Colors.CHARCOAL,
-        right_color=Colors.CHARCOAL,
+        left_color=Colors.CHART_CHARCOAL,
+        right_color=Colors.CHART_CHARCOAL,
         left_linestyle="-",
         right_linestyle="-",
         left_linewidth=1,
@@ -1301,13 +1328,8 @@ class ReportStyling:
             if title:
                 ax1.set_title(title, fontsize=16, fontweight="bold", pad=20)
 
-            # Create main legend for data (left side)
-            lines1, labels1 = ax1.get_legend_handles_labels()
-            lines2, labels2 = ax2.get_legend_handles_labels()
-            if lines1 or lines2:
-                ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=12)
-
-            # Create separate crisis legend (right side) if we have crisis overlays
+            # Create separate crisis legend first if we have crisis overlays
+            crisis_legend = None
             if show_crisis_periods and "crisis_patches" in locals() and crisis_patches:
                 import matplotlib.patches as mpatches
 
@@ -1325,22 +1347,28 @@ class ReportStyling:
                     crisis_labels.append(crisis_info["name"])
 
                 if crisis_handles:
-                    # Add crisis legend in upper right corner
+                    # Add crisis legend in upper right corner with same style as main legend
                     crisis_legend = ax1.legend(
                         crisis_handles,
                         crisis_labels,
                         loc="upper right",
-                        fontsize=10,
+                        fontsize=12,  # Match main legend font size
                         title="Financial Events",
-                        title_fontsize=11,
-                        framealpha=0.8,
+                        title_fontsize=12,  # Match main legend style
+                        framealpha=1.0,  # Match main legend opacity
+                        frameon=True,
+                        fancybox=False,  # Match main legend style
+                        shadow=False,  # Match main legend style
                     )
-                    # Add the main legend back (since ax1.legend overwrites the previous one)
-                    if lines1 or lines2:
-                        main_legend = ax1.legend(
-                            lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=12
-                        )
-                        ax1.add_artist(main_legend)  # Keep both legends
+
+            # Create main legend for data (left side)
+            lines1, labels1 = ax1.get_legend_handles_labels()
+            lines2, labels2 = ax2.get_legend_handles_labels()
+            if lines1 or lines2:
+                main_legend = ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=12)
+                # If we created a crisis legend, add it back as an artist so both legends show
+                if crisis_legend:
+                    ax1.add_artist(crisis_legend)
 
             # Format dates on x-axis
             plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, ha="right")

@@ -1,15 +1,19 @@
 """actually do the math here, strategy will make the trading decisions based on the math here"""
 
+import talib
+import numpy as np
 
 class TechnicalIndicators:
     @staticmethod
     def macd(prices, fast_period=12, slow_period=26, signal_period=9):
-        ema_fast = prices.ewm(span=fast_period).mean()
-        ema_slow = prices.ewm(span=slow_period).mean()
-        macd_line = ema_fast - ema_slow
-        signal_line = macd_line.ewm(span=signal_period).mean()
-        histogram = macd_line - signal_line
-        return macd_line, signal_line, histogram
+        price_values = prices.values.astype(np.float64)
+        _, _, histogram = talib.MACD(
+            price_values,
+            fastperiod=fast_period,
+            slowperiod=slow_period,
+            signalperiod=signal_period
+        )        
+        return histogram[-2], histogram[-1]
 
     @staticmethod
     def rsi(prices, period=14):

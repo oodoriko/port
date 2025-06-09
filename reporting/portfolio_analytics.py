@@ -162,40 +162,36 @@ class PortfolioAnalytics:
 
         total_return, annualized_return = get_return(portfolio_value, annualized=True)
         daily_returns = get_return(portfolio_value)
-        monthly_returns = get_return(portfolio_value, freq="M")
-        quarterly_returns = get_return(portfolio_value, freq="Q")
-        annual_returns = get_return(portfolio_value, freq="Y")
+        monthly_returns = get_return(portfolio_value, freq="ME")
+        quarterly_returns = get_return(portfolio_value, freq="QE")
+        annual_returns = get_return(portfolio_value, freq="YE")
 
-        # Vol for sharpe and ir
-        annualized_vol = daily_returns.std() * np.sqrt(252)
+        # Sharpe Ratios -> ALL ARE BASED ON DAILY RETURNS
+        annualized_sharpe = calculate_sharpe(daily_returns, rf, annualized=True)
+        annual_sharpe = calculate_sharpe(daily_returns, freq="YE", rf=rf)
+        monthly_sharpe = calculate_sharpe(daily_returns, freq="ME", rf=rf)  # min 10 days per month
+        quarterly_sharpe = calculate_sharpe(daily_returns, freq="QE", rf=rf)
 
-        # Sharpe Ratios - pass daily returns and let function handle time grouping
-        annualized_sharpe = (annualized_return - rf) / annualized_vol if annualized_vol != 0 else 0
-        annual_sharpe = calculate_sharpe(daily_returns, "year", 30, rf)
-        monthly_sharpe = calculate_sharpe(daily_returns, "month", 10, rf)  # min 10 days per month
-        quarterly_sharpe = calculate_sharpe(daily_returns, "quarter", 30, rf)
+        # Information Ratios -> ALL ARE BASED ON DAILY RETURNS
+        annualized_ir = calculate_ir(daily_returns, bmk_returns, annualized=True)
+        annual_ir = calculate_ir(daily_returns, bmk_returns, freq="YE")
+        monthly_ir = calculate_ir(daily_returns, bmk_returns, freq="ME")  # min 10 days per month
+        quarterly_ir = calculate_ir(daily_returns, bmk_returns, freq="QE")
 
-        # Information Ratios - pass daily returns and let function handle time grouping
-        annualized_ir = (
-            (annualized_return - bmk_returns) / annualized_vol if annualized_vol != 0 else 0
-        )
-        annual_ir = calculate_ir(daily_returns, "year", 30, bmk_returns)
-        monthly_ir = calculate_ir(daily_returns, "month", 10, bmk_returns)  # min 10 days per month
-        quarterly_ir = calculate_ir(daily_returns, "quarter", 30, bmk_returns)
-
-        # Win Rate
+        # Win Rate metrics
         positive_days = (daily_returns > 0).sum()
+        negative_days = (daily_returns < 0).sum()
         total_days = len(daily_returns)
+
         win_rate = positive_days / total_days if total_days > 0 else 0
         avg_win = daily_returns[daily_returns > 0].mean() if positive_days > 0 else 0
-        avg_loss = (
-            daily_returns[daily_returns < 0].mean() if (total_days - positive_days) > 0 else 0
-        )
-        profit_factor = abs(avg_win / avg_loss) if avg_loss != 0 else np.inf
+        avg_loss = abs(daily_returns[daily_returns < 0].mean()) if negative_days > 0 else 0
 
-        # monthly_returns.index = monthly_returns.index.strftime("%Y-%m")
-        # quarterly_returns.index = quarterly_returns.index.to_period("Q").astype(str)
-        # annual_returns.index = annual_returns.index.strftime("%Y")
+        # Correct profit factor calculation
+        total_gains = daily_returns[daily_returns > 0].sum()
+        total_losses = abs(daily_returns[daily_returns < 0].sum())
+        profit_factor = total_gains / total_losses if total_losses != 0 else np.inf
+
 
         return {
             # Returns
@@ -232,15 +228,17 @@ class PortfolioAnalytics:
                 "buy": long_trades,
                 "sell": short_trades,
             }
-        trades_by_ticker = [
+        trades_by_ticker = pd.DataFrame([
             {
                 "ticker": ticker,
                 "buy": v["total_long_trades"],
                 "sell": v["total_short_trade"],
                 "duration": v["average_holding_period"],
+                "return": v["average_return"],
+                "profit": v["average_profit"],
             }
             for ticker, v in self.ticker_analysis.items()
-        ]
+        ])
         trading_status_count = Counter(self.portfolio.trading_status.values())
 
         return {

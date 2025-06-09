@@ -15,7 +15,7 @@ class Strategy:
 
     def __init__(self, name: Strategies):
         self.name = name
-        self.price_type = "open"
+        self.price_type = "close"
         self.min_window = 60
 
     @classmethod
@@ -57,7 +57,7 @@ class VolatilityStrategy(Strategy):
 
 
 class MACD(MomentumStrategy):
-    """macd strategy - cross over"""
+    """macd strategy - cross over. macd needs a good warm up period for stabilization"""
 
     def __init__(
         self,
@@ -69,52 +69,58 @@ class MACD(MomentumStrategy):
         self.fast_period = fast_period
         self.slow_period = slow_period
         self.signal_period = signal_period
-        self.min_window = ((fast_period + slow_period) // 10 + 1) * 10
+        self.min_window = max(200, slow_period * 4)  # 200 periods or 4x slow period 
 
+    def rules(self, prev: float, current: float) -> int:
+        if prev <= 0 and current > 0:
+            return 1
+        elif prev >= 0 and current < 0:
+            return -1
+        else:
+            return 0
+        
     def generate_signals_batch(self, data: pd.DataFrame) -> pd.DataFrame:
         """data: row is keyed by date, column is ticker, value is close price"""
-        """batch as in calculate signal for every date for every ticker in one go"""
-        results = {}
+        """Returns dataframe with same structure containing MACD histogram values"""
+        result = pd.DataFrame(index=data.index, columns=data.columns)
+        if len(data) < self.min_window:
+            print(f"Not enough data to calculate MACD for {data.columns}")
+            return result
+       
         for ticker in data.columns:
-            _, _, histogram = TechnicalIndicators.macd(
+            histogram = TechnicalIndicators.macd(
                 data[ticker], self.fast_period, self.slow_period, self.signal_period
             )
-            histogram_lag = np.roll(histogram, 1)  # shift by 1 but keep the shape
-            histogram_lag[0] = histogram[0]
+            print(ticker)
+            return histogram
+    
 
-            signals = np.where(
-                (histogram_lag <= 0) & (histogram > 0),
-                1,  # buy
-                np.where((histogram_lag >= 0) & (histogram < 0), -1, 0),  # sell  # hold
-            )
-            results[ticker] = signals
-
-        return pd.DataFrame(results)
 
     def generate_signals_single(self, data: pd.DataFrame) -> dict[str, int]:
         """most feasible for live trading, assumes the data passed is in right dates range"""
         if len(data) < self.slow_period + self.signal_period:
-            return [0] * len(data)
+            return {ticker: 0 for ticker in data.columns}
 
-        results = {}
+        results = []
         for ticker in data.columns:
-            _, _, histogram = TechnicalIndicators.macd(
+            histogram = TechnicalIndicators.macd(
                 data[ticker], self.fast_period, self.slow_period, self.signal_period
             )
-            current = histogram.iloc[-1]
-            previous = histogram.iloc[-2]
+            return histogram
+        #     current = histogram.iloc[-1]
+        #     previous = histogram.iloc[-2]
 
-            if len(histogram) < 2:
-                results[ticker] = 0
-                continue
+        #     if len(histogram) < 2:
+        #         results[ticker] = 0
+        #         continue
 
-            if previous <= 0 and current > 0:
-                results[ticker] = 1
-            elif previous >= 0 and current < 0:
-                results[ticker] = -1
-            else:
-                results[ticker] = 0
-        return results
+        #     if previous <= 0 and current > 0:
+        #         results[ticker] = 1
+        #     elif previous >= 0 and current < 0:
+        #         results[ticker] = -1
+        #     else:
+        #         results[ticker] = 0
+        # return results
 
 
 class RSI(MomentumStrategy):
@@ -135,12 +141,12 @@ class RSI(MomentumStrategy):
                 np.where(rsi > 70, -1, 0),  # sell  # hold
             )
             results[ticker] = signals
-        return pd.DataFrame(results)
+        return pd.DataFrame(results, index=data.index)
 
     def generate_signals_single(self, data: pd.DataFrame) -> dict[str, int]:
         """most feasible for live trading, assumes the data passed is in right dates range"""
         if len(data) < self.period:
-            return [0] * len(data)
+            return {ticker: 0 for ticker in data.columns}
 
         results = {}
         for ticker in data.columns:
@@ -177,12 +183,12 @@ class BollingerBands(VolatilityStrategy):
                 np.where(data[ticker] < lower, -1, 0),  # sell  # hold
             )
             results[ticker] = signals
-        return pd.DataFrame(results)
+        return pd.DataFrame(results, index=data.index)
 
     def generate_signals_single(self, data: pd.DataFrame) -> dict[str, int]:
         """most feasible for live trading, assumes the data passed is in right dates range"""
         if len(data) < self.period:
-            return [0] * len(data)
+            return {ticker: 0 for ticker in data.columns}
 
         results = {}
         for ticker in data.columns:
@@ -238,7 +244,7 @@ class ZScoreMeanReversion(MeanReversionStrategy):
     def generate_signals_single(self, data: pd.DataFrame) -> dict[str, int]:
         """most feasible for live trading, assumes the data passed is in right dates range"""
         if len(data) < self.lookback_period:
-            return [0] * len(data.columns)
+            return {ticker: 0 for ticker in data.columns}
 
         results = {}
         for ticker in data.columns:
@@ -279,3 +285,25 @@ def plurality_voting_batch(strategies: pd.DataFrame, tie_breaker=0) -> pd.DataFr
         lambda x: plurality_voting_single(x, tie_breaker=tie_breaker), axis=1
     )
     return strategies
+
+def plurality_voting_batch_batch(strategies: list[pd.DataFrame], tie_breaker=0) -> pd.DataFrame:
+    common_index = strategies[0].index
+    common_columns = strategies[0].columns
+    
+    # Ensure all DataFrames have the same structure
+    for i, df in enumerate(strategies[1:], 1):
+        if not df.index.equals(common_index):
+            raise ValueError(f"DataFrame {i} has different index than DataFrame 0")
+        if not df.columns.equals(common_columns):
+            raise ValueError(f"DataFrame {i} has different columns than DataFrame 0")
+    
+    # vectorize
+    stacked = np.stack([df.values for df in strategies], axis=2)
+    flat_stacked = stacked.reshape(-1, stacked.shape[2])
+    flat_result = np.array([plurality_voting_single(row.tolist(), tie_breaker) 
+                           for row in flat_stacked])
+    result_values = flat_result.reshape(stacked.shape[:2])
+    result = pd.DataFrame(result_values, index=common_index, columns=common_columns)
+    return result
+
+   

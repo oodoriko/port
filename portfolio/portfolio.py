@@ -97,19 +97,31 @@ class Portfolio:
 
         shares = {}
         new_holdings = self.holdings.copy()
+        # Create a copy of trading_plan to avoid modifying the original
+        executed_trading_plan = trading_plan.copy()
+        
         for ticker, signal in trading_plan.items():
             # always sell all, buy 1, never short
-            if not self.allow_short and signal == -1 and ticker not in self.holdings.keys():
-                trading_plan[ticker] = 0
-                continue
             if signal == 1:
                 shares[ticker] = 1
                 new_holdings[ticker] = new_holdings.get(ticker, 0) + 1
             if signal == -1:
-                shares[ticker] = -1 * new_holdings[ticker]
-                del new_holdings[ticker]
+                if ticker in self.holdings:
+                    shares[ticker] = -1 * self.holdings[ticker]
+                    del new_holdings[ticker]
+                elif not self.allow_short:
+                    # Don't modify the original trading_plan, modify the copy instead
+                    executed_trading_plan[ticker] = 0
 
         self.trading_status[date] = 1 if len(shares) > 0 else 0
-        self.trading_history[date] = trading_plan
+        self.trading_history[date] = executed_trading_plan
         self.transaction_history[date] = shares
         self.holdings_history[date] = new_holdings
+        self.holdings = new_holdings
+
+    def trade_batch(self, trading_plan: pd.DataFrame) -> None:
+        for date in trading_plan.index:
+            date_signals = trading_plan.loc[date] 
+            trading_plan_dict = {ticker: signal for ticker, signal in date_signals.items()}
+            trades = date_signals.tolist()
+            self.trade(date, trades, trading_plan_dict)

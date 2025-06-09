@@ -1,3 +1,5 @@
+CACHE SOME DATA FIRST
+
 # Portfolio Construction
 
 ## Backtest
