@@ -46,7 +46,11 @@ class DataCacher:
         return key in self.cache  # key is ticker
 
     def get_from_cache(self, key) -> dict:
-        return {k: self.cache.get(k) for k in key} if isinstance(key, list) else self.cache.get(key)
+        return (
+            {k: self.cache.get(k) for k in key}
+            if isinstance(key, list)
+            else self.cache.get(key)
+        )
 
     def add_to_cache(self, key=None, data=None):
         if key is None and isinstance(data, dict):
@@ -57,7 +61,9 @@ class DataCacher:
 
 class YFinance:
     @staticmethod
-    def get_price_data(tickers, start_date=None, end_date=None, interval="1d", max_rows=50000):
+    def get_price_data(
+        tickers, start_date=None, end_date=None, interval="1d", max_rows=50000
+    ):
         # only download daily
         if not start_date or not end_date:
             start_date = START_DATE
@@ -67,7 +73,8 @@ class YFinance:
             tickers = [tickers]
 
         days = (
-            datetime.strptime(end_date, "%Y-%m-%d") - datetime.strptime(start_date, "%Y-%m-%d")
+            datetime.strptime(end_date, "%Y-%m-%d")
+            - datetime.strptime(start_date, "%Y-%m-%d")
         ).days
         batch_size = max_rows // days  # max 50000 return rows per batch
 
@@ -156,7 +163,9 @@ class PriceData(DataCacher):
                 self.save_cache()
 
         results_dict = self.get_from_cache(tickers)
-        dates = results_dict[tickers[0]]["Date"]  # assume all tickers have the same dates
+        dates = results_dict[tickers[0]][
+            "Date"
+        ]  # assume all tickers have the same dates
         return {
             "open": pd.DataFrame(
                 {ticker: price["Open"] for ticker, price in results_dict.items()}
@@ -206,7 +215,9 @@ class ProductData(DataCacher):
             self.save_cache()
         result_dict = self.get_from_cache(tickers)
         return (
-            pd.DataFrame(result_dict).T.reset_index(drop=False).rename(columns={"index": "ticker"})
+            pd.DataFrame(result_dict)
+            .T.reset_index(drop=False)
+            .rename(columns={"index": "ticker"})
         )
 
 
@@ -231,7 +242,7 @@ class BenchmarkData(DataCacher):
         url_map = {
             Benchmarks.SP500: "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
             Benchmarks.NASDAQ: "https://en.wikipedia.org/wiki/NASDAQ-100",
-            Benchmarks.DOWJONES: "https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average",
+            Benchmarks.DOW_JONES: "https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average",
         }
         try:
             tables = pd.read_html(url_map[benchmark])
@@ -239,8 +250,12 @@ class BenchmarkData(DataCacher):
                 if "Symbol" in table.columns or "Ticker" in table.columns:
                     symbol_col = "Symbol" if "Symbol" in table.columns else "Ticker"
                     tickers = table[symbol_col].dropna().tolist()
-                    tickers = [str(ticker).strip() for ticker in tickers if str(ticker).strip()]
-                    print(f"Scraped {len(tickers)} tickers for {benchmark.name} from Wikipedia")
+                    tickers = [
+                        str(ticker).strip() for ticker in tickers if str(ticker).strip()
+                    ]
+                    print(
+                        f"Scraped {len(tickers)} tickers for {benchmark.name} from Wikipedia"
+                    )
                     return tickers
 
             print(f"Could not find symbol table for {benchmark.name} on Wikipedia")

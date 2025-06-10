@@ -27,7 +27,10 @@ class TransactionCost:
 
         cost_multiple = self.get_cost_multiple(volume, shares, execution_time_days)
         total_cost = sum(
-            [abs(val) * price[ticker] * cost_multiple[ticker] for ticker, val in shares.items()]
+            [
+                abs(val) * price[ticker] * cost_multiple[ticker]
+                for ticker, val in shares.items()
+            ]
         )
         return total_cost
 
@@ -53,7 +56,6 @@ class TransactionCost:
         return total_cost_multiple.to_dict()
 
     def get_liquidity_factor(self, volume):
-        # Static liquidity factor based on volume levels
         volume_liquidity_map = {
             (0, 100_000): 2.0,
             (100_000, 500_000): 1.5,

@@ -1,9 +1,23 @@
-from config import DEFAULT_BACKTEST_PARAMS, INITIAL_SETUP, Benchmarks, Strategies
+from config import (
+    DEFAULT_BACKTEST_PARAMS,
+    INITIAL_SETUP,
+    Benchmarks,
+    CapitalGrowthFrequency,
+    InitialSetup,
+    Strategies,
+)
 
 
 class Scenario:
     def __init__(
-        self, name, strategies, start_date, end_date, constraints, additional_setup, benchmark
+        self,
+        name,
+        strategies,
+        start_date,
+        end_date,
+        constraints,
+        additional_setup,
+        benchmark,
     ):
         self.name = name
         self.strategies = strategies
@@ -25,7 +39,7 @@ scenario_1 = Scenario(
         Strategies.MACD_CROSSOVER,
         Strategies.RSI_CROSSOVER,
         Strategies.BOLLINGER_BANDS,
-        Strategies.RSI_CROSSOVER,
+        Strategies.Z_SCORE_MEAN_REVERSION,
     ],
     start_date="2015-01-01",
     end_date="2025-06-01",
@@ -55,10 +69,45 @@ scenario_2 = Scenario(
 # for testing
 scenario_3 = Scenario(
     name="sp500_3yrs_unconstrained_no_short_macd",
-    strategies=[Strategies.MACD_CROSSOVER],
+    strategies=[
+        Strategies.MACD_CROSSOVER,
+        Strategies.RSI_CROSSOVER,
+        Strategies.BOLLINGER_BANDS,
+        Strategies.Z_SCORE_MEAN_REVERSION,
+    ],
     start_date="2022-01-01",
     end_date="2025-06-01",
     constraints=DEFAULT_BACKTEST_PARAMS["constraints"],
     additional_setup=INITIAL_SETUP,
+    benchmark=Benchmarks.SP500,
+)
+
+
+# Test scenarios to demonstrate capital growth configurations
+scenario_no_capital_growth = Scenario(
+    name="test_no_capital_growth",
+    strategies=[Strategies.MACD_CROSSOVER],
+    start_date="2025-02-01",
+    end_date="2025-06-01",
+    constraints=DEFAULT_BACKTEST_PARAMS["constraints"],
+    additional_setup=InitialSetup(
+        initial_capital=10,
+        new_capital_growth_amt=0,  # No capital growth
+        capital_growth_freq=CapitalGrowthFrequency.MONTHLY.value,
+    ).to_dict(),
+    benchmark=Benchmarks.SP500,
+)
+
+scenario_with_capital_growth = Scenario(
+    name="test_with_10k_daily_capital_growth",
+    strategies=[Strategies.MACD_CROSSOVER],
+    start_date="2025-02-01",
+    end_date="2025-06-01",
+    constraints=DEFAULT_BACKTEST_PARAMS["constraints"],
+    additional_setup=InitialSetup(
+        initial_capital=100_000,
+        new_capital_growth_amt=10_000,  # $10k capital growth
+        capital_growth_freq=CapitalGrowthFrequency.DAILY.value,  # Daily
+    ).to_dict(),
     benchmark=Benchmarks.SP500,
 )

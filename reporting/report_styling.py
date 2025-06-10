@@ -258,7 +258,8 @@ class ReportStyling:
             # Set professional matplotlib styling
             self.setup_matplotlib_style()
 
-            fig, ax = plt.subplots(figsize=(10, 7))
+            # Reduce chart size to accommodate crisis legend below
+            fig, ax = plt.subplots(figsize=(10, 5.5))
             fig.patch.set_facecolor("white")
 
             # Get data from either direct dict or metrics lookup
@@ -318,7 +319,9 @@ class ReportStyling:
                     returns_data = metrics[data_key]
 
                     # Handle different data structures for returns
-                    if hasattr(returns_data, "keys") and hasattr(returns_data, "values"):
+                    if hasattr(returns_data, "keys") and hasattr(
+                        returns_data, "values"
+                    ):
                         # This is a dict-like structure
                         if graph_type == "Y":
                             # For yearly returns, keys should be years
@@ -331,7 +334,9 @@ class ReportStyling:
                     else:
                         if graph_type == "Y":
                             dates_or_years = (
-                                list(returns_data.index) if hasattr(returns_data, "index") else []
+                                list(returns_data.index)
+                                if hasattr(returns_data, "index")
+                                else []
                             )
                             values = (
                                 [float(r) * 100 for r in returns_data]
@@ -382,19 +387,25 @@ class ReportStyling:
                         if isinstance(first_item, (int, np.integer)):
                             # Plot as sequential data
                             ax.plot(range(len(values)), values, **plot_kwargs)
-                            ax.set_xlabel("Period", fontsize=14, color=Colors.CHART_CHARCOAL)
+                            ax.set_xlabel(
+                                "Period", fontsize=14, color=Colors.CHART_CHARCOAL
+                            )
                             date_formatting_needed = False
                         else:
                             # Try to convert to datetime if it's not already
                             try:
-                                if not hasattr(first_item, "year"):  # Not already a datetime
+                                if not hasattr(
+                                    first_item, "year"
+                                ):  # Not already a datetime
                                     dates_or_years = pd.to_datetime(dates_or_years)
                                 ax.plot(dates_or_years, values, **plot_kwargs)
                                 date_formatting_needed = True
                             except:
                                 # If datetime conversion fails, plot as sequential
                                 ax.plot(range(len(values)), values, **plot_kwargs)
-                                ax.set_xlabel("Period", fontsize=14, color=Colors.CHART_CHARCOAL)
+                                ax.set_xlabel(
+                                    "Period", fontsize=14, color=Colors.CHART_CHARCOAL
+                                )
                                 date_formatting_needed = False
                     else:
                         # Empty data
@@ -402,7 +413,9 @@ class ReportStyling:
 
                 # Add zero line for returns charts
                 if add_zero_line:
-                    ax.axhline(y=0, color=Colors.CHART_CHARCOAL, linestyle="--", alpha=0.5)
+                    ax.axhline(
+                        y=0, color=Colors.CHART_CHARCOAL, linestyle="--", alpha=0.5
+                    )
 
                     # Add financial crisis overlays if requested
                 crisis_overlays = []
@@ -413,7 +426,9 @@ class ReportStyling:
                         date_range = (df.index.min(), df.index.max())
                     else:
                         # Only create date range if we have actual datetime objects
-                        if len(dates_or_years) > 0 and hasattr(dates_or_years[0], "year"):
+                        if len(dates_or_years) > 0 and hasattr(
+                            dates_or_years[0], "year"
+                        ):
                             date_range = (min(dates_or_years), max(dates_or_years))
 
                     # Only add overlays if we have a valid date range
@@ -427,22 +442,34 @@ class ReportStyling:
                     ax.yaxis.set_major_formatter(y_formatter)
 
                 # Date formatting - only apply if we have actual dates
-                if data_dict is not None or (data_key is not None and date_formatting_needed):
+                if data_dict is not None or (
+                    data_key is not None and date_formatting_needed
+                ):
                     if date_format == "%Y":
                         # For annual data, show every year if there are few years
                         if data_dict is not None:
                             years_span = (df.index.max() - df.index.min()).days / 365.25
                         else:
-                            years_span = len(dates_or_years) if len(dates_or_years) < 20 else 20
-                        year_interval = max(1, int(years_span / 10)) if years_span > 10 else 1
-                        ax.xaxis.set_major_locator(mdates.YearLocator(base=year_interval))
+                            years_span = (
+                                len(dates_or_years) if len(dates_or_years) < 20 else 20
+                            )
+                        year_interval = (
+                            max(1, int(years_span / 10)) if years_span > 10 else 1
+                        )
+                        ax.xaxis.set_major_locator(
+                            mdates.YearLocator(base=year_interval)
+                        )
                         ax.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
                     elif date_format == "%Y-%m":
-                        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
+                        ax.xaxis.set_major_locator(
+                            mdates.MonthLocator(interval=interval)
+                        )
                         ax.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
                     elif date_format in ["%Y-%q", "%Y-Q%q"]:  # Handle quarterly format
                         ax.xaxis.set_major_locator(
-                            mdates.MonthLocator(bymonth=[1, 4, 7, 10], interval=interval)
+                            mdates.MonthLocator(
+                                bymonth=[1, 4, 7, 10], interval=interval
+                            )
                         )
 
                         # Use quarterly months formatter - will show as Q1, Q2, Q3, Q4
@@ -451,7 +478,9 @@ class ReportStyling:
                             quarter = (date.month - 1) // 3 + 1
                             return f"{date.year}-Q{quarter}"
 
-                        ax.xaxis.set_major_formatter(plt.FuncFormatter(quarter_formatter))
+                        ax.xaxis.set_major_formatter(
+                            plt.FuncFormatter(quarter_formatter)
+                        )
                     elif date_format == "%Y-%m-%d":
                         ax.xaxis.set_major_locator(mdates.DayLocator(interval=interval))
                         ax.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
@@ -476,18 +505,27 @@ class ReportStyling:
                         crisis_labels.append(crisis_info["name"])
 
                     if crisis_handles:
-                        # Add crisis legend in upper right corner with consistent styling
+                        # Add crisis legend below the chart with proper spacing
                         crisis_legend = ax.legend(
                             crisis_handles,
                             crisis_labels,
-                            loc="upper right",
-                            fontsize=12,  # Match other legends
+                            bbox_to_anchor=(
+                                0.5,
+                                -0.15,
+                            ),  # Centered below chart with adequate spacing
+                            loc="upper center",
+                            ncol=min(
+                                len(crisis_handles), 3
+                            ),  # Max 3 columns to prevent overcrowding
+                            fontsize=8,  # Smaller font to fit better
                             title="Financial Events",
-                            title_fontsize=12,  # Match other legends
-                            framealpha=1.0,  # Match other legends
+                            title_fontsize=9,
+                            framealpha=1.0,
                             frameon=True,
-                            fancybox=False,  # Match other legends
-                            shadow=False,  # Match other legends
+                            fancybox=False,
+                            shadow=False,
+                            columnspacing=0.8,  # Reduce space between columns
+                            handletextpad=0.5,  # Reduce space between legend marker and text
                         )
             else:
                 # No data available
@@ -522,7 +560,13 @@ class ReportStyling:
             ax.grid(True, alpha=0.3, color=Colors.CHART_MEDIUM_GRAY)
             ax.set_facecolor(Colors.CHART_LIGHT_GRAY)
 
-            plt.tight_layout(pad=1.0)
+            # Adjust layout to accommodate crisis legend if present
+            if crisis_overlays:
+                plt.tight_layout(
+                    pad=1.0, rect=[0, 0.12, 1, 1]
+                )  # Leave space at bottom for legend
+            else:
+                plt.tight_layout(pad=1.0)
 
             buffer = BytesIO()
             fig.savefig(
@@ -575,7 +619,11 @@ class ReportStyling:
             fig.patch.set_facecolor("white")
 
             # Check if data exists
-            if data_key in metrics and metrics[data_key] is not None and len(metrics[data_key]) > 0:
+            if (
+                data_key in metrics
+                and metrics[data_key] is not None
+                and len(metrics[data_key]) > 0
+            ):
                 returns_data = metrics[data_key]
                 if hasattr(returns_data, "values"):
                     returns = [float(r) * 100 for r in returns_data.values]
@@ -597,7 +645,7 @@ class ReportStyling:
                     edgecolor=Colors.CHART_CHARCOAL,
                     linewidth=0.5,
                 )
-                
+
                 # Add vertical lines for mean and median
                 ax.axvline(
                     mean_val,
@@ -616,7 +664,9 @@ class ReportStyling:
 
                 # Format axis labels based on data type
                 data_type = data_key.replace("_returns", "").title()
-                ax.set_xlabel(f"{data_type} Return (%)", fontsize=14, color=Colors.CHART_CHARCOAL)
+                ax.set_xlabel(
+                    f"{data_type} Return (%)", fontsize=14, color=Colors.CHART_CHARCOAL
+                )
                 ax.set_ylabel("Frequency", fontsize=14, color=Colors.CHART_CHARCOAL)
                 ax.tick_params(colors=Colors.CHART_CHARCOAL)
                 ax.grid(True, alpha=0.3, color=Colors.CHART_MEDIUM_GRAY)
@@ -624,18 +674,30 @@ class ReportStyling:
 
                 # Create custom legend entries for statistics
                 import matplotlib.patches as mpatches
-                
+
                 # Create invisible patches for statistics in legend
-                std_patch = mpatches.Patch(color='none', label=f"Std Dev: {std_val:.2f}%")
-                skew_patch = mpatches.Patch(color='none', label=f"Skewness: {skew_val:.2f}")
-                kurt_patch = mpatches.Patch(color='none', label=f"Kurtosis: {kurt_val:.2f}")
+                std_patch = mpatches.Patch(
+                    color="none", label=f"Std Dev: {std_val:.2f}%"
+                )
+                skew_patch = mpatches.Patch(
+                    color="none", label=f"Skewness: {skew_val:.2f}"
+                )
+                kurt_patch = mpatches.Patch(
+                    color="none", label=f"Kurtosis: {kurt_val:.2f}"
+                )
 
                 # Get existing legend handles and labels
                 handles, labels = ax.get_legend_handles_labels()
-                
+
                 # Add statistics to legend
                 handles.extend([std_patch, skew_patch, kurt_patch])
-                labels.extend([f"Std Dev: {std_val:.2f}%", f"Skewness: {skew_val:.2f}", f"Kurtosis: {kurt_val:.2f}"])
+                labels.extend(
+                    [
+                        f"Std Dev: {std_val:.2f}%",
+                        f"Skewness: {skew_val:.2f}",
+                        f"Kurtosis: {kurt_val:.2f}",
+                    ]
+                )
 
                 # Enhanced legend with all statistics
                 legend = ax.legend(
@@ -643,9 +705,9 @@ class ReportStyling:
                     labels,
                     frameon=True,
                     fancybox=False,  # Match other legends
-                    shadow=False,   # Match other legends
-                    fontsize=12,    # Match other legends
-                    loc='best'
+                    shadow=False,  # Match other legends
+                    fontsize=12,  # Match other legends
+                    loc="best",
                 )
             else:
                 no_data_message = f"No {data_key.replace('_', ' ')} data available"
@@ -804,7 +866,12 @@ class ReportStyling:
                 else:
                     # No non-zero data
                     ax.text(
-                        0.5, 0.5, no_data_message, transform=ax.transAxes, ha="center", va="center"
+                        0.5,
+                        0.5,
+                        no_data_message,
+                        transform=ax.transAxes,
+                        ha="center",
+                        va="center",
                     )
                     if title:
                         ax.set_title(
@@ -814,7 +881,14 @@ class ReportStyling:
                         )
             else:
                 # No data at all
-                ax.text(0.5, 0.5, no_data_message, transform=ax.transAxes, ha="center", va="center")
+                ax.text(
+                    0.5,
+                    0.5,
+                    no_data_message,
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="center",
+                )
                 if title:
                     ax.set_title(
                         title,
@@ -871,7 +945,9 @@ class ReportStyling:
             self.setup_matplotlib_style(legend_fontsize=11)
 
             # Increase height slightly for better utilization
-            enhanced_figsize = (figsize[0], figsize[1] + 1) if len(figsize) == 2 else (10, 6)
+            enhanced_figsize = (
+                (figsize[0], figsize[1] + 1) if len(figsize) == 2 else (10, 6)
+            )
             fig, ax = plt.subplots(figsize=enhanced_figsize)
             fig.patch.set_facecolor("white")
             if data_df is not None and len(data_df) > 0 and len(data_df.columns) > 0:
@@ -898,7 +974,9 @@ class ReportStyling:
                     )
 
                 # Adapt date format based on data density
-                if date_format == "%Y-%m" and len(data_df) <= 7:  # Less than a week of data
+                if (
+                    date_format == "%Y-%m" and len(data_df) <= 7
+                ):  # Less than a week of data
                     date_format = "%Y-%m-%d"
                     ax.xaxis.set_major_locator(mdates.DayLocator(interval=interval))
                 elif date_format == "%Y-%q" and len(data_df.resample("Q").last()) <= 1:
@@ -920,7 +998,9 @@ class ReportStyling:
                         quarter = (date.month - 1) // 3 + 1
                         return f"{date.year}-Q{quarter}"
 
-                    ax.xaxis.set_major_formatter(plt.FuncFormatter(quarter_formatter_multi))
+                    ax.xaxis.set_major_formatter(
+                        plt.FuncFormatter(quarter_formatter_multi)
+                    )
                 else:
                     ax.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
                 ax.set_ylabel(y_label, fontsize=14, color=Colors.CHART_CHARCOAL)
@@ -1030,12 +1110,23 @@ class ReportStyling:
                         whiskerprops=dict(color=Colors.CHART_NAVY),
                         capprops=dict(color=Colors.CHART_NAVY),
                         flierprops=dict(
-                            marker="o", markerfacecolor=Colors.CHART_RED, markersize=6, alpha=0.5
+                            marker="o",
+                            markerfacecolor=Colors.CHART_RED,
+                            markersize=6,
+                            alpha=0.5,
                         ),
                     )
 
                     ax.set_ylabel(y_label, fontsize=14, fontweight="bold")
+
+                    # Rotate and align x-axis labels properly
                     ax.tick_params(axis="x", rotation=45)
+                    plt.setp(
+                        ax.get_xticklabels(),
+                        rotation=45,
+                        ha="right",
+                        rotation_mode="anchor",
+                    )
 
                     # Add grid
                     ax.grid(True, alpha=0.3)
@@ -1044,12 +1135,135 @@ class ReportStyling:
                         ax.set_title(title, fontsize=16, fontweight="bold", pad=20)
                 else:
                     ax.text(
-                        0.5, 0.5, no_data_message, transform=ax.transAxes, ha="center", va="center"
+                        0.5,
+                        0.5,
+                        no_data_message,
+                        transform=ax.transAxes,
+                        ha="center",
+                        va="center",
                     )
                     if title:
                         ax.set_title(title, fontsize=14, fontweight="bold")
             else:
-                ax.text(0.5, 0.5, no_data_message, transform=ax.transAxes, ha="center", va="center")
+                ax.text(
+                    0.5,
+                    0.5,
+                    no_data_message,
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="center",
+                )
+                if title:
+                    ax.set_title(title, fontsize=14, fontweight="bold")
+
+            plt.tight_layout(pad=1.0)
+
+            buffer = BytesIO()
+            fig.savefig(buffer, format="png", dpi=self.dpi, bbox_inches="tight")
+            buffer.seek(0)
+            plt.close()
+
+            return buffer
+        except Exception as e:
+            plt.close()
+            chart_name = title.lower() if title else "chart"
+            if normal_style:
+                return Paragraph(f"Error creating {chart_name}: {str(e)}", normal_style)
+            else:
+                return f"Error creating {chart_name}: {str(e)}"
+
+    def create_generic_scatter_plot(
+        self,
+        data_df,
+        x_column,
+        y_column,
+        color_column=None,
+        title=None,
+        x_label="X-axis",
+        y_label="Y-axis",
+        figsize=(10, 6),
+        no_data_message="No data available",
+        normal_style=None,
+    ):
+        """
+        Create a generic scatter plot chart
+
+        Parameters:
+        - data_df: DataFrame with data for plotting
+        - x_column: Column name for x-axis values
+        - y_column: Column name for y-axis values
+        - color_column: Column name for color grouping (optional)
+        - title: Chart title
+        - x_label: X-axis label
+        - y_label: Y-axis label
+        - figsize: Figure size tuple
+        - no_data_message: Message to display when no data is available
+        - normal_style: Text style for error messages
+        """
+        try:
+            self.setup_matplotlib_style()
+            fig, ax = plt.subplots(figsize=figsize)
+
+            if data_df is not None and len(data_df) > 0:
+                if color_column and color_column in data_df.columns:
+                    # Color by category (e.g., sector)
+                    unique_categories = data_df[color_column].dropna().unique()
+                    colors = self.multi_color_theme(
+                        np.linspace(0, 1, len(unique_categories))
+                    )
+
+                    for i, category in enumerate(unique_categories):
+                        category_data = data_df[data_df[color_column] == category]
+                        ax.scatter(
+                            category_data[x_column],
+                            category_data[y_column],
+                            c=[colors[i]],
+                            label=category,
+                            alpha=0.7,
+                            s=60,
+                            edgecolors="black",
+                            linewidth=0.5,
+                        )
+
+                    # Add legend
+                    ax.legend(
+                        bbox_to_anchor=(1.05, 1),
+                        loc="upper left",
+                        frameon=True,
+                        fancybox=True,
+                        shadow=True,
+                        facecolor=Colors.CHART_WHITE,
+                        edgecolor=Colors.CHART_BLUE,
+                    )
+                else:
+                    # Single color scatter plot
+                    ax.scatter(
+                        data_df[x_column],
+                        data_df[y_column],
+                        c=Colors.CHART_BLUE,
+                        alpha=0.7,
+                        s=60,
+                        edgecolors="black",
+                        linewidth=0.5,
+                    )
+
+                ax.set_xlabel(x_label, fontsize=14, fontweight="bold")
+                ax.set_ylabel(y_label, fontsize=14, fontweight="bold")
+
+                # Add grid
+                ax.grid(True, alpha=0.3)
+
+                if title:
+                    ax.set_title(title, fontsize=16, fontweight="bold", pad=20)
+            else:
+                ax.text(
+                    0.5,
+                    0.5,
+                    no_data_message,
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="center",
+                )
                 if title:
                     ax.set_title(title, fontsize=14, fontweight="bold")
 
@@ -1137,6 +1351,7 @@ class ReportStyling:
         """
         try:
             self.setup_matplotlib_style()
+
             fig, ax1 = plt.subplots(figsize=figsize)
 
             # Prepare data for left axis
@@ -1159,7 +1374,12 @@ class ReportStyling:
 
             if not has_left_data and not has_right_data:
                 ax1.text(
-                    0.5, 0.5, no_data_message, transform=ax1.transAxes, ha="center", va="center"
+                    0.5,
+                    0.5,
+                    no_data_message,
+                    transform=ax1.transAxes,
+                    ha="center",
+                    va="center",
                 )
                 if title:
                     ax1.set_title(title, fontsize=16, fontweight="bold", pad=20)
@@ -1175,11 +1395,15 @@ class ReportStyling:
 
             # Plot left axis data
             if has_left_data:
-                df_left = pd.DataFrame(list(left_data.items()), columns=["date", "value"])
+                df_left = pd.DataFrame(
+                    list(left_data.items()), columns=["date", "value"]
+                )
                 df_left["date"] = pd.to_datetime(
                     df_left["date"], format="%Y-%m-%d", errors="coerce"
                 )
-                df_left = df_left.dropna(subset=["date"])  # Remove any failed conversions
+                df_left = df_left.dropna(
+                    subset=["date"]
+                )  # Remove any failed conversions
                 df_left = df_left.sort_values("date")
                 df_left.set_index("date", inplace=True)
 
@@ -1201,16 +1425,22 @@ class ReportStyling:
                     marker=left_marker,
                     label=left_y_label,
                 )
-                ax1.set_ylabel(left_y_label, color=left_color, fontsize=14, fontweight="bold")
+                ax1.set_ylabel(
+                    left_y_label, color=left_color, fontsize=14, fontweight="bold"
+                )
                 ax1.tick_params(axis="y", labelcolor=left_color)
 
             # Plot right axis data
             if has_right_data:
-                df_right = pd.DataFrame(list(right_data.items()), columns=["date", "value"])
+                df_right = pd.DataFrame(
+                    list(right_data.items()), columns=["date", "value"]
+                )
                 df_right["date"] = pd.to_datetime(
                     df_right["date"], format="%Y-%m-%d", errors="coerce"
                 )
-                df_right = df_right.dropna(subset=["date"])  # Remove any failed conversions
+                df_right = df_right.dropna(
+                    subset=["date"]
+                )  # Remove any failed conversions
                 df_right = df_right.sort_values("date")
                 df_right.set_index("date", inplace=True)
 
@@ -1232,8 +1462,13 @@ class ReportStyling:
                     marker=right_marker,
                     label=right_y_label,
                 )
-                ax2.set_ylabel(right_y_label, color=right_color, fontsize=14, fontweight="bold")
+                ax2.set_ylabel(
+                    right_y_label, color=right_color, fontsize=14, fontweight="bold"
+                )
                 ax2.tick_params(axis="y", labelcolor=right_color)
+
+            # Initialize crisis_patches outside the conditional block
+            crisis_patches = []
 
             # Format x-axis
             if has_left_data or has_right_data:
@@ -1248,22 +1483,31 @@ class ReportStyling:
                     date_range = (min(all_dates), max(all_dates))
 
                     # Add crisis overlays
-                    crisis_patches = []
                     if show_crisis_periods:
-                        crisis_patches = self.add_crisis_overlays(ax1, date_range, add_legend=False)
+                        crisis_patches = self.add_crisis_overlays(
+                            ax1, date_range, add_legend=False
+                        )
 
                     # Format dates
                     if graph_type == "M":
-                        ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
+                        ax1.xaxis.set_major_locator(
+                            mdates.MonthLocator(interval=interval)
+                        )
                         ax1.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
                     elif graph_type == "Q":
-                        ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=3 * interval))
+                        ax1.xaxis.set_major_locator(
+                            mdates.MonthLocator(interval=3 * interval)
+                        )
                         ax1.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
                     elif graph_type == "Y":
-                        ax1.xaxis.set_major_locator(mdates.YearLocator(interval=interval))
+                        ax1.xaxis.set_major_locator(
+                            mdates.YearLocator(interval=interval)
+                        )
                         ax1.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
                     else:  # Daily
-                        ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
+                        ax1.xaxis.set_major_locator(
+                            mdates.MonthLocator(interval=interval)
+                        )
                         ax1.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
 
             # Add right axis zero line if requested
@@ -1273,8 +1517,12 @@ class ReportStyling:
             # Add bar chart if provided
             if bar_data_dict and len(bar_data_dict) > 0:
                 # Prepare bar data
-                df_bar = pd.DataFrame(list(bar_data_dict.items()), columns=["date", "value"])
-                df_bar["date"] = pd.to_datetime(df_bar["date"], format="%Y-%m-%d", errors="coerce")
+                df_bar = pd.DataFrame(
+                    list(bar_data_dict.items()), columns=["date", "value"]
+                )
+                df_bar["date"] = pd.to_datetime(
+                    df_bar["date"], format="%Y-%m-%d", errors="coerce"
+                )
                 df_bar = df_bar.dropna(subset=["date"])
                 df_bar = df_bar.sort_values("date")
                 df_bar.set_index("date", inplace=True)
@@ -1292,7 +1540,9 @@ class ReportStyling:
                 if has_left_data:
                     left_values = df_left["value"].values
                     bar_bottom = min(left_values) * bar_position_ratio
-                    bar_height_scale = (max(left_values) - min(left_values)) * bar_height_ratio
+                    bar_height_scale = (
+                        max(left_values) - min(left_values)
+                    ) * bar_height_ratio
                 else:
                     # Fallback positioning if no left axis data
                     bar_bottom = 0
@@ -1304,10 +1554,10 @@ class ReportStyling:
                     min_bar_value = df_bar["value"].min()
 
                     if max_bar_value > 0:
-                        normalized_bars = (df_bar["value"] / max_bar_value) * bar_height_scale
-                        bar_legend_label = (
-                            f"{bar_label} (Min: {int(min_bar_value)}, Max: {int(max_bar_value)})"
-                        )
+                        normalized_bars = (
+                            df_bar["value"] / max_bar_value
+                        ) * bar_height_scale
+                        bar_legend_label = f"{bar_label} (Min: {int(min_bar_value)}, Max: {int(max_bar_value)})"
 
                         bars = ax1.bar(
                             df_bar.index,
@@ -1330,7 +1580,7 @@ class ReportStyling:
 
             # Create separate crisis legend first if we have crisis overlays
             crisis_legend = None
-            if show_crisis_periods and "crisis_patches" in locals() and crisis_patches:
+            if show_crisis_periods and crisis_patches:
                 import matplotlib.patches as mpatches
 
                 crisis_handles = []
@@ -1347,25 +1597,36 @@ class ReportStyling:
                     crisis_labels.append(crisis_info["name"])
 
                 if crisis_handles:
-                    # Add crisis legend in upper right corner with same style as main legend
+                    # Add crisis legend below the chart with proper spacing
                     crisis_legend = ax1.legend(
                         crisis_handles,
                         crisis_labels,
-                        loc="upper right",
-                        fontsize=12,  # Match main legend font size
+                        bbox_to_anchor=(
+                            0.5,
+                            -0.15,
+                        ),  # Centered below chart with adequate spacing
+                        loc="upper center",
+                        ncol=min(
+                            len(crisis_handles), 3
+                        ),  # Max 3 columns to prevent overcrowding
+                        fontsize=8,  # Smaller font to fit better
                         title="Financial Events",
-                        title_fontsize=12,  # Match main legend style
-                        framealpha=1.0,  # Match main legend opacity
+                        title_fontsize=9,
+                        framealpha=1.0,
                         frameon=True,
-                        fancybox=False,  # Match main legend style
-                        shadow=False,  # Match main legend style
+                        fancybox=False,
+                        shadow=False,
+                        columnspacing=0.8,  # Reduce space between columns
+                        handletextpad=0.5,  # Reduce space between legend marker and text
                     )
 
             # Create main legend for data (left side)
             lines1, labels1 = ax1.get_legend_handles_labels()
             lines2, labels2 = ax2.get_legend_handles_labels()
             if lines1 or lines2:
-                main_legend = ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=12)
+                main_legend = ax1.legend(
+                    lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=12
+                )
                 # If we created a crisis legend, add it back as an artist so both legends show
                 if crisis_legend:
                     ax1.add_artist(crisis_legend)
@@ -1376,7 +1637,13 @@ class ReportStyling:
             # Add grid
             ax1.grid(True, alpha=0.3)
 
-            plt.tight_layout()
+            # Adjust layout to accommodate crisis legend if present
+            if crisis_legend:
+                plt.tight_layout(
+                    rect=[0, 0.12, 1, 1]
+                )  # Leave space at bottom for legend
+            else:
+                plt.tight_layout()
 
             buffer = BytesIO()
             fig.savefig(buffer, format="png", dpi=self.dpi, bbox_inches="tight")
@@ -1425,13 +1692,22 @@ class ReportStyling:
             # Special formatting for portfolio configuration
             if isinstance(value, list) and len(value) == 0:
                 formatted_value = "None"
-            elif isinstance(value, list) and all(isinstance(item, Enum) for item in value):
+            elif isinstance(value, list) and all(
+                isinstance(item, Enum) for item in value
+            ):
                 formatted_value = ", ".join([vv.value for vv in value])
             elif isinstance(value, list):
                 formatted_value = ", ".join(str(v) for v in value) if value else "None"
             elif key == "allow_short":
                 formatted_value = "Not allowed" if not value else "Allowed"
-            elif key in ["min_market_cap", "max_market_cap", "initial_capital"]:
+            elif isinstance(value, bool):
+                formatted_value = "Yes" if value else "No"
+            elif key in [
+                "min_market_cap",
+                "max_market_cap",
+                "initial_capital",
+                "new_capital_growth_amt",
+            ]:
                 if key == "max_market_cap" and value == np.inf:
                     formatted_value = "Uncapped"
                 elif value is not None and isinstance(value, (int, float)):
@@ -1442,6 +1718,7 @@ class ReportStyling:
                 "initial_capital",
                 "min_market_cap",
                 "max_market_cap",
+                "new_capital_growth_amt",
                 "Overall Sharpe Ratio",
             ]:
                 formatted_value = f"{value:.2%}"
@@ -1578,6 +1855,11 @@ class StyleUtility:
             [
                 ("LINEBELOW", (0, 0), (-1, -1), 1.5, Colors.NAVY_BLUE),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 0),  # Keep minimal for tight line
-                ("TOPPADDING", (0, 0), (-1, -1), -5),  # Small negative to bring line close to title
+                (
+                    "TOPPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    -5,
+                ),  # Small negative to bring line close to title
             ]
         )

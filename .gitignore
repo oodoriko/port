@@ -7,3 +7,4 @@ reports/
 temp/
 .DS_Store
 gitignore
+*.toml
