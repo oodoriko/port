@@ -30,4 +30,8 @@ TODO:
 
 1. A cost model dependent on prev day volume -> done
 2. Shares -> done
-3. add capital, fracitional shares (divide capital across shares)
+3. add capital, fracitional shares (divide capital across shares) -> DONE
+4. FIX GRAPH STYLING
+5. CEHCK NUMBER
+6. SET UP GRID SEARCH
+7. SET UP GRID SESARH REP -> TEXT
