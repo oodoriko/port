@@ -1,6 +1,7 @@
 __pycache__/
 .venv/
 .vscode/
+*.pdf
 data_cache/
 backtesting/portfolio_cache/
 reports/
