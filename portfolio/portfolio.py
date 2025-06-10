@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from config import INITIAL_SETUP, SIMPLE_CONSTRAINTS, Benchmarks
+from config import DEFAULT_PORTFOLIO_SETUP, SIMPLE_CONSTRAINTS, Benchmarks
 from data.data import BenchmarkData, PriceData, ProductData, get_prices_by_dates
 from portfolio.constraints import Constraints
 from portfolio.cost import TransactionCost
@@ -16,7 +16,7 @@ class Portfolio:
         name: Optional[str] = None,
         benchmark: Benchmarks = Benchmarks.SP500,
         constraints: Dict = SIMPLE_CONSTRAINTS,
-        additional_setup: Dict = INITIAL_SETUP,
+        additional_setup: Dict = DEFAULT_PORTFOLIO_SETUP,
     ):
         self.name = name
         self.benchmark = benchmark
@@ -31,9 +31,7 @@ class Portfolio:
 
         # Data
         self.universe, self.product_data = self._initialize_universe()
-        self.open_prices, self.close_prices, self.volumes = (
-            self._initialize_price_data()
-        )
+        self.open_prices, self.close_prices, self.volumes = self._initialize_price_data()
         self._setup_constraints_data()
 
         # Trading history tracking
@@ -56,8 +54,7 @@ class Portfolio:
             sector.value for sector in self.constraints.constraints["exclude_sectors"]
         ]
         include_countries = [
-            country.value
-            for country in self.constraints.constraints["include_countries"]
+            country.value for country in self.constraints.constraints["include_countries"]
         ]
 
         sector_filter = ~product_data.sector.isin(exclude_sectors)
@@ -109,9 +106,7 @@ class Portfolio:
             price_data, end_date, start_date, lookback_window, lookahead_window
         )
 
-    def trade(
-        self, date: np.datetime64, trades: List[int], trading_plan: Dict[str, int]
-    ) -> None:
+    def trade(self, date: np.datetime64, trades: List[int], trading_plan: Dict[str, int]) -> None:
         if not self._can_execute_trades(trades):
             self.trading_status[date] = -1
             return
@@ -139,9 +134,7 @@ class Portfolio:
         )
 
         # Update portfolio state
-        self._update_portfolio_state(
-            date, shares_to_be_traded, new_holdings, executed_trading_plan
-        )
+        self._update_portfolio_state(date, shares_to_be_traded, new_holdings, executed_trading_plan)
 
     def trade_batch(self, trading_plan: pd.DataFrame) -> None:
         for date in trading_plan.index:
@@ -151,9 +144,7 @@ class Portfolio:
             self.trade(date, trades, trading_plan_dict)
 
     def _can_execute_trades(self, trades: List[int]) -> bool:
-        positions_size = (
-            len(self.universe) if len(self.holdings) == 0 else len(self.holdings)
-        )
+        positions_size = len(self.universe) if len(self.holdings) == 0 else len(self.holdings)
         max_holdings = len(self.universe)
 
         return self.constraints.evaluate_trades(trades, positions_size, max_holdings)

@@ -319,9 +319,7 @@ class ReportStyling:
                     returns_data = metrics[data_key]
 
                     # Handle different data structures for returns
-                    if hasattr(returns_data, "keys") and hasattr(
-                        returns_data, "values"
-                    ):
+                    if hasattr(returns_data, "keys") and hasattr(returns_data, "values"):
                         # This is a dict-like structure
                         if graph_type == "Y":
                             # For yearly returns, keys should be years
@@ -334,9 +332,7 @@ class ReportStyling:
                     else:
                         if graph_type == "Y":
                             dates_or_years = (
-                                list(returns_data.index)
-                                if hasattr(returns_data, "index")
-                                else []
+                                list(returns_data.index) if hasattr(returns_data, "index") else []
                             )
                             values = (
                                 [float(r) * 100 for r in returns_data]
@@ -387,25 +383,19 @@ class ReportStyling:
                         if isinstance(first_item, (int, np.integer)):
                             # Plot as sequential data
                             ax.plot(range(len(values)), values, **plot_kwargs)
-                            ax.set_xlabel(
-                                "Period", fontsize=14, color=Colors.CHART_CHARCOAL
-                            )
+                            ax.set_xlabel("Period", fontsize=14, color=Colors.CHART_CHARCOAL)
                             date_formatting_needed = False
                         else:
                             # Try to convert to datetime if it's not already
                             try:
-                                if not hasattr(
-                                    first_item, "year"
-                                ):  # Not already a datetime
+                                if not hasattr(first_item, "year"):  # Not already a datetime
                                     dates_or_years = pd.to_datetime(dates_or_years)
                                 ax.plot(dates_or_years, values, **plot_kwargs)
                                 date_formatting_needed = True
                             except:
                                 # If datetime conversion fails, plot as sequential
                                 ax.plot(range(len(values)), values, **plot_kwargs)
-                                ax.set_xlabel(
-                                    "Period", fontsize=14, color=Colors.CHART_CHARCOAL
-                                )
+                                ax.set_xlabel("Period", fontsize=14, color=Colors.CHART_CHARCOAL)
                                 date_formatting_needed = False
                     else:
                         # Empty data
@@ -413,11 +403,9 @@ class ReportStyling:
 
                 # Add zero line for returns charts
                 if add_zero_line:
-                    ax.axhline(
-                        y=0, color=Colors.CHART_CHARCOAL, linestyle="--", alpha=0.5
-                    )
+                    ax.axhline(y=0, color=Colors.CHART_CHARCOAL, linestyle="--", alpha=0.5)
 
-                    # Add financial crisis overlays if requested
+                # Add financial crisis overlays if requested
                 crisis_overlays = []
                 if show_crisis_periods and graph_type != "Y" and date_formatting_needed:
                     # Determine date range for filtering relevant crises
@@ -426,9 +414,7 @@ class ReportStyling:
                         date_range = (df.index.min(), df.index.max())
                     else:
                         # Only create date range if we have actual datetime objects
-                        if len(dates_or_years) > 0 and hasattr(
-                            dates_or_years[0], "year"
-                        ):
+                        if len(dates_or_years) > 0 and hasattr(dates_or_years[0], "year"):
                             date_range = (min(dates_or_years), max(dates_or_years))
 
                     # Only add overlays if we have a valid date range
@@ -442,34 +428,40 @@ class ReportStyling:
                     ax.yaxis.set_major_formatter(y_formatter)
 
                 # Date formatting - only apply if we have actual dates
-                if data_dict is not None or (
-                    data_key is not None and date_formatting_needed
-                ):
-                    if date_format == "%Y":
+                if data_dict is not None or (data_key is not None and date_formatting_needed):
+                    # Check data density after resampling to determine appropriate date locator
+                    total_data_points = 0
+                    if data_dict is not None:
+                        total_data_points = len(df)
+                    else:
+                        total_data_points = len(dates_or_years)
+
+                    # Check if data spans only one month
+                    if data_dict is not None:
+                        date_span_days = (df.index.max() - df.index.min()).days
+                    else:
+                        date_span_days = (max(dates_or_years) - min(dates_or_years)).days
+                    date_span_months = date_span_days / 30.0  # Approximate months
+
+                    if date_span_months <= 1.0:
+                        # Only one month of data - use daily locator
+                        ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+                        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+                    elif date_format == "%Y":
                         # For annual data, show every year if there are few years
                         if data_dict is not None:
                             years_span = (df.index.max() - df.index.min()).days / 365.25
                         else:
-                            years_span = (
-                                len(dates_or_years) if len(dates_or_years) < 20 else 20
-                            )
-                        year_interval = (
-                            max(1, int(years_span / 10)) if years_span > 10 else 1
-                        )
-                        ax.xaxis.set_major_locator(
-                            mdates.YearLocator(base=year_interval)
-                        )
+                            years_span = len(dates_or_years) if len(dates_or_years) < 20 else 20
+                        year_interval = max(1, int(years_span / 10)) if years_span > 10 else 1
+                        ax.xaxis.set_major_locator(mdates.YearLocator(base=year_interval))
                         ax.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
                     elif date_format == "%Y-%m":
-                        ax.xaxis.set_major_locator(
-                            mdates.MonthLocator(interval=interval)
-                        )
+                        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
                         ax.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
                     elif date_format in ["%Y-%q", "%Y-Q%q"]:  # Handle quarterly format
                         ax.xaxis.set_major_locator(
-                            mdates.MonthLocator(
-                                bymonth=[1, 4, 7, 10], interval=interval
-                            )
+                            mdates.MonthLocator(bymonth=[1, 4, 7, 10], interval=interval)
                         )
 
                         # Use quarterly months formatter - will show as Q1, Q2, Q3, Q4
@@ -478,9 +470,7 @@ class ReportStyling:
                             quarter = (date.month - 1) // 3 + 1
                             return f"{date.year}-Q{quarter}"
 
-                        ax.xaxis.set_major_formatter(
-                            plt.FuncFormatter(quarter_formatter)
-                        )
+                        ax.xaxis.set_major_formatter(plt.FuncFormatter(quarter_formatter))
                     elif date_format == "%Y-%m-%d":
                         ax.xaxis.set_major_locator(mdates.DayLocator(interval=interval))
                         ax.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
@@ -505,25 +495,21 @@ class ReportStyling:
                         crisis_labels.append(crisis_info["name"])
 
                     if crisis_handles:
-                        # Add crisis legend below the chart with proper spacing
+                        # Add crisis legend in upper right corner of chart with transparency
                         crisis_legend = ax.legend(
                             crisis_handles,
                             crisis_labels,
-                            bbox_to_anchor=(
-                                0.5,
-                                -0.15,
-                            ),  # Centered below chart with adequate spacing
-                            loc="upper center",
-                            ncol=min(
-                                len(crisis_handles), 3
-                            ),  # Max 3 columns to prevent overcrowding
-                            fontsize=8,  # Smaller font to fit better
+                            loc="upper right",
+                            ncol=1,  # Single column for cleaner look in corner
+                            fontsize=12,  # Match main legend font size
                             title="Financial Events",
-                            title_fontsize=9,
-                            framealpha=1.0,
+                            title_fontsize=12,  # Match main legend title size
+                            framealpha=0.8,  # Make legend background more transparent
                             frameon=True,
-                            fancybox=False,
+                            fancybox=True,
                             shadow=False,
+                            facecolor="white",
+                            edgecolor="gray",
                             columnspacing=0.8,  # Reduce space between columns
                             handletextpad=0.5,  # Reduce space between legend marker and text
                         )
@@ -560,13 +546,8 @@ class ReportStyling:
             ax.grid(True, alpha=0.3, color=Colors.CHART_MEDIUM_GRAY)
             ax.set_facecolor(Colors.CHART_LIGHT_GRAY)
 
-            # Adjust layout to accommodate crisis legend if present
-            if crisis_overlays:
-                plt.tight_layout(
-                    pad=1.0, rect=[0, 0.12, 1, 1]
-                )  # Leave space at bottom for legend
-            else:
-                plt.tight_layout(pad=1.0)
+            # Adjust layout
+            plt.tight_layout(pad=1.0)
 
             buffer = BytesIO()
             fig.savefig(
@@ -619,11 +600,7 @@ class ReportStyling:
             fig.patch.set_facecolor("white")
 
             # Check if data exists
-            if (
-                data_key in metrics
-                and metrics[data_key] is not None
-                and len(metrics[data_key]) > 0
-            ):
+            if data_key in metrics and metrics[data_key] is not None and len(metrics[data_key]) > 0:
                 returns_data = metrics[data_key]
                 if hasattr(returns_data, "values"):
                     returns = [float(r) * 100 for r in returns_data.values]
@@ -664,9 +641,7 @@ class ReportStyling:
 
                 # Format axis labels based on data type
                 data_type = data_key.replace("_returns", "").title()
-                ax.set_xlabel(
-                    f"{data_type} Return (%)", fontsize=14, color=Colors.CHART_CHARCOAL
-                )
+                ax.set_xlabel(f"{data_type} Return (%)", fontsize=14, color=Colors.CHART_CHARCOAL)
                 ax.set_ylabel("Frequency", fontsize=14, color=Colors.CHART_CHARCOAL)
                 ax.tick_params(colors=Colors.CHART_CHARCOAL)
                 ax.grid(True, alpha=0.3, color=Colors.CHART_MEDIUM_GRAY)
@@ -676,15 +651,9 @@ class ReportStyling:
                 import matplotlib.patches as mpatches
 
                 # Create invisible patches for statistics in legend
-                std_patch = mpatches.Patch(
-                    color="none", label=f"Std Dev: {std_val:.2f}%"
-                )
-                skew_patch = mpatches.Patch(
-                    color="none", label=f"Skewness: {skew_val:.2f}"
-                )
-                kurt_patch = mpatches.Patch(
-                    color="none", label=f"Kurtosis: {kurt_val:.2f}"
-                )
+                std_patch = mpatches.Patch(color="none", label=f"Std Dev: {std_val:.2f}%")
+                skew_patch = mpatches.Patch(color="none", label=f"Skewness: {skew_val:.2f}")
+                kurt_patch = mpatches.Patch(color="none", label=f"Kurtosis: {kurt_val:.2f}")
 
                 # Get existing legend handles and labels
                 handles, labels = ax.get_legend_handles_labels()
@@ -704,10 +673,13 @@ class ReportStyling:
                     handles,
                     labels,
                     frameon=True,
-                    fancybox=False,  # Match other legends
-                    shadow=False,  # Match other legends
-                    fontsize=12,  # Match other legends
+                    fancybox=True,
+                    shadow=False,
+                    fontsize=12,
                     loc="best",
+                    framealpha=0.8,  # Make legend background more transparent
+                    facecolor="white",
+                    edgecolor="gray",
                 )
             else:
                 no_data_message = f"No {data_key.replace('_', ' ')} data available"
@@ -849,9 +821,10 @@ class ReportStyling:
                         title_fontsize=fontsize + 1,
                         frameon=True,
                         fancybox=True,
-                        shadow=True,
+                        shadow=False,
                         facecolor=Colors.CHART_WHITE,
-                        edgecolor=Colors.CHART_BLUE,
+                        edgecolor="gray",
+                        framealpha=0.8,  # Make legend background more transparent
                     )
 
                     if title:
@@ -945,9 +918,7 @@ class ReportStyling:
             self.setup_matplotlib_style(legend_fontsize=11)
 
             # Increase height slightly for better utilization
-            enhanced_figsize = (
-                (figsize[0], figsize[1] + 1) if len(figsize) == 2 else (10, 6)
-            )
+            enhanced_figsize = (figsize[0], figsize[1] + 1) if len(figsize) == 2 else (10, 6)
             fig, ax = plt.subplots(figsize=enhanced_figsize)
             fig.patch.set_facecolor("white")
             if data_df is not None and len(data_df) > 0 and len(data_df.columns) > 0:
@@ -973,24 +944,38 @@ class ReportStyling:
                         pad=25,
                     )
 
-                # Adapt date format based on data density
-                if (
-                    date_format == "%Y-%m" and len(data_df) <= 7
-                ):  # Less than a week of data
-                    date_format = "%Y-%m-%d"
-                    ax.xaxis.set_major_locator(mdates.DayLocator(interval=interval))
-                elif date_format == "%Y-%q" and len(data_df.resample("Q").last()) <= 1:
-                    date_format = "%Y-%m"
-                    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
-                elif date_format == "%Y" and len(data_df.resample("Y").last()) <= 1:
-                    date_format = "%Y-%q"
-                    ax.xaxis.set_major_locator(
-                        mdates.MonthLocator(bymonth=[1, 4, 7, 10], interval=interval)
-                    )
-                else:
-                    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
+                    # Check data density to determine appropriate date locator
+                total_data_points = len(data_df)
 
-                # Handle quarterly format properly
+                # Check if data spans only one month
+                date_span_days = (data_df.index.max() - data_df.index.min()).days
+                date_span_months = date_span_days / 30.0  # Approximate months
+
+                if date_span_months <= 1.0:
+                    # Only one month of data - use daily locator
+                    ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+                    date_format = "%Y-%m-%d"
+                else:
+                    # For larger datasets, intelligently choose interval based on data span
+                    if date_span_months <= 6:
+                        # Less than 6 months - show every month
+                        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+                        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+                        date_format = "%Y-%m"
+                    elif date_span_months <= 24:
+                        # Less than 2 years - show every 2-3 months
+                        smart_interval = max(1, int(date_span_months / 6))
+                        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=smart_interval))
+                        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+                        date_format = "%Y-%m"
+                    else:
+                        # More than 2 years - use provided interval or calculate smart one
+                        smart_interval = max(1, min(interval, int(date_span_months / 8)))
+                        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=smart_interval))
+                        ax.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
+
+                # Handle quarterly format properly (only if not already set above)
                 if date_format == "%Y-%q":
 
                     def quarter_formatter_multi(x, pos):
@@ -998,10 +983,8 @@ class ReportStyling:
                         quarter = (date.month - 1) // 3 + 1
                         return f"{date.year}-Q{quarter}"
 
-                    ax.xaxis.set_major_formatter(
-                        plt.FuncFormatter(quarter_formatter_multi)
-                    )
-                else:
+                    ax.xaxis.set_major_formatter(plt.FuncFormatter(quarter_formatter_multi))
+                elif date_format not in ["%Y-%m-%d", "%Y-%m"]:  # Don't override if already set
                     ax.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
                 ax.set_ylabel(y_label, fontsize=14, color=Colors.CHART_CHARCOAL)
 
@@ -1018,11 +1001,11 @@ class ReportStyling:
                         ncol=legend_ncol,
                         frameon=True,
                         fancybox=True,
-                        shadow=True,
+                        shadow=False,
                         facecolor=Colors.CHART_WHITE,
-                        edgecolor=Colors.CHART_BLUE,
+                        edgecolor="gray",
+                        framealpha=0.8,  # Make legend background more transparent
                     )
-                    legend.get_frame().set_alpha(0.95)
 
                 plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
             else:
@@ -1208,9 +1191,7 @@ class ReportStyling:
                 if color_column and color_column in data_df.columns:
                     # Color by category (e.g., sector)
                     unique_categories = data_df[color_column].dropna().unique()
-                    colors = self.multi_color_theme(
-                        np.linspace(0, 1, len(unique_categories))
-                    )
+                    colors = self.multi_color_theme(np.linspace(0, 1, len(unique_categories)))
 
                     for i, category in enumerate(unique_categories):
                         category_data = data_df[data_df[color_column] == category]
@@ -1231,9 +1212,10 @@ class ReportStyling:
                         loc="upper left",
                         frameon=True,
                         fancybox=True,
-                        shadow=True,
+                        shadow=False,
                         facecolor=Colors.CHART_WHITE,
-                        edgecolor=Colors.CHART_BLUE,
+                        edgecolor="gray",
+                        framealpha=0.8,  # Make legend background more transparent
                     )
                 else:
                     # Single color scatter plot
@@ -1395,15 +1377,11 @@ class ReportStyling:
 
             # Plot left axis data
             if has_left_data:
-                df_left = pd.DataFrame(
-                    list(left_data.items()), columns=["date", "value"]
-                )
+                df_left = pd.DataFrame(list(left_data.items()), columns=["date", "value"])
                 df_left["date"] = pd.to_datetime(
                     df_left["date"], format="%Y-%m-%d", errors="coerce"
                 )
-                df_left = df_left.dropna(
-                    subset=["date"]
-                )  # Remove any failed conversions
+                df_left = df_left.dropna(subset=["date"])  # Remove any failed conversions
                 df_left = df_left.sort_values("date")
                 df_left.set_index("date", inplace=True)
 
@@ -1425,22 +1403,16 @@ class ReportStyling:
                     marker=left_marker,
                     label=left_y_label,
                 )
-                ax1.set_ylabel(
-                    left_y_label, color=left_color, fontsize=14, fontweight="bold"
-                )
+                ax1.set_ylabel(left_y_label, color=left_color, fontsize=14, fontweight="bold")
                 ax1.tick_params(axis="y", labelcolor=left_color)
 
             # Plot right axis data
             if has_right_data:
-                df_right = pd.DataFrame(
-                    list(right_data.items()), columns=["date", "value"]
-                )
+                df_right = pd.DataFrame(list(right_data.items()), columns=["date", "value"])
                 df_right["date"] = pd.to_datetime(
                     df_right["date"], format="%Y-%m-%d", errors="coerce"
                 )
-                df_right = df_right.dropna(
-                    subset=["date"]
-                )  # Remove any failed conversions
+                df_right = df_right.dropna(subset=["date"])  # Remove any failed conversions
                 df_right = df_right.sort_values("date")
                 df_right.set_index("date", inplace=True)
 
@@ -1462,9 +1434,7 @@ class ReportStyling:
                     marker=right_marker,
                     label=right_y_label,
                 )
-                ax2.set_ylabel(
-                    right_y_label, color=right_color, fontsize=14, fontweight="bold"
-                )
+                ax2.set_ylabel(right_y_label, color=right_color, fontsize=14, fontweight="bold")
                 ax2.tick_params(axis="y", labelcolor=right_color)
 
             # Initialize crisis_patches outside the conditional block
@@ -1484,31 +1454,37 @@ class ReportStyling:
 
                     # Add crisis overlays
                     if show_crisis_periods:
-                        crisis_patches = self.add_crisis_overlays(
-                            ax1, date_range, add_legend=False
-                        )
+                        crisis_patches = self.add_crisis_overlays(ax1, date_range, add_legend=False)
 
-                    # Format dates
-                    if graph_type == "M":
-                        ax1.xaxis.set_major_locator(
-                            mdates.MonthLocator(interval=interval)
-                        )
-                        ax1.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
-                    elif graph_type == "Q":
-                        ax1.xaxis.set_major_locator(
-                            mdates.MonthLocator(interval=3 * interval)
-                        )
-                        ax1.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
-                    elif graph_type == "Y":
-                        ax1.xaxis.set_major_locator(
-                            mdates.YearLocator(interval=interval)
-                        )
-                        ax1.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
-                    else:  # Daily
-                        ax1.xaxis.set_major_locator(
-                            mdates.MonthLocator(interval=interval)
-                        )
-                        ax1.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
+                    # Check the actual number of data points after resampling to determine appropriate date locator
+                    total_data_points = 0
+                    if has_left_data:
+                        total_data_points = max(total_data_points, len(df_left))
+                    if has_right_data:
+                        total_data_points = max(total_data_points, len(df_right))
+
+                    # Check if data spans only one month
+                    date_span_days = (max(all_dates) - min(all_dates)).days
+                    date_span_months = date_span_days / 30.0  # Approximate months
+
+                    if date_span_months <= 1.0:
+                        # Only one month of data - use daily locator
+                        ax1.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+                        ax1.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+                    else:
+                        # For larger datasets, use the original logic based on graph_type
+                        if graph_type == "M":
+                            ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
+                            ax1.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
+                        elif graph_type == "Q":
+                            ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=3 * interval))
+                            ax1.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
+                        elif graph_type == "Y":
+                            ax1.xaxis.set_major_locator(mdates.YearLocator(interval=interval))
+                            ax1.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
+                        else:  # Daily
+                            ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
+                            ax1.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
 
             # Add right axis zero line if requested
             if right_axis_zero_line and has_right_data:
@@ -1517,12 +1493,8 @@ class ReportStyling:
             # Add bar chart if provided
             if bar_data_dict and len(bar_data_dict) > 0:
                 # Prepare bar data
-                df_bar = pd.DataFrame(
-                    list(bar_data_dict.items()), columns=["date", "value"]
-                )
-                df_bar["date"] = pd.to_datetime(
-                    df_bar["date"], format="%Y-%m-%d", errors="coerce"
-                )
+                df_bar = pd.DataFrame(list(bar_data_dict.items()), columns=["date", "value"])
+                df_bar["date"] = pd.to_datetime(df_bar["date"], format="%Y-%m-%d", errors="coerce")
                 df_bar = df_bar.dropna(subset=["date"])
                 df_bar = df_bar.sort_values("date")
                 df_bar.set_index("date", inplace=True)
@@ -1540,9 +1512,7 @@ class ReportStyling:
                 if has_left_data:
                     left_values = df_left["value"].values
                     bar_bottom = min(left_values) * bar_position_ratio
-                    bar_height_scale = (
-                        max(left_values) - min(left_values)
-                    ) * bar_height_ratio
+                    bar_height_scale = (max(left_values) - min(left_values)) * bar_height_ratio
                 else:
                     # Fallback positioning if no left axis data
                     bar_bottom = 0
@@ -1554,10 +1524,10 @@ class ReportStyling:
                     min_bar_value = df_bar["value"].min()
 
                     if max_bar_value > 0:
-                        normalized_bars = (
-                            df_bar["value"] / max_bar_value
-                        ) * bar_height_scale
-                        bar_legend_label = f"{bar_label} (Min: {int(min_bar_value)}, Max: {int(max_bar_value)})"
+                        normalized_bars = (df_bar["value"] / max_bar_value) * bar_height_scale
+                        bar_legend_label = (
+                            f"{bar_label} (Min: {int(min_bar_value)}, Max: {int(max_bar_value)})"
+                        )
 
                         bars = ax1.bar(
                             df_bar.index,
@@ -1597,35 +1567,40 @@ class ReportStyling:
                     crisis_labels.append(crisis_info["name"])
 
                 if crisis_handles:
-                    # Add crisis legend below the chart with proper spacing
+                    # Add crisis legend in upper right corner of chart with transparency
                     crisis_legend = ax1.legend(
                         crisis_handles,
                         crisis_labels,
-                        bbox_to_anchor=(
-                            0.5,
-                            -0.15,
-                        ),  # Centered below chart with adequate spacing
-                        loc="upper center",
-                        ncol=min(
-                            len(crisis_handles), 3
-                        ),  # Max 3 columns to prevent overcrowding
-                        fontsize=8,  # Smaller font to fit better
+                        loc="upper right",
+                        ncol=1,  # Single column for cleaner look in corner
+                        fontsize=12,  # Match main legend font size
                         title="Financial Events",
-                        title_fontsize=9,
-                        framealpha=1.0,
+                        title_fontsize=12,  # Match main legend title size
+                        framealpha=0.8,  # Make legend background more transparent
                         frameon=True,
-                        fancybox=False,
+                        fancybox=True,
                         shadow=False,
+                        facecolor="white",
+                        edgecolor="gray",
                         columnspacing=0.8,  # Reduce space between columns
                         handletextpad=0.5,  # Reduce space between legend marker and text
                     )
 
-            # Create main legend for data (left side)
+            # Create main legend for data (upper left corner of chart)
             lines1, labels1 = ax1.get_legend_handles_labels()
             lines2, labels2 = ax2.get_legend_handles_labels()
             if lines1 or lines2:
                 main_legend = ax1.legend(
-                    lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=12
+                    lines1 + lines2,
+                    labels1 + labels2,
+                    loc="upper left",
+                    fontsize=12,
+                    framealpha=0.8,  # Make legend background more transparent
+                    frameon=True,
+                    fancybox=True,
+                    shadow=False,
+                    facecolor="white",
+                    edgecolor="gray",
                 )
                 # If we created a crisis legend, add it back as an artist so both legends show
                 if crisis_legend:
@@ -1637,13 +1612,8 @@ class ReportStyling:
             # Add grid
             ax1.grid(True, alpha=0.3)
 
-            # Adjust layout to accommodate crisis legend if present
-            if crisis_legend:
-                plt.tight_layout(
-                    rect=[0, 0.12, 1, 1]
-                )  # Leave space at bottom for legend
-            else:
-                plt.tight_layout()
+            # Adjust layout
+            plt.tight_layout()
 
             buffer = BytesIO()
             fig.savefig(buffer, format="png", dpi=self.dpi, bbox_inches="tight")
@@ -1692,9 +1662,7 @@ class ReportStyling:
             # Special formatting for portfolio configuration
             if isinstance(value, list) and len(value) == 0:
                 formatted_value = "None"
-            elif isinstance(value, list) and all(
-                isinstance(item, Enum) for item in value
-            ):
+            elif isinstance(value, list) and all(isinstance(item, Enum) for item in value):
                 formatted_value = ", ".join([vv.value for vv in value])
             elif isinstance(value, list):
                 formatted_value = ", ".join(str(v) for v in value) if value else "None"

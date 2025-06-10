@@ -118,9 +118,7 @@ class TradingConstraints:
     exclude_sectors: List[Sectors] = field(default_factory=list)
     min_market_cap: float = MIN_MARKET_CAP_DEFAULT
     max_market_cap: float = MAX_MARKET_CAP_DEFAULT
-    include_countries: List[Countries] = field(
-        default_factory=lambda: [Countries.UNITED_STATES]
-    )
+    include_countries: List[Countries] = field(default_factory=lambda: [Countries.UNITED_STATES])
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for backward compatibility."""
@@ -204,131 +202,10 @@ class BacktestParams:
 
 
 # default configurations
-INITIAL_SETUP = InitialSetup().to_dict()
+DEFAULT_PORTFOLIO_SETUP = InitialSetup().to_dict()
 SIMPLE_CONSTRAINTS = TradingConstraints().to_dict()
 CONSTRAINTS_OPTIONS = AdvancedConstraints().to_dict()
 DEFAULT_BACKTEST_PARAMS = BacktestParams().to_dict()
 
 # product attributes
 DEFAULT_PRODUCT_ATTRIBUTES = ["sector", "industry", "marketCap", "country"]
-
-
-# utility functions
-def create_market_cap_filter(
-    min_cap: float = MIN_MARKET_CAP_DEFAULT, max_cap: float = MAX_MARKET_CAP_DEFAULT
-) -> Dict[str, float]:
-    """Create a market cap filter configuration."""
-    return {"min_market_cap": min_cap, "max_market_cap": max_cap}
-
-
-def create_sector_filter(
-    exclude: List[Sectors] = None, include: List[Sectors] = None
-) -> Dict[str, List[Sectors]]:
-    """Create a sector filter configuration."""
-    config = {}
-    if exclude:
-        config["exclude_sectors"] = exclude
-    if include:
-        config["include_sectors"] = include
-    return config
-
-
-def create_country_filter(
-    countries: List[Countries] = None,
-) -> Dict[str, List[Countries]]:
-    """Create a country filter configuration."""
-    if countries is None:
-        countries = [Countries.UNITED_STATES]
-    return {"include_countries": countries}
-
-
-def create_simple_config(
-    initial_capital: float = 100_000,
-    long_only: bool = True,
-    exclude_sectors: List[Sectors] = None,
-    include_countries: List[Countries] = None,
-    max_position_size: float = DEFAULT_MAX_POSITION_SIZE,
-) -> Dict[str, Any]:
-    """Create a simple configuration for basic backtesting."""
-    constraints = TradingConstraints(
-        long_only=long_only,
-        exclude_sectors=exclude_sectors or [],
-        include_countries=include_countries or [Countries.UNITED_STATES],
-        max_buy_size=max_position_size,
-        max_long_count=max_position_size,
-        max_short_count=max_position_size,
-    )
-
-    setup = InitialSetup(initial_capital=initial_capital)
-
-    return {
-        "setup": setup.to_dict(),
-        "constraints": constraints.to_dict(),
-    }
-
-
-def validate_config(config: Dict[str, Any]) -> bool:
-    """Validate a configuration dictionary."""
-    try:
-        # Check required keys
-        if "constraints" not in config and "setup" not in config:
-            return False
-
-        # Validate constraints if present
-        if "constraints" in config:
-            constraints = config["constraints"]
-            if not isinstance(constraints, dict):
-                return False
-
-            # Check position sizes make sense
-            max_long = constraints.get("max_long_count", 0)
-            max_short = constraints.get("max_short_count", 0)
-            max_buy = constraints.get("max_buy_size", 0)
-
-            if max_long < 0 or max_long > 1:
-                return False
-            if max_short < 0 or max_short > 1:
-                return False
-            if max_buy < 0 or max_buy > 1:
-                return False
-
-        # Validate setup if present
-        if "setup" in config:
-            setup = config["setup"]
-            if not isinstance(setup, dict):
-                return False
-
-            # Check capital is positive
-            capital = setup.get("initial_capital", 0)
-            if capital <= 0:
-                return False
-
-        return True
-    except Exception:
-        return False
-
-
-# Configuration presets
-CONSERVATIVE_CONFIG = create_simple_config(
-    initial_capital=50_000,
-    long_only=True,
-    exclude_sectors=[Sectors.ENERGY, Sectors.BASIC_MATERIALS],
-    max_position_size=0.2,
-)
-
-AGGRESSIVE_CONFIG = create_simple_config(
-    initial_capital=100_000,
-    long_only=False,
-    max_position_size=0.5,
-)
-
-TECH_FOCUSED_CONFIG = create_simple_config(
-    initial_capital=75_000,
-    exclude_sectors=[
-        Sectors.UTILITIES,
-        Sectors.ENERGY,
-        Sectors.BASIC_MATERIALS,
-        Sectors.REAL_ESTATE,
-    ],
-    max_position_size=0.4,
-)

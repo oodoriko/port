@@ -1,6 +1,6 @@
 from config import (
     DEFAULT_BACKTEST_PARAMS,
-    INITIAL_SETUP,
+    DEFAULT_PORTFOLIO_SETUP,
     Benchmarks,
     CapitalGrowthFrequency,
     InitialSetup,
@@ -44,7 +44,7 @@ scenario_1 = Scenario(
     start_date="2015-01-01",
     end_date="2025-06-01",
     constraints=DEFAULT_BACKTEST_PARAMS["constraints"],
-    additional_setup=INITIAL_SETUP,
+    additional_setup=DEFAULT_PORTFOLIO_SETUP,
     benchmark=Benchmarks.SP500,
 )
 scenario_1.set_trading_style(
@@ -61,7 +61,7 @@ scenario_2 = Scenario(
     start_date="2025-02-01",
     end_date="2025-06-01",
     constraints=DEFAULT_BACKTEST_PARAMS["constraints"],
-    additional_setup=INITIAL_SETUP,
+    additional_setup=DEFAULT_PORTFOLIO_SETUP,
     benchmark=Benchmarks.SP500,
 )
 
@@ -78,7 +78,7 @@ scenario_3 = Scenario(
     start_date="2022-01-01",
     end_date="2025-06-01",
     constraints=DEFAULT_BACKTEST_PARAMS["constraints"],
-    additional_setup=INITIAL_SETUP,
+    additional_setup=DEFAULT_PORTFOLIO_SETUP,
     benchmark=Benchmarks.SP500,
 )
 
