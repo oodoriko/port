@@ -1,113 +1,73 @@
-from config import (
-    DEFAULT_BACKTEST_PARAMS,
-    DEFAULT_PORTFOLIO_SETUP,
-    Benchmarks,
-    CapitalGrowthFrequency,
-    InitialSetup,
-    Strategies,
-)
+from typing import Optional
+
+import numpy as np
+import pandas as pd
+
+from config import PortfolioSetup, TradingConstraints
+from portfolio.portfolio import Portfolio
+from strategies.strategy import StrategyTypes
 
 
 class Scenario:
     def __init__(
         self,
         name,
-        strategies,
         start_date,
         end_date,
         constraints,
-        additional_setup,
+        portfolio_setup,
         benchmark,
+        portfolio_name: Optional[str] = None,
     ):
         self.name = name
-        self.strategies = strategies
+        self.strategies = None
         self.start_date = start_date
         self.end_date = end_date
-        self.constraints = constraints
-        self.additional_setup = additional_setup
-        self.benchmark = benchmark
-        self.trading_style = ""
+        self.scenario_description = ""
+        self.portfolio = Portfolio(
+            name=portfolio_name,
+            benchmark=benchmark,
+            constraints=constraints,
+            setup=portfolio_setup,
+        )
+        self.trading_dates = self.get_trading_dates()
+        self.contains_filters = False
 
-    def set_trading_style(self, trading_style):
-        self.trading_style = trading_style
+    def get_start_date(self) -> str:
+        return self.start_date
 
+    def get_end_date(self) -> str:
+        return self.end_date
 
-# scenario 1: sp500 10yrs unconstrained no short macd rsi bollinger mr
-scenario_1 = Scenario(
-    name="sp500_10yrs_unconstrained_no_short_macd_rsi_bollinger_mr",
-    strategies=[
-        Strategies.MACD_CROSSOVER,
-        Strategies.RSI_CROSSOVER,
-        Strategies.BOLLINGER_BANDS,
-        Strategies.Z_SCORE_MEAN_REVERSION,
-    ],
-    start_date="2015-01-01",
-    end_date="2025-06-01",
-    constraints=DEFAULT_BACKTEST_PARAMS["constraints"],
-    additional_setup=DEFAULT_PORTFOLIO_SETUP,
-    benchmark=Benchmarks.SP500,
-)
-scenario_1.set_trading_style(
-    """Using purely technical indicators with a lookback window less than 2 months.
-The portfolio should be traded relatively frequently, with a high turnover rate.
-    """
-)
+    def get_name(self) -> str:
+        return self.name
 
+    def get_portfolio(self) -> Portfolio:
+        return self.portfolio
 
-# for testing
-scenario_2 = Scenario(
-    name="testing",
-    strategies=[Strategies.MACD_CROSSOVER],
-    start_date="2025-02-01",
-    end_date="2025-06-01",
-    constraints=DEFAULT_BACKTEST_PARAMS["constraints"],
-    additional_setup=DEFAULT_PORTFOLIO_SETUP,
-    benchmark=Benchmarks.SP500,
-)
+    def get_portfolio_setup(self) -> PortfolioSetup:
+        return self.portfolio.setup
 
+    def get_constraints(self) -> TradingConstraints:
+        return self.portfolio.constraints
 
-# for testing
-scenario_3 = Scenario(
-    name="sp500_3yrs_unconstrained_no_short_macd",
-    strategies=[
-        Strategies.MACD_CROSSOVER,
-        Strategies.RSI_CROSSOVER,
-        Strategies.BOLLINGER_BANDS,
-        Strategies.Z_SCORE_MEAN_REVERSION,
-    ],
-    start_date="2022-01-01",
-    end_date="2025-06-01",
-    constraints=DEFAULT_BACKTEST_PARAMS["constraints"],
-    additional_setup=DEFAULT_PORTFOLIO_SETUP,
-    benchmark=Benchmarks.SP500,
-)
+    def get_strategies(self) -> list[StrategyTypes]:
+        return self.strategies
 
+    def set_name(self, name):
+        self.name = name
 
-# Test scenarios to demonstrate capital growth configurations
-scenario_no_capital_growth = Scenario(
-    name="test_no_capital_growth",
-    strategies=[Strategies.MACD_CROSSOVER],
-    start_date="2025-02-01",
-    end_date="2025-06-01",
-    constraints=DEFAULT_BACKTEST_PARAMS["constraints"],
-    additional_setup=InitialSetup(
-        initial_capital=10,
-        new_capital_growth_amt=0,  # No capital growth
-        capital_growth_freq=CapitalGrowthFrequency.MONTHLY.value,
-    ).to_dict(),
-    benchmark=Benchmarks.SP500,
-)
+    def set_scenario_description(self, scenario_description):
+        self.scenario_description = scenario_description
 
-scenario_with_capital_growth = Scenario(
-    name="test_with_10k_daily_capital_growth",
-    strategies=[Strategies.MACD_CROSSOVER],
-    start_date="2025-02-01",
-    end_date="2025-06-01",
-    constraints=DEFAULT_BACKTEST_PARAMS["constraints"],
-    additional_setup=InitialSetup(
-        initial_capital=100_000,
-        new_capital_growth_amt=10_000,  # $10k capital growth
-        capital_growth_freq=CapitalGrowthFrequency.DAILY.value,  # Daily
-    ).to_dict(),
-    benchmark=Benchmarks.SP500,
-)
+    def set_strategies(self, strategies: list[StrategyTypes]):
+        self.strategies = strategies
+        self.contains_filters = any(strategy.is_filter for strategy in strategies)
+
+    def get_trading_dates(self) -> list[np.datetime64]:
+        return list(
+            np.intersect1d(
+                self.portfolio.open_prices.index,
+                pd.date_range(self.start_date, self.end_date),
+            )
+        )

@@ -2,76 +2,15 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-import numpy as np
-
-START_DATE = "2014-01-01"
-END_DATE = "2025-06-01"
-
-# market cap constants (in USD)
-MIN_MARKET_CAP_DEFAULT = 0
-MAX_MARKET_CAP_DEFAULT = np.inf
-MARKET_CAP_10M = 10_000_000
-MARKET_CAP_1B = 1_000_000_000
-MARKET_CAP_10B = 10_000_000_000
-MARKET_CAP_100B = 100_000_000_000
-MARKET_CAP_1T = 1_000_000_000_000
-
-# trading constants
-DEFAULT_MAX_POSITION_SIZE = 0.3
-DEFAULT_MAX_TRADES_PER_DAY = 100
-DEFAULT_REBALANCE_THRESHOLD = 0.05
-
-
-class Sectors(Enum):
-    """for yahoo finance"""
-
-    TECHNOLOGY = "Technology"
-    FINANCIAL_SERVICES = "Financial Services"
-    CONSUMER_CYCLICAL = "Consumer Cyclical"
-    COMMUNICATION_SERVICES = "Communication Services"
-    HEALTHCARE = "Healthcare"
-    INDUSTRIALS = "Industrials"
-    CONSUMER_DEFENSIVE = "Consumer Defensive"
-    ENERGY = "Energy"
-    BASIC_MATERIALS = "Basic Materials"
-    REAL_ESTATE = "Real Estate"
-    UTILITIES = "Utilities"
-
-
-class Countries(Enum):
-    """for yahoo finance"""
-
-    UNITED_STATES = "United States"
-    CANADA = "Canada"
-    UNITED_KINGDOM = "United Kingdom"
-    JAPAN = "Japan"
-    GERMANY = "Germany"
-    FRANCE = "France"
-
-
-class Benchmarks(Enum):
-    """Supported benchmark indices."""
-
-    SP500 = "sp500"
-    NASDAQ = "nasdaq"
-    DOW_JONES = "dowjones"
-
-
-class StrategyTypes(Enum):
-    """strategy classification types"""
-
-    MOMENTUM = "momentum"
-    VOLATILITY = "volatility"
-    MEAN_REVERSION = "mean_reversion"
-
-
-class Strategies(Enum):
-    """available trading strategies, note a strategy belongs to a strategy type"""
-
-    MACD_CROSSOVER = "macd_crossover"
-    RSI_CROSSOVER = "rsi_crossover"
-    BOLLINGER_BANDS = "bollinger_bands"
-    Z_SCORE_MEAN_REVERSION = "z_score_mean_reversion"
+from constants import (
+    DEFAULT_MAX_POSITION_SIZE,
+    DEFAULT_MAX_TRADES_PER_DAY,
+    DEFAULT_REBALANCE_THRESHOLD,
+    MAX_MARKET_CAP_DEFAULT,
+    MIN_MARKET_CAP_DEFAULT,
+)
+from data.data import Benchmarks, Countries, Sectors
+from strategies.strategy import Strategies, Strategy
 
 
 class CapitalGrowthFrequency(Enum):
@@ -90,12 +29,12 @@ class AllocationMethod(Enum):
 
 
 @dataclass
-class InitialSetup:
+class PortfolioSetup:
     initial_capital: float = 100_000
     initial_holdings: Dict[str, float] = field(default_factory=dict)
     new_capital_growth_pct: float = 0.0
-    new_capital_growth_amt: float = 10_000
-    capital_growth_freq: str = CapitalGrowthFrequency.DAILY.value
+    new_capital_growth_amt: float = 10000
+    capital_growth_freq: str = CapitalGrowthFrequency.MONTHLY.value
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -104,6 +43,25 @@ class InitialSetup:
             "new_capital_growth_pct": self.new_capital_growth_pct,
             "new_capital_growth_amt": self.new_capital_growth_amt,
             "capital_growth_freq": self.capital_growth_freq,
+        }
+
+
+@dataclass
+class StrategyConfig:
+    triggers: List[Strategies] = field(default_factory=list)
+    filter: List[Strategies] = field(default_factory=list)
+
+    def to_strategies(self) -> List[Strategy]:
+        return [
+            Strategy.create(v, is_filter=k == "filter")
+            for k, values in self.to_dict().items()
+            for v in values
+        ]
+
+    def to_dict(self) -> Dict[str, list[Strategies]]:
+        return {
+            "triggers": self.triggers,
+            "filter": self.filter,
         }
 
 
@@ -118,7 +76,9 @@ class TradingConstraints:
     exclude_sectors: List[Sectors] = field(default_factory=list)
     min_market_cap: float = MIN_MARKET_CAP_DEFAULT
     max_market_cap: float = MAX_MARKET_CAP_DEFAULT
-    include_countries: List[Countries] = field(default_factory=lambda: [Countries.UNITED_STATES])
+    include_countries: List[Countries] = field(
+        default_factory=lambda: [Countries.UNITED_STATES]
+    )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for backward compatibility."""
@@ -169,25 +129,34 @@ class AdvancedConstraints:
         }
 
 
+########BACKTESTING CONFIGS########
+
+# default configurations
+DEFAULT_PORTFOLIO_SETUP = PortfolioSetup().to_dict()
+SIMPLE_CONSTRAINTS = TradingConstraints().to_dict()
+CONSTRAINTS_OPTIONS = AdvancedConstraints().to_dict()
+
+
 @dataclass
 class BacktestParams:
-    initial_capital: float = 10_000
+    scenario_name: str = "default_scenario_sp500_10yrs_no_short"
+    initial_capital: float = 100_000
     start_date: str = "2022-01-01"
-    end_date: str = END_DATE
+    end_date: str = "2025-06-01"
     interval: str = "B"  # Business days
-    strategies: List[Strategies] = field(
-        default_factory=lambda: [
-            Strategies.MACD_CROSSOVER,
-            Strategies.RSI_CROSSOVER,
-            Strategies.BOLLINGER_BANDS,
-            Strategies.Z_SCORE_MEAN_REVERSION,
-        ]
+    benchmark: str = Benchmarks.SP500.value
+
+    setup: Dict[str, Any] = field(default_factory=lambda: DEFAULT_PORTFOLIO_SETUP)
+    constraints: Optional[Dict[str, Any]] = field(
+        default_factory=lambda: SIMPLE_CONSTRAINTS
     )
-    constraints: Optional[TradingConstraints] = None
+    strategies: List[Strategies] = field(
+        default_factory=lambda: [Strategies.MACD_CROSSOVER]
+    )
 
     def __post_init__(self):
         if self.constraints is None:
-            self.constraints = TradingConstraints()
+            self.constraints = SIMPLE_CONSTRAINTS
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for backward compatibility."""
@@ -197,15 +166,43 @@ class BacktestParams:
             "end_date": self.end_date,
             "interval": self.interval,
             "strategies": self.strategies,
-            "constraints": self.constraints.to_dict() if self.constraints else {},
+            "constraints": self.constraints if self.constraints else {},
+            "benchmark": self.benchmark,
+            "setup": self.setup,
+            "scenario_name": self.scenario_name,
         }
 
 
-# default configurations
-DEFAULT_PORTFOLIO_SETUP = InitialSetup().to_dict()
-SIMPLE_CONSTRAINTS = TradingConstraints().to_dict()
-CONSTRAINTS_OPTIONS = AdvancedConstraints().to_dict()
 DEFAULT_BACKTEST_PARAMS = BacktestParams().to_dict()
+DEFAULT_STRATEGY_CONFIG = StrategyConfig(
+    triggers=[
+        Strategies.MACD_CROSSOVER,
+        Strategies.BOLLINGER_BANDS,
+        Strategies.Z_SCORE_MEAN_REVERSION,
+        Strategies.RSI_CROSSOVER,
+    ],
+    filter=[],
+)
 
-# product attributes
-DEFAULT_PRODUCT_ATTRIBUTES = ["sector", "industry", "marketCap", "country"]
+DEFAULT_GRID_SEARCH_PARAMS = [
+    StrategyConfig(triggers=[Strategies.MACD_CROSSOVER], filter=[]),
+    StrategyConfig(triggers=[Strategies.RSI_CROSSOVER], filter=[]),
+    StrategyConfig(triggers=[Strategies.BOLLINGER_BANDS], filter=[]),
+    StrategyConfig(triggers=[Strategies.Z_SCORE_MEAN_REVERSION], filter=[]),
+    StrategyConfig(
+        triggers=[Strategies.MACD_CROSSOVER], filter=[Strategies.BOLLINGER_BANDS]
+    ),
+    StrategyConfig(
+        triggers=[Strategies.RSI_CROSSOVER, Strategies.Z_SCORE_MEAN_REVERSION],
+        filter=[],
+    ),
+    StrategyConfig(
+        triggers=[
+            Strategies.MACD_CROSSOVER,
+            Strategies.BOLLINGER_BANDS,
+            Strategies.Z_SCORE_MEAN_REVERSION,
+            Strategies.RSI_CROSSOVER,
+        ],
+        filter=[],
+    ),
+]

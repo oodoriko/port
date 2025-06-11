@@ -2,18 +2,56 @@
 Everything probably has to be numpy arrays implicitly indexed by dates when data gets too big... ugh
 """
 
-import json
 import os
 import pickle
 from datetime import datetime
+from enum import Enum
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from config import DEFAULT_PRODUCT_ATTRIBUTES, END_DATE, START_DATE, Benchmarks
+from constants import END_DATE, START_DATE
 
 RATE_LIMITING_AVAILABLE = True
+
+# product attributes
+DEFAULT_PRODUCT_ATTRIBUTES = ["sector", "industry", "marketCap", "country"]
+
+
+class Sectors(Enum):
+    """for yahoo finance"""
+
+    TECHNOLOGY = "Technology"
+    FINANCIAL_SERVICES = "Financial Services"
+    CONSUMER_CYCLICAL = "Consumer Cyclical"
+    COMMUNICATION_SERVICES = "Communication Services"
+    HEALTHCARE = "Healthcare"
+    INDUSTRIALS = "Industrials"
+    CONSUMER_DEFENSIVE = "Consumer Defensive"
+    ENERGY = "Energy"
+    BASIC_MATERIALS = "Basic Materials"
+    REAL_ESTATE = "Real Estate"
+    UTILITIES = "Utilities"
+
+
+class Countries(Enum):
+    """for yahoo finance"""
+
+    UNITED_STATES = "United States"
+    CANADA = "Canada"
+    UNITED_KINGDOM = "United Kingdom"
+    JAPAN = "Japan"
+    GERMANY = "Germany"
+    FRANCE = "France"
+
+
+class Benchmarks(Enum):
+    """Supported benchmark indices."""
+
+    SP500 = "sp500"
+    NASDAQ = "nasdaq"
+    DOW_JONES = "dowjones"
 
 
 class DataCacher:
@@ -225,9 +263,9 @@ class BenchmarkData(DataCacher):
     def __init__(self):
         super().__init__(cache_file="benchmark_cache.pkl")
 
-    def get_constituents(self, benchmark: Benchmarks) -> list:
-        if self.is_cached(benchmark.value):
-            cached_data = self.get_from_cache(benchmark.value)
+    def get_constituents(self, benchmark: str) -> list:
+        if self.is_cached(benchmark):
+            cached_data = self.get_from_cache(benchmark)
             return cached_data.get("tickers", [])
 
         tickers = self._scrape_wikipedia_constituents(benchmark)

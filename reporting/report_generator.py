@@ -8,8 +8,8 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
-from reportlab.lib.pagesizes import A4, landscape, letter
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import (
@@ -19,7 +19,6 @@ from reportlab.platypus import (
     PageBreak,
     PageTemplate,
     Paragraph,
-    SimpleDocTemplate,
     Spacer,
     Table,
     TableStyle,
@@ -129,7 +128,9 @@ class ReportGenerator:
     def create_table_title(self, title_text: str, color: str = None) -> Paragraph:
         """Create a table title paragraph with custom color"""
         return self.styling.create_table_title(
-            title_text=title_text, color=color, base_title_style=self.base_table_title_style
+            title_text=title_text,
+            color=color,
+            base_title_style=self.base_table_title_style,
         )
 
     def create_portfolio_info_footer(self) -> Paragraph:
@@ -141,7 +142,9 @@ class ReportGenerator:
     def create_title_page(self, report_name: str = None) -> list[BaseDocTemplate]:
         story = []
         story.append(Spacer(1, 2.5 * inch))
-        story.append(Paragraph(report_name or self.portfolio_name, self.title_page_title_style))
+        story.append(
+            Paragraph(report_name or self.portfolio_name, self.title_page_title_style)
+        )
 
         info_style = ParagraphStyle(
             "TitlePageInfo",
@@ -158,7 +161,8 @@ class ReportGenerator:
         story.append(Paragraph(f"<b>Benchmark:</b> {self.benchmark_text}", info_style))
         story.append(
             Paragraph(
-                f"<b>Analysis Period:</b> {self.start_date_str} to {self.end_date_str}", info_style
+                f"<b>Analysis Period:</b> {self.start_date_str} to {self.end_date_str}",
+                info_style,
             )
         )
         story.append(Paragraph(f"<b>Report Runtime:</b> {self.run_date}", info_style))
@@ -170,7 +174,9 @@ class ReportGenerator:
         config_data = self.portfolio_config
         performance_data = self.create_key_performance_data()
 
-        config_elements = self.styling.create_formatted_list(config_data, "Portfolio Configuration")
+        config_elements = self.styling.create_formatted_list(
+            config_data, "Portfolio Configuration"
+        )
         performance_elements = self.styling.create_formatted_list(
             performance_data, "Key Performance Metrics"
         )
@@ -185,7 +191,9 @@ class ReportGenerator:
 
         for i in range(max_rows):
             config_item = config_elements[i] if i < len(config_elements) else ""
-            performance_item = performance_elements[i] if i < len(performance_elements) else ""
+            performance_item = (
+                performance_elements[i] if i < len(performance_elements) else ""
+            )
             combined_data.append([config_item, performance_item])
 
         combined_table = Table(combined_data, colWidths=[section_width, section_width])
@@ -194,7 +202,13 @@ class ReportGenerator:
                 [
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
                     ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-                    ("LINEAFTER", (0, 0), (0, -1), 2, Colors.SLATE_BLUE),  # Vertical divider line
+                    (
+                        "LINEAFTER",
+                        (0, 0),
+                        (0, -1),
+                        2,
+                        Colors.SLATE_BLUE,
+                    ),  # Vertical divider line
                     ("LEFTPADDING", (0, 0), (-1, -1), 20),
                     ("RIGHTPADDING", (0, 0), (-1, -1), 20),
                     ("TOPPADDING", (0, 0), (-1, -1), 5),
@@ -233,7 +247,9 @@ class ReportGenerator:
         non_zero_mask = holdings_counts_arr > 0
 
         if np.any(non_zero_mask):
-            min_holdings_idx = np.argmin(np.where(non_zero_mask, holdings_counts_arr, np.inf))
+            min_holdings_idx = np.argmin(
+                np.where(non_zero_mask, holdings_counts_arr, np.inf)
+            )
             min_holdings = holdings_counts[min_holdings_idx]
             min_date = holdings_dates[min_holdings_idx]
         else:
@@ -451,7 +467,8 @@ class ReportGenerator:
                 "Date": dates,
                 "PnL": [self.portfolio.pnl_history.get(date, 0) for date in dates],
                 "Transaction_Costs": [
-                    -self.portfolio.transaction_cost_history.get(date, 0) for date in dates
+                    -self.portfolio.transaction_cost_history.get(date, 0)
+                    for date in dates
                 ],  # Negative to show as costs
                 "Net_PnL": [
                     self.portfolio.pnl_history.get(date, 0)
@@ -500,7 +517,8 @@ class ReportGenerator:
                 "Date": dates,
                 "PnL": [self.portfolio.pnl_history.get(date, 0) for date in dates],
                 "Transaction_Costs": [
-                    -self.portfolio.transaction_cost_history.get(date, 0) for date in dates
+                    -self.portfolio.transaction_cost_history.get(date, 0)
+                    for date in dates
                 ],  # Negative to show as costs
                 "Net_PnL": [
                     self.portfolio.pnl_history.get(date, 0)
@@ -552,7 +570,8 @@ class ReportGenerator:
                 "Date": dates,
                 "PnL": [self.portfolio.pnl_history.get(date, 0) for date in dates],
                 "Transaction_Costs": [
-                    -self.portfolio.transaction_cost_history.get(date, 0) for date in dates
+                    -self.portfolio.transaction_cost_history.get(date, 0)
+                    for date in dates
                 ],  # Negative to show as costs
                 "Net_PnL": [
                     self.portfolio.pnl_history.get(date, 0)
@@ -605,14 +624,19 @@ class ReportGenerator:
 
     def create_sector_exposure_chart(self, title: str = None) -> BytesIO:
         """Create multiline plot showing sector percentage over time with professional styling"""
-        if self.holdings_summary["sector_ts"] and self.holdings_summary["holdings_count"]:
+        if (
+            self.holdings_summary["sector_ts"]
+            and self.holdings_summary["holdings_count"]
+        ):
             # Create dataframe from sector time series
             holdings_dates = list(self.holdings_summary["holdings_count"].keys())
             sector_df = pd.DataFrame(self.holdings_summary["sector_ts"])
             sector_df.index = pd.to_datetime(holdings_dates)
             sector_df = sector_df.sort_index()
 
-            sector_pct_df = sector_df.div(sector_df[sector_df.columns].sum(axis=1), axis=0) * 100
+            sector_pct_df = (
+                sector_df.div(sector_df[sector_df.columns].sum(axis=1), axis=0) * 100
+            )
             sector_pct_df = sector_pct_df.fillna(0)
 
             return self.styling.create_generic_multiline_chart(
@@ -669,16 +693,23 @@ class ReportGenerator:
 
     def create_sector_duration_boxplot(self, title: str = None) -> BytesIO:
         """Create box plot showing duration distribution by sector"""
-        if self.holdings_summary["duration_by_ticker"] and self.holdings_summary["sector_ts"]:
+        if (
+            self.holdings_summary["duration_by_ticker"]
+            and self.holdings_summary["sector_ts"]
+        ):
             # Get duration data
             duration_df = pd.DataFrame(self.holdings_summary["duration_by_ticker"])
-            duration_df = duration_df.merge(self.portfolio.product_data, on="ticker", how="left")
+            duration_df = duration_df.merge(
+                self.portfolio.product_data, on="ticker", how="left"
+            )
 
             if len(duration_df) > 0:
                 # Create data dictionary for generic boxplot
                 sectors = duration_df["sector"].unique()
                 sector_data_dict = {
-                    sector: duration_df[duration_df["sector"] == sector]["duration"].tolist()
+                    sector: duration_df[duration_df["sector"] == sector][
+                        "duration"
+                    ].tolist()
                     for sector in sectors
                 }
 
@@ -756,34 +787,46 @@ class ReportGenerator:
         try:
             # Extract trading metrics directly from portfolio analytics
             # This method assumes the portfolio has trading_metrics available
-            if hasattr(self.portfolio, 'portfolio_analytics'):
+            if hasattr(self.portfolio, "portfolio_analytics"):
                 trading_metrics = self.portfolio.portfolio_analytics.trading_metrics()
                 trades_ts = trading_metrics["trades_ts"]
                 trades_by_ticker = trading_metrics["trades_by_ticker"]
             else:
                 # Fallback to existing holdings_summary structure
                 trades_ts = self.holdings_summary.get("trades_ts", {})
-                trades_by_ticker = self.holdings_summary.get("trades_by_ticker", pd.DataFrame())
-            
+                trades_by_ticker = self.holdings_summary.get(
+                    "trades_by_ticker", pd.DataFrame()
+                )
+
             # Convert trades_ts to DataFrame for analysis
             if isinstance(trades_ts, dict):
                 trades_df = pd.DataFrame(list(trades_ts.values()))
             else:
                 trades_df = pd.DataFrame(trades_ts) if trades_ts else pd.DataFrame()
-            
+
             # Calculate basic metrics
             total_trading_days = len(trades_df) if not trades_df.empty else 0
-            avg_buy_trades_per_day = trades_df["buy"].mean() if not trades_df.empty and "buy" in trades_df.columns else 0
-            avg_sell_trades_per_day = trades_df["sell"].mean() if not trades_df.empty and "sell" in trades_df.columns else 0
-            
+            avg_buy_trades_per_day = (
+                trades_df["buy"].mean()
+                if not trades_df.empty and "buy" in trades_df.columns
+                else 0
+            )
+            avg_sell_trades_per_day = (
+                trades_df["sell"].mean()
+                if not trades_df.empty and "sell" in trades_df.columns
+                else 0
+            )
+
             # Calculate sell trade returns
             if not trades_by_ticker.empty and "return" in trades_by_ticker.columns:
-                positive_return_sell_trades = trades_by_ticker[trades_by_ticker["return"] > 0]["sell"].sum()
+                positive_return_sell_trades = trades_by_ticker[
+                    trades_by_ticker["return"] > 0
+                ]["sell"].sum()
                 avg_return_all_sell_trades = trades_by_ticker["return"].mean()
             else:
                 positive_return_sell_trades = 0
                 avg_return_all_sell_trades = 0
-            
+
             # Create table data
             summary_data = [
                 ["Trading Summary Metric", "Value"],
@@ -791,7 +834,10 @@ class ReportGenerator:
                 ["Average Buy Trades per Day", f"{avg_buy_trades_per_day:.2f}"],
                 ["Average Sell Trades per Day", f"{avg_sell_trades_per_day:.2f}"],
                 ["Sell Trades with Positive Return", f"{positive_return_sell_trades}"],
-                ["Average Return of All Sell Trades", f"{avg_return_all_sell_trades:.2%}"],
+                [
+                    "Average Return of All Sell Trades",
+                    f"{avg_return_all_sell_trades:.2%}",
+                ],
             ]
 
             return self.styling.create_styled_table(
@@ -816,21 +862,30 @@ class ReportGenerator:
                 header_color=Colors.EMERALD,
             )
 
-    def create_trading_activity_chart(self, title: str = None, graph_type: str = "D") -> BytesIO:
+    def create_trading_activity_chart(
+        self, title: str = None, graph_type: str = "D"
+    ) -> BytesIO:
         """Create trading activity bar chart with buy/sell bars and second chart with total/net trades lines"""
         plt.style.use("default")
         fig, (ax1, ax2) = plt.subplots(
             2, 1, figsize=(10, 7.5), gridspec_kw={"height_ratios": [2, 1]}, sharex=True
         )
 
-        if self.holdings_summary["trades_ts"] and self.holdings_summary["holdings_count"]:
+        if (
+            self.holdings_summary["trades_ts"]
+            and self.holdings_summary["holdings_count"]
+        ):
             holdings_dates = list(self.holdings_summary["holdings_count"].keys())
             trades_df = pd.DataFrame(self.holdings_summary["trades_ts"])
             trades_df.index = pd.to_datetime(holdings_dates)
             trades_df = trades_df.sort_index()
 
-            trades_df["buy"] = pd.to_numeric(trades_df["buy"], errors="coerce").fillna(0)
-            trades_df["sell"] = pd.to_numeric(trades_df["sell"], errors="coerce").fillna(0)
+            trades_df["buy"] = pd.to_numeric(trades_df["buy"], errors="coerce").fillna(
+                0
+            )
+            trades_df["sell"] = pd.to_numeric(
+                trades_df["sell"], errors="coerce"
+            ).fillna(0)
             trades_df["net_trades"] = trades_df["buy"] - trades_df["sell"]
             trades_df["total_trades"] = trades_df["buy"] + trades_df["sell"]
 
@@ -890,7 +945,9 @@ class ReportGenerator:
                 ax2.xaxis.set_major_locator(mdates.DayLocator(interval=self.interval))
                 ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
             elif graph_type == "Q" and len(trades_df.resample("Q").last()) <= 1:
-                ax2.xaxis.set_major_locator(mdates.QuarterLocator(interval=self.interval))
+                ax2.xaxis.set_major_locator(
+                    mdates.QuarterLocator(interval=self.interval)
+                )
                 ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
             elif graph_type == "Y" and len(trades_df.resample("Y").last()) <= 1:
                 ax2.xaxis.set_major_locator(mdates.YearLocator(interval=self.interval))
@@ -987,7 +1044,9 @@ class ReportGenerator:
 
         return bought_table, sold_table, traded_table
 
-    def add_page_header(self, story: list[BaseDocTemplate], section_name: str = None) -> None:
+    def add_page_header(
+        self, story: list[BaseDocTemplate], section_name: str = None
+    ) -> None:
         """Add section header with divider line to each page"""
         if section_name:
             story.append(Paragraph(section_name, self.section_header_style))
@@ -996,7 +1055,9 @@ class ReportGenerator:
             divider_table = Table([[""]], colWidths=[landscape(A4)[0] - 1.5 * inch])
             divider_table.setStyle(self.divider_table_style)
             story.append(divider_table)
-            story.append(Spacer(1, 10))  # Increase this to push next content further from divider
+            story.append(
+                Spacer(1, 10)
+            )  # Increase this to push next content further from divider
 
     def generate_report(self, filename: str = None) -> str:
         """Generate the restructured PDF report with landscape orientation and page numbers"""
@@ -1007,7 +1068,9 @@ class ReportGenerator:
         if filename is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             portfolio_name = (
-                self.portfolio.name.replace(" ", "_") if self.portfolio.name else "portfolio"
+                self.portfolio.name.replace(" ", "_")
+                if self.portfolio.name
+                else "portfolio"
             )
             filename = f"reports/{portfolio_name}_custom_report_{timestamp}.pdf"
         elif not filename.startswith("reports/"):
@@ -1025,7 +1088,9 @@ class ReportGenerator:
             # Draw footer divider line
             canvas.setStrokeColor(Colors.MEDIUM_GRAY)
             canvas.setLineWidth(0.5)
-            canvas.line(0.75 * inch, 0.7 * inch, landscape(A4)[0] - 0.75 * inch, 0.7 * inch)
+            canvas.line(
+                0.75 * inch, 0.7 * inch, landscape(A4)[0] - 0.75 * inch, 0.7 * inch
+            )
 
             # Add portfolio info in footer
             period = f"{self.start_date_str} to {self.end_date_str}"
@@ -1036,7 +1101,9 @@ class ReportGenerator:
             canvas.drawString(0.75 * inch, 0.5 * inch, footer_text)
 
             # Add page number (just the number)
-            canvas.drawRightString(landscape(A4)[0] - 0.75 * inch, 0.5 * inch, f"{doc.page}")
+            canvas.drawRightString(
+                landscape(A4)[0] - 0.75 * inch, 0.5 * inch, f"{doc.page}"
+            )
             canvas.restoreState()
 
         doc = BaseDocTemplate(
@@ -1052,7 +1119,8 @@ class ReportGenerator:
             0.75 * inch,
             0.75 * inch,
             landscape(A4)[0] - 1.5 * inch,
-            landscape(A4)[1] - 1.15 * inch,  # Reduced height to account for smaller top margin
+            landscape(A4)[1]
+            - 1.15 * inch,  # Reduced height to account for smaller top margin
             id="normal",
         )
 
@@ -1073,34 +1141,50 @@ class ReportGenerator:
         story.extend(portfolio_overview)
 
         story.append(PageBreak())
-        self.add_page_header(story, section_name="Portfolio Overview - Daily Portfolio Value")
+        self.add_page_header(
+            story, section_name="Portfolio Overview - Daily Portfolio Value"
+        )
         daily_portfolio_value_chart = self.create_daily_portfolio_value_chart()
         if daily_portfolio_value_chart:
             if isinstance(daily_portfolio_value_chart, BytesIO):
-                story.append(Image(daily_portfolio_value_chart, width=10 * inch, height=6 * inch))
+                story.append(
+                    Image(daily_portfolio_value_chart, width=10 * inch, height=6 * inch)
+                )
             else:
                 story.append(daily_portfolio_value_chart)
 
         if self.include_monthly:
             story.append(PageBreak())
-            self.add_page_header(story, section_name="Portfolio Overview - Monthly Portfolio Value")
+            self.add_page_header(
+                story, section_name="Portfolio Overview - Monthly Portfolio Value"
+            )
             monthly_portfolio_value_chart = self.create_monthly_portfolio_value_chart()
             if monthly_portfolio_value_chart:
                 if isinstance(monthly_portfolio_value_chart, BytesIO):
                     story.append(
-                        Image(monthly_portfolio_value_chart, width=10 * inch, height=6 * inch)
+                        Image(
+                            monthly_portfolio_value_chart,
+                            width=10 * inch,
+                            height=6 * inch,
+                        )
                     )
                 else:
                     story.append(monthly_portfolio_value_chart)
 
         if self.include_annual:
             story.append(PageBreak())
-            self.add_page_header(story, section_name="Portfolio Overview - Annual Portfolio Value")
+            self.add_page_header(
+                story, section_name="Portfolio Overview - Annual Portfolio Value"
+            )
             annual_portfolio_value_chart = self.create_annual_portfolio_value_chart()
             if annual_portfolio_value_chart:
                 if isinstance(annual_portfolio_value_chart, BytesIO):
                     story.append(
-                        Image(annual_portfolio_value_chart, width=10 * inch, height=6 * inch)
+                        Image(
+                            annual_portfolio_value_chart,
+                            width=10 * inch,
+                            height=6 * inch,
+                        )
                     )
                 else:
                     story.append(annual_portfolio_value_chart)
@@ -1115,27 +1199,37 @@ class ReportGenerator:
         daily_returns_chart = self.create_daily_returns_chart()
         if daily_returns_chart:
             if isinstance(daily_returns_chart, BytesIO):
-                story.append(Image(daily_returns_chart, width=10 * inch, height=6 * inch))
+                story.append(
+                    Image(daily_returns_chart, width=10 * inch, height=6 * inch)
+                )
             else:
                 story.append(daily_returns_chart)
 
         if self.include_monthly:
             story.append(PageBreak())
-            self.add_page_header(story, section_name="Return Analysis - Monthly Returns")
+            self.add_page_header(
+                story, section_name="Return Analysis - Monthly Returns"
+            )
             monthly_returns_chart = self.create_monthly_returns_chart()
             if monthly_returns_chart:
                 if isinstance(monthly_returns_chart, BytesIO):
-                    story.append(Image(monthly_returns_chart, width=10 * inch, height=6 * inch))
+                    story.append(
+                        Image(monthly_returns_chart, width=10 * inch, height=6 * inch)
+                    )
                 else:
                     story.append(monthly_returns_chart)
 
         if self.include_quarterly:
             story.append(PageBreak())
-            self.add_page_header(story, section_name="Return Analysis - Quarterly Returns")
+            self.add_page_header(
+                story, section_name="Return Analysis - Quarterly Returns"
+            )
             quarterly_returns_chart = self.create_quarterly_returns_chart()
             if quarterly_returns_chart:
                 if isinstance(quarterly_returns_chart, BytesIO):
-                    story.append(Image(quarterly_returns_chart, width=10 * inch, height=6 * inch))
+                    story.append(
+                        Image(quarterly_returns_chart, width=10 * inch, height=6 * inch)
+                    )
                 else:
                     story.append(quarterly_returns_chart)
 
@@ -1145,16 +1239,22 @@ class ReportGenerator:
             annual_returns_chart = self.create_annual_returns_chart()
             if annual_returns_chart:
                 if isinstance(annual_returns_chart, BytesIO):
-                    story.append(Image(annual_returns_chart, width=10 * inch, height=6 * inch))
+                    story.append(
+                        Image(annual_returns_chart, width=10 * inch, height=6 * inch)
+                    )
                 else:
                     story.append(annual_returns_chart)
 
         story.append(PageBreak())
-        self.add_page_header(story, section_name="Return Analysis - Daily Return Distribution")
+        self.add_page_header(
+            story, section_name="Return Analysis - Daily Return Distribution"
+        )
         daily_distribution_chart = self.create_daily_return_distribution_chart()
         if daily_distribution_chart:
             if isinstance(daily_distribution_chart, BytesIO):
-                story.append(Image(daily_distribution_chart, width=10 * inch, height=6 * inch))
+                story.append(
+                    Image(daily_distribution_chart, width=10 * inch, height=6 * inch)
+                )
             else:
                 story.append(daily_distribution_chart)
 
@@ -1167,7 +1267,9 @@ class ReportGenerator:
             if monthly_distribution_chart:
                 if isinstance(monthly_distribution_chart, BytesIO):
                     story.append(
-                        Image(monthly_distribution_chart, width=10 * inch, height=6 * inch)
+                        Image(
+                            monthly_distribution_chart, width=10 * inch, height=6 * inch
+                        )
                     )
                 else:
                     story.append(monthly_distribution_chart)
@@ -1185,12 +1287,16 @@ class ReportGenerator:
             story.append(holdings_table)
 
         story.append(PageBreak())
-        self.add_page_header(story, section_name="Holdings Analysis - Holdings Over Time")
+        self.add_page_header(
+            story, section_name="Holdings Analysis - Holdings Over Time"
+        )
         holdings_chart = self.create_holdings_analysis_chart()
         story.append(Image(holdings_chart, width=10 * inch, height=6 * inch))
 
         story.append(PageBreak())
-        self.add_page_header(story, section_name="Holdings Analysis - Holding Duration Summary")
+        self.add_page_header(
+            story, section_name="Holdings Analysis - Holding Duration Summary"
+        )
 
         duration_title = self.create_table_title("Duration Summary", Colors.SLATE_BLUE)
         story.append(duration_title)
@@ -1209,23 +1315,29 @@ class ReportGenerator:
         )
         if longest_table and shortest_table:
             # Create titles for the duration tables
-            longest_title = self.create_table_title("Top 5 Longest Hold", Colors.EMERALD)
+            longest_title = self.create_table_title(
+                "Top 5 Longest Hold", Colors.EMERALD
+            )
             shortest_title = self.create_table_title("Top 5 Shortest Hold", Colors.GOLD)
 
             # Create containers with titles and tables
             longest_container = Table(
-                [[longest_title], [Spacer(1, 8)], [longest_table]], colWidths=[3.5 * inch]
+                [[longest_title], [Spacer(1, 8)], [longest_table]],
+                colWidths=[3.5 * inch],
             )
             longest_container.setStyle(style)
 
             shortest_container = Table(
-                [[shortest_title], [Spacer(1, 8)], [shortest_table]], colWidths=[3.5 * inch]
+                [[shortest_title], [Spacer(1, 8)], [shortest_table]],
+                colWidths=[3.5 * inch],
             )
             shortest_container.setStyle(style)
 
             # Add spacer between the two tables
             spacer_cell = Table([[Spacer(1, 1)]], colWidths=[1.5 * inch])
-            duration_tables_data = [[longest_container, spacer_cell, shortest_container]]
+            duration_tables_data = [
+                [longest_container, spacer_cell, shortest_container]
+            ]
             combined_duration_table = Table(
                 duration_tables_data, colWidths=[3.5 * inch, 1.5 * inch, 3.5 * inch]
             )
@@ -1241,7 +1353,9 @@ class ReportGenerator:
             story.append(combined_duration_table)
 
         story.append(PageBreak())
-        self.add_page_header(story, section_name="Holdings Analysis - Duration vs Sector")
+        self.add_page_header(
+            story, section_name="Holdings Analysis - Duration vs Sector"
+        )
         sector_duration_chart = self.create_sector_duration_boxplot()
         story.append(Image(sector_duration_chart, width=10 * inch, height=6 * inch))
 
@@ -1257,7 +1371,9 @@ class ReportGenerator:
         story.append(Image(sector_chart, width=10 * inch, height=6.4 * inch))
 
         story.append(PageBreak())
-        self.add_page_header(story, section_name="Sector Analysis - Average Sector Composition (%)")
+        self.add_page_header(
+            story, section_name="Sector Analysis - Average Sector Composition (%)"
+        )
         pie_chart = self.create_sector_composition_pie()
         story.append(Image(pie_chart, width=8.5 * inch, height=6.4 * inch))
 
@@ -1282,7 +1398,9 @@ class ReportGenerator:
             monthly_pnl_chart = self.create_monthly_pnl_chart()
             if monthly_pnl_chart:
                 if isinstance(monthly_pnl_chart, BytesIO):
-                    story.append(Image(monthly_pnl_chart, width=10 * inch, height=6 * inch))
+                    story.append(
+                        Image(monthly_pnl_chart, width=10 * inch, height=6 * inch)
+                    )
                 else:
                     story.append(monthly_pnl_chart)
 
@@ -1292,7 +1410,9 @@ class ReportGenerator:
             annual_pnl_chart = self.create_annual_pnl_chart()
             if annual_pnl_chart:
                 if isinstance(annual_pnl_chart, BytesIO):
-                    story.append(Image(annual_pnl_chart, width=10 * inch, height=6 * inch))
+                    story.append(
+                        Image(annual_pnl_chart, width=10 * inch, height=6 * inch)
+                    )
                 else:
                     story.append(annual_pnl_chart)
 
@@ -1325,9 +1445,15 @@ class ReportGenerator:
         )
         if bought_table and sold_table and traded_table:
             # Create titles for each table
-            bought_title = self.create_table_title("Top 10 Most Bought Tickers", Colors.SLATE_BLUE)
-            sold_title = self.create_table_title("Top 10 Most Sold Tickers", Colors.EMERALD)
-            traded_title = self.create_table_title("Top 10 Most Traded Tickers", Colors.GOLD)
+            bought_title = self.create_table_title(
+                "Top 10 Most Bought Tickers", Colors.SLATE_BLUE
+            )
+            sold_title = self.create_table_title(
+                "Top 10 Most Sold Tickers", Colors.EMERALD
+            )
+            traded_title = self.create_table_title(
+                "Top 10 Most Traded Tickers", Colors.GOLD
+            )
 
             # Create containers with titles and tables
             bought_container = Table(
@@ -1353,10 +1479,17 @@ class ReportGenerator:
             spacer_cell2.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
 
             tables_data = [
-                [bought_container, spacer_cell1, sold_container, spacer_cell2, traded_container]
+                [
+                    bought_container,
+                    spacer_cell1,
+                    sold_container,
+                    spacer_cell2,
+                    traded_container,
+                ]
             ]
             three_tables = Table(
-                tables_data, colWidths=[2.2 * inch, 1.0 * inch, 2.2 * inch, 1.0 * inch, 2.2 * inch]
+                tables_data,
+                colWidths=[2.2 * inch, 1.0 * inch, 2.2 * inch, 1.0 * inch, 2.2 * inch],
             )
             three_tables.setStyle(
                 TableStyle(
@@ -1388,14 +1521,16 @@ def generate_report(
     include_annual=True,
 ) -> str:
     # Handle both Backtest and Portfolio objects
-    if hasattr(backtest_or_portfolio, 'generate_analytics'):
+    if hasattr(backtest_or_portfolio, "generate_analytics"):
         # This is a Backtest object
-        analytics = backtest_or_portfolio.generate_analytics(rf=rf, bmk_returns=bmk_returns)
+        analytics = backtest_or_portfolio.generate_analytics(
+            rf=rf, bmk_returns=bmk_returns
+        )
         portfolio = backtest_or_portfolio.portfolio
-        
+
         # Store analytics on portfolio for access in report generator
         portfolio.portfolio_analytics = analytics
-        
+
         # Generate required data structures
         metrics = analytics.performance_metrics(rf=rf, bmk_returns=bmk_returns)
         trading_metrics = analytics.trading_metrics()
@@ -1407,8 +1542,12 @@ def generate_report(
     else:
         # This is a Portfolio object (legacy support)
         portfolio = backtest_or_portfolio
-        if not hasattr(portfolio, "metrics") or not hasattr(portfolio, "holdings_summary"):
-            raise ValueError("Portfolio object must have metrics and holdings_summary attributes")
+        if not hasattr(portfolio, "metrics") or not hasattr(
+            portfolio, "holdings_summary"
+        ):
+            raise ValueError(
+                "Portfolio object must have metrics and holdings_summary attributes"
+            )
         metrics = portfolio.metrics
         holdings_summary = portfolio.holdings_summary
 

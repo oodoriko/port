@@ -3,8 +3,14 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from config import DEFAULT_PORTFOLIO_SETUP, SIMPLE_CONSTRAINTS, Benchmarks
-from data.data import BenchmarkData, PriceData, ProductData, get_prices_by_dates
+from config import DEFAULT_PORTFOLIO_SETUP, SIMPLE_CONSTRAINTS
+from data.data import (
+    BenchmarkData,
+    Benchmarks,
+    PriceData,
+    ProductData,
+    get_prices_by_dates,
+)
 from portfolio.constraints import Constraints
 from portfolio.cost import TransactionCost
 from portfolio.utils import is_business_period_end
@@ -15,23 +21,25 @@ class Portfolio:
         self,
         name: Optional[str] = None,
         benchmark: Benchmarks = Benchmarks.SP500,
+        setup: Dict = DEFAULT_PORTFOLIO_SETUP,
         constraints: Dict = SIMPLE_CONSTRAINTS,
-        additional_setup: Dict = DEFAULT_PORTFOLIO_SETUP,
     ):
         self.name = name
         self.benchmark = benchmark
-        self.setup = additional_setup
+        self.setup = setup
         self.cost = TransactionCost()
         self.constraints = Constraints(constraints)
-
+        print(self.setup)
         # Portfolio state
         self.portfolio_value = 0
-        self.holdings = additional_setup.get("initial_holdings", {}).copy()
-        self.capital = additional_setup.get("initial_capital", 0)
+        self.holdings = setup.get("initial_holdings", {}).copy()
+        self.capital = setup.get("initial_capital", 0)
 
         # Data
         self.universe, self.product_data = self._initialize_universe()
-        self.open_prices, self.close_prices, self.volumes = self._initialize_price_data()
+        self.open_prices, self.close_prices, self.volumes = (
+            self._initialize_price_data()
+        )
         self._setup_constraints_data()
 
         # Trading history tracking
@@ -39,6 +47,9 @@ class Portfolio:
         self.trading_history: Dict[str, Dict[str, int]] = {}
         self.transaction_history: Dict[str, Dict[str, float]] = {}
         self.trading_status: Dict[str, int] = {}
+
+    def set_name(self, name):
+        self.name = name
 
     def _initialize_universe(self) -> Tuple[List[str], pd.DataFrame]:
         tickers = BenchmarkData().get_constituents(self.benchmark)
@@ -54,7 +65,8 @@ class Portfolio:
             sector.value for sector in self.constraints.constraints["exclude_sectors"]
         ]
         include_countries = [
-            country.value for country in self.constraints.constraints["include_countries"]
+            country.value
+            for country in self.constraints.constraints["include_countries"]
         ]
 
         sector_filter = ~product_data.sector.isin(exclude_sectors)
@@ -106,7 +118,9 @@ class Portfolio:
             price_data, end_date, start_date, lookback_window, lookahead_window
         )
 
-    def trade(self, date: np.datetime64, trades: List[int], trading_plan: Dict[str, int]) -> None:
+    def trade(
+        self, date: np.datetime64, trades: List[int], trading_plan: Dict[str, int]
+    ) -> None:
         if not self._can_execute_trades(trades):
             self.trading_status[date] = -1
             return
@@ -134,7 +148,9 @@ class Portfolio:
         )
 
         # Update portfolio state
-        self._update_portfolio_state(date, shares_to_be_traded, new_holdings, executed_trading_plan)
+        self._update_portfolio_state(
+            date, shares_to_be_traded, new_holdings, executed_trading_plan
+        )
 
     def trade_batch(self, trading_plan: pd.DataFrame) -> None:
         for date in trading_plan.index:
@@ -144,7 +160,9 @@ class Portfolio:
             self.trade(date, trades, trading_plan_dict)
 
     def _can_execute_trades(self, trades: List[int]) -> bool:
-        positions_size = len(self.universe) if len(self.holdings) == 0 else len(self.holdings)
+        positions_size = (
+            len(self.universe) if len(self.holdings) == 0 else len(self.holdings)
+        )
         max_holdings = len(self.universe)
 
         return self.constraints.evaluate_trades(trades, positions_size, max_holdings)

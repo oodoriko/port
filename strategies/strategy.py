@@ -1,17 +1,37 @@
 import warnings
 from collections import Counter
+from enum import Enum
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from config import Strategies, StrategyTypes
 from strategies.indicators import TechnicalIndicators
 
 warnings.filterwarnings("ignore")
 
 
+class StrategyTypes(Enum):
+    """strategy classification types"""
+
+    MOMENTUM = "momentum"
+    VOLATILITY = "volatility"
+    MEAN_REVERSION = "mean_reversion"
+
+
+class Strategies(Enum):
+    """available trading strategies, note a strategy belongs to a strategy type"""
+
+    MACD_CROSSOVER = "macd_x"
+    RSI_CROSSOVER = "rsi_x"
+    BOLLINGER_BANDS = "b_bands"
+    Z_SCORE_MEAN_REVERSION = "z"
+
+
 class Strategy:
     """maybe i don't need this...."""
+
+    """filter means the signal is used as a negative signal"""
 
     def __init__(self, name: Strategies):
         self.name = name
@@ -20,15 +40,15 @@ class Strategy:
         self.is_filter = False
 
     @classmethod
-    def create(cls, strategy_name: Strategies) -> "Strategy":
+    def create(cls, strategy_name: Strategies, is_filter: bool = False) -> "Strategy":
         if strategy_name == Strategies.MACD_CROSSOVER:
-            return MACD()
+            return MACD(is_filter=is_filter)
         elif strategy_name == Strategies.RSI_CROSSOVER:
-            return RSI()
+            return RSI(is_filter=is_filter)
         elif strategy_name == Strategies.BOLLINGER_BANDS:
-            return BollingerBands()
+            return BollingerBands(is_filter=is_filter)
         elif strategy_name == Strategies.Z_SCORE_MEAN_REVERSION:
-            return ZScoreMeanReversion()
+            return ZScoreMeanReversion(is_filter=is_filter)
         else:
             raise ValueError(f"Invalid strategy name: {strategy_name}")
 
@@ -74,14 +94,17 @@ class MACD(MomentumStrategy):
         prev, current = TechnicalIndicators.macd(
             arr, self.fast_period, self.slow_period, self.signal_period
         )
+        filter_signal = -1 if self.is_filter else 1
         if prev <= 0 and current > 0:
-            return 1
+            return 1 * filter_signal
         elif prev >= 0 and current < 0:
-            return -1
+            return -1 * filter_signal
         else:
-            return 0
+            return 0 * filter_signal
 
-    def generate_signals_batch(self, data: pd.DataFrame, run_start_index: int) -> pd.DataFrame:
+    def generate_signals_batch(
+        self, data: pd.DataFrame, run_start_index: int
+    ) -> pd.DataFrame:
         """data: row is keyed by date, column is ticker, value is close price, full history of data"""
         """Returns dataframe with same structure containing trading signals (-1, 0, 1)"""
 
@@ -90,7 +113,9 @@ class MACD(MomentumStrategy):
             np.apply_along_axis(self.get_signal, arr=data_arr[:i, :], axis=0)
             for i in range(run_start_index, len(data_arr))
         ]
-        return pd.DataFrame(signals, index=data.index[run_start_index:], columns=data.columns)
+        return pd.DataFrame(
+            signals, index=data.index[run_start_index:], columns=data.columns
+        )
 
     def generate_signals_single_date(self, data: pd.DataFrame) -> dict[str, int]:
         """data only up to run date"""
@@ -115,15 +140,25 @@ class RSI(MomentumStrategy):
 
     def get_signals(self, prices: np.ndarray) -> np.ndarray:
         rsi = TechnicalIndicators.rsi(prices, self.period)
-        return np.where(
-            rsi < 30,
-            1,  # buy
-            np.where(rsi > 70, -1, 0),  # sell  # hold
+        filter_signal = -1 if self.is_filter else 1
+        return (
+            np.where(
+                rsi < 30,
+                1,  # buy
+                np.where(rsi > 70, -1, 0),  # sell  # hold
+            )
+            * filter_signal
         )
 
-    def generate_signals_batch(self, data: pd.DataFrame, start_index: int) -> pd.DataFrame:
-        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[start_index:]
-        return pd.DataFrame(results, index=data.index[start_index:], columns=data.columns)
+    def generate_signals_batch(
+        self, data: pd.DataFrame, start_index: int
+    ) -> pd.DataFrame:
+        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[
+            start_index:
+        ]
+        return pd.DataFrame(
+            results, index=data.index[start_index:], columns=data.columns
+        )
 
     def generate_signals_single_date(self, data: pd.DataFrame) -> dict[str, int]:
         """most feasible for live trading, assumes the data passed is in right dates range"""
@@ -143,16 +178,28 @@ class BollingerBands(VolatilityStrategy):
         self.min_window = (period // 10 + 1) * 10
 
     def get_signals(self, prices: np.ndarray) -> np.ndarray:
-        upper, _, lower = TechnicalIndicators.bollinger_bands(prices, self.period, self.std_dev)
-        return np.where(
-            prices > upper,
-            1,  # buy
-            np.where(prices < lower, -1, 0),  # sell  # hold
+        upper, _, lower = TechnicalIndicators.bollinger_bands(
+            prices, self.period, self.std_dev
+        )
+        filter_signal = -1 if self.is_filter else 1
+        return (
+            np.where(
+                prices > upper,
+                1,  # buy
+                np.where(prices < lower, -1, 0),  # sell  # hold
+            )
+            * filter_signal
         )
 
-    def generate_signals_batch(self, data: pd.DataFrame, start_index: int) -> pd.DataFrame:
-        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[start_index:]
-        return pd.DataFrame(results, index=data.index[start_index:], columns=data.columns)
+    def generate_signals_batch(
+        self, data: pd.DataFrame, start_index: int
+    ) -> pd.DataFrame:
+        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[
+            start_index:
+        ]
+        return pd.DataFrame(
+            results, index=data.index[start_index:], columns=data.columns
+        )
 
     def generate_signals_single_date(self, data: pd.DataFrame) -> dict[str, int]:
         """most feasible for live trading, assumes the data passed is in right dates range"""
@@ -178,15 +225,25 @@ class ZScoreMeanReversion(MeanReversionStrategy):
 
     def get_signals(self, prices: np.ndarray) -> np.ndarray:
         z_scores = TechnicalIndicators.zscore(prices, self.lookback_period)
-        return np.where(
-            z_scores > self.entry_threshold,
-            -1,
-            np.where(z_scores < -self.entry_threshold, 1, 0),
+        filter_signal = -1 if self.is_filter else 1
+        return (
+            np.where(
+                z_scores > self.entry_threshold,
+                -1,
+                np.where(z_scores < -self.entry_threshold, 1, 0),
+            )
+            * filter_signal
         )
 
-    def generate_signals_batch(self, data: pd.DataFrame, start_index: int) -> pd.DataFrame:
-        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[start_index:]
-        return pd.DataFrame(results, index=data.index[start_index:], columns=data.columns)
+    def generate_signals_batch(
+        self, data: pd.DataFrame, start_index: int
+    ) -> pd.DataFrame:
+        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[
+            start_index:
+        ]
+        return pd.DataFrame(
+            results, index=data.index[start_index:], columns=data.columns
+        )
 
     def generate_signals_single_date(self, data: pd.DataFrame) -> dict[str, int]:
         """most feasible for live trading, assumes the data passed is in right dates range"""
@@ -196,7 +253,25 @@ class ZScoreMeanReversion(MeanReversionStrategy):
         return dict(zip(data.columns, results))
 
 
-def plurality_voting_single_date(strategies: list[int], tie_breaker=0) -> int:
+def vote_batch(
+    strategies: Any, contains_filters: bool = False, tie_breaker: int = 0
+) -> Any:
+    if contains_filters:
+        return sum_voting_batch(strategies)
+    else:
+        return plurality_voting_batch(strategies, tie_breaker)
+
+
+def vote_single_date(
+    strategies: Any, contains_filters: bool = False, tie_breaker: int = 0
+) -> Any:
+    if contains_filters:
+        return sum_voting_single_date(strategies)
+    else:
+        return plurality_voting_single_date(strategies, tie_breaker)
+
+
+def _plurality_voting(strategies: list[int], tie_breaker=0) -> int:
     """strategies: list of ints, each int is a signal for the SAME ticker from different strategies"""
     counts = Counter(strategies)
     most_common = counts.most_common()
@@ -209,14 +284,16 @@ def plurality_voting_single_date(strategies: list[int], tie_breaker=0) -> int:
             return most_common[0][0]
 
 
-def plurality_voting_batch(strategies: pd.DataFrame, tie_breaker=0) -> pd.DataFrame:
+def plurality_voting_single_date(strategies: pd.DataFrame, tie_breaker=0) -> list[int]:
     strategies["Signal"] = strategies.apply(
-        lambda x: plurality_voting_single_date(x, tie_breaker=tie_breaker), axis=1
+        lambda x: _plurality_voting(x, tie_breaker=tie_breaker), axis=1
     )
-    return strategies
+    return strategies.Signal.tolist()
 
 
-def plurality_voting_batch_batch(strategies: list[pd.DataFrame], tie_breaker=0) -> pd.DataFrame:
+def plurality_voting_batch(
+    strategies: list[pd.DataFrame], tie_breaker=0
+) -> pd.DataFrame:
     common_index = strategies[0].index
     common_columns = strategies[0].columns
 
@@ -231,8 +308,16 @@ def plurality_voting_batch_batch(strategies: list[pd.DataFrame], tie_breaker=0) 
     stacked = np.stack([df.values for df in strategies], axis=2)
     flat_stacked = stacked.reshape(-1, stacked.shape[2])
     flat_result = np.array(
-        [plurality_voting_single_date(row.tolist(), tie_breaker) for row in flat_stacked]
+        [_plurality_voting(row.tolist(), tie_breaker) for row in flat_stacked]
     )
     result_values = flat_result.reshape(stacked.shape[:2])
     result = pd.DataFrame(result_values, index=common_index, columns=common_columns)
     return result
+
+
+def sum_voting_single_date(strategies: list[int]) -> list[int]:
+    return list(np.sign(strategies.sum(axis=1)))
+
+
+def sum_voting_batch(strategies: list[pd.DataFrame]) -> pd.DataFrame:
+    return np.sign(sum(strategies))
