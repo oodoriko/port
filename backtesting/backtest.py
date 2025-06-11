@@ -2,8 +2,8 @@ import pandas as pd
 from tqdm import tqdm
 
 from backtesting.scenarios import Scenario
-from report import generate_simple_report
 from reporting.portfolio_analytics import AdvancedPortfolioAnalytics, PortfolioAnalytics
+from reporting.report import generate_simple_report
 from strategies.strategy import vote_batch, vote_single_date
 
 
