@@ -25,7 +25,9 @@ def calculate_sharpe(returns, rf, freq="D", annualized=False) -> float | pd.Seri
     return (excess_return / volatility).resample(freq).last()
 
 
-def calculate_ir(daily_returns, bmk_returns, freq="D", annualized=False) -> float | pd.Series:
+def calculate_ir(
+    daily_returns, bmk_returns, freq="D", annualized=False
+) -> float | pd.Series:
     daily_excess_return = daily_returns - bmk_returns
     if annualized:
         annualized_return = daily_excess_return.mean() * 252
@@ -40,7 +42,9 @@ def calculate_ir(daily_returns, bmk_returns, freq="D", annualized=False) -> floa
     return (excess_return / volatility).resample(freq).last()
 
 
-def get_return(data: pd.Series, annualized=False, freq="D") -> tuple[float, float] | pd.Series:
+def get_return(
+    data: pd.Series, annualized=False, freq="D"
+) -> tuple[float, float] | pd.Series:
     if annualized:
         # Use the actual data values, skipping day one
         start_idx = 1
@@ -48,7 +52,9 @@ def get_return(data: pd.Series, annualized=False, freq="D") -> tuple[float, floa
 
         start_value = data.iloc[start_idx]
         end_value = data.iloc[end_idx]
-        total_return = (end_value - start_value) / start_value if start_value != 0 else 0
+        total_return = (
+            (end_value - start_value) / start_value if start_value != 0 else 0
+        )
 
         # Use trading days for annualization (standard in finance)
         trading_days = end_idx - start_idx + 1
@@ -56,7 +62,11 @@ def get_return(data: pd.Series, annualized=False, freq="D") -> tuple[float, floa
 
         annualized_return = (1 + total_return) ** (1 / years) - 1 if years > 0 else 0
         return total_return, annualized_return
-    if freq == "ME" or freq == "D":  # avoid day one
+    if freq == "ME":  # avoid day one
         return data.resample(freq).mean()[1:].pct_change().dropna()
-    else:
+    elif freq == "D":
+        return data.pct_change().dropna()
+    elif freq in ["QE", "YE"]:
         return data.resample(freq).mean().pct_change().dropna()
+    else:
+        raise ValueError(f"Invalid frequency: {freq}")

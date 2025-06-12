@@ -13,7 +13,7 @@ class TechnicalIndicators:
             slowperiod=slow_period,
             signalperiod=signal_period,
         )
-
+        """macd needs a good warm up period for stabilization"""
         # Handle insufficient data cases
         if len(histogram) < 2 or np.isnan(histogram[-1]) or np.isnan(histogram[-2]):
             return 0.0, 0.0
@@ -39,7 +39,6 @@ class TechnicalIndicators:
 
     @staticmethod
     def zscore(prices: np.ndarray, period=20):
-        # TA-Lib doesn't have a direct zscore function, so we'll use its components
         rolling_mean = talib.SMA(prices, timeperiod=period)
         rolling_std = talib.STDDEV(prices, timeperiod=period)
         z_score = (prices - rolling_mean) / rolling_std

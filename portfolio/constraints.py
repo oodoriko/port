@@ -1,10 +1,49 @@
+from dataclasses import dataclass, field
+from typing import Any, Dict, List
+
 import numpy as np
 import pandas as pd
 
 
-class Constraints:
-    """dummy dumb dumb bad"""
+@dataclass
+class ConstraintsConfig:
+    long_only: bool = True
+    cash_pct: float = 0.0
+    max_long_count: float = 0.3
+    max_short_count: float = 0.3
+    max_buy_size: float = 0.3
 
+    # not used yet
+    # max_position_size: float = 0.3
+    # max_drawdown_limit: float = 0.3
+    # rebalance_threshold: float = 0.05
+    # max_daily_trades: int = 100
+    # blackout_dates: List[str] = field(default_factory=list)
+    # default_position_size: float = 0.3
+    # sector_exposure: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    # country_exposure: Dict[str, Dict[str, float]] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for backward compatibility."""
+        return {
+            "long_only": self.long_only,
+            "cash_pct": self.cash_pct,
+            "max_long_count": self.max_long_count,
+            "max_short_count": self.max_short_count,
+            "max_buy_size": self.max_buy_size,
+            # not used yet
+            # "sector_exposure": self.sector_exposure,
+            # "country_exposure": self.country_exposure,
+            # "max_position_size": self.max_position_size,
+            # "max_drawdown_limit": self.max_drawdown_limit,
+            # "rebalance_threshold": self.rebalance_threshold,
+            # "max_daily_trades": self.max_daily_trades,
+            # "blackout_dates": self.blackout_dates,
+            # "default_position_size": self.default_position_size,
+        }
+
+
+class Constraints:
     def __init__(self, constraints: dict):
         self.constraints = constraints
         self.product_data = None
@@ -20,12 +59,13 @@ class Constraints:
     def set_volume(self, volume: pd.DataFrame):
         self.volume = volume
 
-    def list_constraints(self) -> dict:
+    def get_constraints(self) -> dict:
         return self.constraints
 
     def evaluate_trades(
         self, trades: list[int], positions_size: int, max_holdings: int
     ) -> bool:
+        """bad and dumb"""
         if self.constraints is None or len(self.constraints) == 0:
             return True
         if trades is None or len(trades) == 0:
@@ -62,18 +102,18 @@ class Constraints:
         date,
         capital: float,
         trading_plan: dict[str, int],
-        new_holdings: dict[str, int],
+        new_holdings_state: dict[str, int],
         shares_to_be_traded: dict[str, int],
         executed_trading_plan: dict[str, int],
+        allocation_method: str,
     ) -> float:
-        available_capital = self._calculate_available_capital(capital)
-        to_buy = self._get_tickers_to_buy(trading_plan)
+        available_capital = capital * (1 - self.constraints.get("cash_pct", 0.0))
+        to_buy = [ticker for ticker, signal in trading_plan.items() if signal == 1]
 
         if not to_buy:
             return available_capital
 
         prices = self.price.loc[date, to_buy]
-        allocation_method = self.constraints.get("capital_allocation_method", "equal")
 
         return self._execute_allocation_strategy(
             allocation_method,
@@ -81,18 +121,10 @@ class Constraints:
             to_buy,
             prices,
             date,
-            new_holdings,
+            new_holdings_state,
             shares_to_be_traded,
             executed_trading_plan,
         )
-
-    def _calculate_available_capital(self, capital: float) -> float:
-        if self.constraints.get("no_cash", False):
-            capital *= 1 - self.constraints.get("hold_cash", 0)
-        return capital
-
-    def _get_tickers_to_buy(self, trading_plan: dict[str, int]) -> list[str]:
-        return [ticker for ticker, signal in trading_plan.items() if signal == 1]
 
     def _execute_allocation_strategy(
         self,
@@ -105,7 +137,6 @@ class Constraints:
         shares_to_be_traded: dict[str, int],
         executed_trading_plan: dict[str, int],
     ) -> float:
-        """Execute the appropriate capital allocation strategy."""
         if method == "equal":
             return self._allocate_equal_weights(
                 capital, tickers, prices, new_holdings, shares_to_be_traded
@@ -143,17 +174,13 @@ class Constraints:
         new_holdings: dict[str, int],
         shares_to_be_traded: dict[str, int],
     ) -> float:
-        """Allocate capital equally across all tickers."""
-        total_price = np.sum(prices)
-        amount_per_ticker = capital / total_price
+        amount_per_ticker = capital / len(tickers)
         remaining_capital = capital
-
         for ticker in tickers:
             shares = amount_per_ticker / prices[ticker]
             shares_to_be_traded[ticker] = shares
             new_holdings[ticker] = new_holdings.get(ticker, 0) + shares
             remaining_capital -= shares * prices[ticker]
-
         return remaining_capital
 
     def _allocate_by_priority(
@@ -161,11 +188,11 @@ class Constraints:
         capital: float,
         priority_list: list[str],
         prices: pd.Series,
-        new_holdings: dict[str, int],
+        new_holdings_state: dict[str, int],
         shares_to_be_traded: dict[str, int],
         executed_trading_plan: dict[str, int],
     ) -> float:
-        """Allocate capital based on priority order with max buy size constraints."""
+        """allocate capital based on priority order with max buy size constraints."""
         remaining_capital = capital
         max_buy_size = self.constraints.get("max_buy_size", 1) * capital
 
@@ -178,7 +205,9 @@ class Constraints:
                 min(remaining_capital, max_buy_size) / prices[ticker]
             )
             shares_to_be_traded[ticker] = max_affordable_shares
-            new_holdings[ticker] = new_holdings.get(ticker, 0) + max_affordable_shares
+            new_holdings_state[ticker] = (
+                new_holdings_state.get(ticker, 0) + max_affordable_shares
+            )
             remaining_capital -= max_affordable_shares * prices[ticker]
 
         # Allocate any remaining capital to the top priority ticker
@@ -188,8 +217,10 @@ class Constraints:
             shares_to_be_traded[top_ticker] = (
                 shares_to_be_traded.get(top_ticker) + additional_shares
             )
-            new_holdings[top_ticker] = new_holdings.get(top_ticker) + additional_shares
-            remaining_capital = 0
+            new_holdings_state[top_ticker] = (
+                new_holdings_state.get(top_ticker) + additional_shares
+            )
+            remaining_capital -= additional_shares * prices[top_ticker]
 
         return remaining_capital
 

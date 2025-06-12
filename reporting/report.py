@@ -7,22 +7,12 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.platypus import (
-    BaseDocTemplate,
-    Image,
-    PageBreak,
-    Paragraph,
-    SimpleDocTemplate,
-    Spacer,
-    Table,
-    TableStyle,
-)
+from reportlab.platypus import Image, PageBreak, Paragraph, Spacer, Table, TableStyle
 
-from reporting.portfolio_analytics import PortfolioAnalytics
 from reporting.report_styling import Colors, ReportStyling, StyleUtility
 
 
@@ -133,7 +123,7 @@ class SimpleReportGenerator:
 
         # Get constraints information
         if hasattr(self.portfolio, "constraints") and self.portfolio.constraints:
-            constraints_list = self.portfolio.constraints.list_constraints()
+            constraints_list = self.portfolio.constraints.get_constraints()
             for constraint_key, constraint_value in constraints_list.items():
                 config_data[constraint_key] = constraint_value
         self.portfolio_config = config_data
@@ -1355,11 +1345,11 @@ class SimpleReportGenerator:
         if filename is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"reports/portfolio_report_{timestamp}.pdf"
-
-        if not filename.endswith(".pdf"):
+        elif not filename.endswith(".pdf"):
             filename = f"reports/{filename}.pdf"
         else:
             filename = f"reports/{filename}"
+
         os.makedirs("reports", exist_ok=True)
 
         # Add page number function (define before using it)

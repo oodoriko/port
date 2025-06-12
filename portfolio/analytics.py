@@ -3,7 +3,7 @@ from collections import Counter, defaultdict
 import numpy as np
 import pandas as pd
 
-from reporting.metrics_calculator import calculate_ir, calculate_sharpe, get_return
+from portfolio.metrics_calculator import calculate_ir, calculate_sharpe, get_return
 
 
 class PortfolioAnalytics:
@@ -13,7 +13,7 @@ class PortfolioAnalytics:
         start_date,
         end_date,
         rf=0.02,
-        bmk_returns=0.1,
+        bmk_returns=0.1,  # we need to source a real bmk
     ):
         self.portfolio = portfolio
         self.portfolio_value = portfolio.portfolio_value
@@ -29,7 +29,7 @@ class PortfolioAnalytics:
         self.rf = rf
         self.bmk_returns = bmk_returns
         self.portfolio_value, self.portfolio_value_history = (
-            self.calculate_portfolio_value()
+            self._calculate_portfolio_value()
         )
 
     def holdings_metrics(self):
@@ -37,8 +37,8 @@ class PortfolioAnalytics:
             d: len(holdings) for d, holdings in self.portfolio.holdings_history.items()
         }
 
-    def calculate_portfolio_value(self) -> float:
-        portfolio_value_history = {}  # -> need to add portfolio value at the beginning
+    def _calculate_portfolio_value(self) -> float:
+        portfolio_value_history = {}
         for date, tickers in self.portfolio.holdings_history.items():
             value = self.close_prices.loc[date, tickers.keys()]
             portfolio_value_history[date] = value.sum()
@@ -70,12 +70,12 @@ class AdvancedPortfolioAnalytics(PortfolioAnalytics):
     def __init__(self, portfolio, start_date, end_date, rf=0.02, bmk_returns=0.1):
         super().__init__(portfolio, start_date, end_date, rf, bmk_returns)
 
-        self.cashflow_history = self.calculate_cashflow()
-        self.transaction_cost_history = self.calculate_cost()
-        self.pnl_details_history = self.calculate_daily_pnl()
-        self.pnl_history = self.calculate_pnl()
-        self.pnl_by_ticker = self.process_ticker_level_trades_data()
-        self.ticker_analysis = self.process_ticker_level_trades_data()
+        self.cashflow_history = self._calculate_cashflow()
+        self.transaction_cost_history = self._calculate_cost()
+        self.pnl_details_history = self._calculate_daily_pnl()
+        self.pnl_history = self._calculate_pnl()
+        self.pnl_by_ticker = self._process_ticker_level_trades_data()
+        self.ticker_analysis = self._process_ticker_level_trades_data()
 
     def performance_metrics(self, rf=0.02, bmk_returns=0.1):
         result = super().performance_metrics(rf, bmk_returns)
@@ -187,9 +187,9 @@ class AdvancedPortfolioAnalytics(PortfolioAnalytics):
             "sector_ts": sector_ts,
         }
 
-    def process_ticker_level_trades_data(self):
+    def _process_ticker_level_trades_data(self):
         if self.pnl_details_history is None:
-            self.pnl_details_history = self.calculate_daily_pnl()
+            self.pnl_details_history = self._calculate_daily_pnl()
 
         pnl_by_ticker = defaultdict(dict)
         for date, pnls in self.pnl_details_history.items():
@@ -202,7 +202,12 @@ class AdvancedPortfolioAnalytics(PortfolioAnalytics):
             average_holding_period = np.mean(
                 [pnl["holding_period"] for pnl in pnls.values()]
             )
-            average_return = np.mean([pnl["return"] for pnl in pnls.values()])
+
+            # Handle potential NaN/inf values in returns
+            returns = [pnl["return"] for pnl in pnls.values()]
+            valid_returns = [r for r in returns if np.isfinite(r)]
+            average_return = np.mean(valid_returns) if valid_returns else 0.0
+
             average_profit = np.mean([pnl["profit"] for pnl in pnls.values()])
             total_long_trades = np.sum(
                 [pnl["total_long_trades"] for pnl in pnls.values()]
@@ -217,7 +222,7 @@ class AdvancedPortfolioAnalytics(PortfolioAnalytics):
             }
         return ticker_analysis
 
-    def calculate_cashflow(self):
+    def _calculate_cashflow(self):
         cashflow_history = {}
         for date, tickers_shares in self.portfolio.transaction_history.items():
             prices = self.open_prices.loc[date, tickers_shares.keys()]
@@ -225,20 +230,24 @@ class AdvancedPortfolioAnalytics(PortfolioAnalytics):
             cashflow_history[date] = cf
         return cashflow_history
 
-    def calculate_pnl(self) -> dict:
+    def _calculate_pnl(self) -> dict:
         if self.pnl_details_history is None:
-            self.pnl_details_history = self.calculate_daily_pnl()
+            self.pnl_details_history = self._calculate_daily_pnl()
 
         pnl_dollar = {}
         pnl_return = {}
         for date, pnls in self.pnl_details_history.items():
             pnl_dollar[date] = sum([pnl["profit"] for d in pnls for pnl in d.values()])
-            pnl_return[date] = np.mean(
-                [pnl["return"] for d in pnls for pnl in d.values()]
+
+            # Handle potential NaN/inf values in daily returns
+            daily_returns = [pnl["return"] for d in pnls for pnl in d.values()]
+            valid_daily_returns = [r for r in daily_returns if np.isfinite(r)]
+            pnl_return[date] = (
+                np.mean(valid_daily_returns) if valid_daily_returns else 0.0
             )
         return pnl_dollar, pnl_return
 
-    def calculate_cost(self):
+    def _calculate_cost(self):
         transaction_cost_history = {}
         for date, tickers_shares in self.portfolio.transaction_history.items():
             total_cost = self.portfolio.cost.calculate_transaction_costs(
@@ -249,7 +258,7 @@ class AdvancedPortfolioAnalytics(PortfolioAnalytics):
             transaction_cost_history[date] = total_cost
         return transaction_cost_history
 
-    def calculate_daily_pnl(self) -> dict:
+    def _calculate_daily_pnl(self) -> dict:
         """pnl is only calculated when there is a sell trade, adding holdings alone doesn't generate pnl"""
         pnl_details_history = {}
         intermediate_holdings = {}
@@ -279,7 +288,17 @@ class AdvancedPortfolioAnalytics(PortfolioAnalytics):
                 elif shares < 0:  # sell trade
                     if len(existing_holding) == 0:
                         continue
-                    profit = (price - existing_holding.get("cost_basis")) * abs(shares)
+
+                    cost_basis = existing_holding.get("cost_basis", 0)
+                    profit = (price - cost_basis) * abs(shares)
+
+                    # Calculate return properly: (sell_price - cost_basis) / cost_basis
+                    # Handle division by zero
+                    if cost_basis != 0:
+                        return_pct = (price - cost_basis) / cost_basis
+                    else:
+                        return_pct = 0.0  # or handle as appropriate for your logic
+
                     daily_pnl.append(
                         {
                             ticker: {
@@ -291,12 +310,14 @@ class AdvancedPortfolioAnalytics(PortfolioAnalytics):
                                     - existing_holding.get("holding_start_date", date),
                                     unit="days",
                                 ).days,
-                                "cost_basis": existing_holding.get("cost_basis"),
+                                "cost_basis": cost_basis,
                                 "sell_price": price,
                                 "profit": profit,
-                                "total_long_trades": existing_holding.get("total_long")
+                                "total_long_trades": existing_holding.get(
+                                    "total_long", 0
+                                )
                                 + 1,
-                                "return": profit / buy_cost,
+                                "return": return_pct,
                             }
                         }
                     )
