@@ -12,16 +12,6 @@ warnings.filterwarnings("ignore")
 
 
 class StrategyTypes(Enum):
-    """strategy classification types"""
-
-    MOMENTUM = "momentum"
-    VOLATILITY = "volatility"
-    MEAN_REVERSION = "mean_reversion"
-
-
-class Strategies(Enum):
-    """available trading strategies, note a strategy belongs to a strategy type"""
-
     MACD_CROSSOVER = "macd_x"
     RSI_CROSSOVER = "rsi_x"
     BOLLINGER_BANDS = "b_bands"
@@ -29,62 +19,41 @@ class Strategies(Enum):
 
 
 class Strategy:
-    """maybe i don't need this...."""
+    """is_positive: is the signal is used as a positive signal"""
 
-    """filter means the signal is used as a negative signal"""
-
-    def __init__(self, name: Strategies):
+    def __init__(self, name: StrategyTypes, is_positive: bool = False):
         self.name = name
         self.price_type = "close"
         self.min_window = 60
-        self.is_filter = False
+        self.is_positive = is_positive
 
     @classmethod
-    def create(cls, strategy_name: Strategies, is_filter: bool = False) -> "Strategy":
-        if strategy_name == Strategies.MACD_CROSSOVER:
-            return MACD(is_filter=is_filter)
-        elif strategy_name == Strategies.RSI_CROSSOVER:
-            return RSI(is_filter=is_filter)
-        elif strategy_name == Strategies.BOLLINGER_BANDS:
-            return BollingerBands(is_filter=is_filter)
-        elif strategy_name == Strategies.Z_SCORE_MEAN_REVERSION:
-            return ZScoreMeanReversion(is_filter=is_filter)
+    def create(
+        cls, strategy_name: StrategyTypes, is_positive: bool = False
+    ) -> "Strategy":
+        if strategy_name == StrategyTypes.MACD_CROSSOVER:
+            return MACD(is_positive=is_positive)
+        elif strategy_name == StrategyTypes.RSI_CROSSOVER:
+            return RSI(is_positive=is_positive)
+        elif strategy_name == StrategyTypes.BOLLINGER_BANDS:
+            return BollingerBands(is_positive=is_positive)
+        elif strategy_name == StrategyTypes.Z_SCORE_MEAN_REVERSION:
+            return ZScoreMeanReversion(is_positive=is_positive)
         else:
             raise ValueError(f"Invalid strategy name: {strategy_name}")
 
 
-class MomentumStrategy(Strategy):
-    def __init__(self, name: StrategyTypes, is_filter: bool = False):
-        super().__init__(name)
-        self.is_filter = is_filter
-        self.strategy_type = StrategyTypes.MOMENTUM
-
-
-class MeanReversionStrategy(Strategy):
-    def __init__(self, name: str, is_filter: bool = False):
-        super().__init__(name)
-        self.is_filter = is_filter
-        self.strategy_type = StrategyTypes.MEAN_REVERSION
-
-
-class VolatilityStrategy(Strategy):
-    def __init__(self, name: str, is_filter: bool = False):
-        super().__init__(name)
-        self.is_filter = is_filter
-        self.strategy_type = StrategyTypes.VOLATILITY
-
-
-class MACD(MomentumStrategy):
-    """macd strategy - cross over. macd needs a good warm up period for stabilization"""
+class MACD(Strategy):
+    """macd strategy - cross over"""
 
     def __init__(
         self,
         fast_period=12,
         slow_period=26,
         signal_period=9,
-        is_filter: bool = False,
+        is_positive: bool = False,
     ):
-        super().__init__(Strategies.MACD_CROSSOVER, is_filter)
+        super().__init__(StrategyTypes.MACD_CROSSOVER, is_positive)
         self.fast_period = fast_period
         self.slow_period = slow_period
         self.signal_period = signal_period
@@ -94,7 +63,7 @@ class MACD(MomentumStrategy):
         prev, current = TechnicalIndicators.macd(
             arr, self.fast_period, self.slow_period, self.signal_period
         )
-        filter_signal = -1 if self.is_filter else 1
+        filter_signal = -1 if self.is_positive else 1
         if prev <= 0 and current > 0:
             return 1 * filter_signal
         elif prev >= 0 and current < 0:
@@ -130,17 +99,17 @@ class MACD(MomentumStrategy):
         return {ticker: signal for ticker, signal in zip(data.columns, signals)}
 
 
-class RSI(MomentumStrategy):
+class RSI(Strategy):
     """RSI strategy - overbought/oversold"""
 
-    def __init__(self, period=14, is_filter: bool = False):
-        super().__init__(Strategies.RSI_CROSSOVER, is_filter)
+    def __init__(self, period=14, is_positive: bool = False):
+        super().__init__(StrategyTypes.RSI_CROSSOVER, is_positive)
         self.period = period
         self.min_window = (period // 10 + 1) * 10
 
     def get_signals(self, prices: np.ndarray) -> np.ndarray:
         rsi = TechnicalIndicators.rsi(prices, self.period)
-        filter_signal = -1 if self.is_filter else 1
+        filter_signal = -1 if self.is_positive else 1
         return (
             np.where(
                 rsi < 30,
@@ -161,18 +130,17 @@ class RSI(MomentumStrategy):
         )
 
     def generate_signals_single_date(self, data: pd.DataFrame) -> dict[str, int]:
-        """most feasible for live trading, assumes the data passed is in right dates range"""
         if len(data) < self.period:
             return {ticker: 0 for ticker in data.columns}
         results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[-1]
         return dict(zip(data.columns, results))
 
 
-class BollingerBands(VolatilityStrategy):
+class BollingerBands(Strategy):
     """Bollinger Bands strategy - breakout"""
 
-    def __init__(self, period=20, std_dev=2, is_filter: bool = False):
-        super().__init__(Strategies.BOLLINGER_BANDS, is_filter)
+    def __init__(self, period=20, std_dev=2, is_positive: bool = False):
+        super().__init__(StrategyTypes.BOLLINGER_BANDS, is_positive)
         self.period = period
         self.std_dev = std_dev
         self.min_window = (period // 10 + 1) * 10
@@ -181,7 +149,7 @@ class BollingerBands(VolatilityStrategy):
         upper, _, lower = TechnicalIndicators.bollinger_bands(
             prices, self.period, self.std_dev
         )
-        filter_signal = -1 if self.is_filter else 1
+        filter_signal = -1 if self.is_positive else 1
         return (
             np.where(
                 prices > upper,
@@ -202,22 +170,21 @@ class BollingerBands(VolatilityStrategy):
         )
 
     def generate_signals_single_date(self, data: pd.DataFrame) -> dict[str, int]:
-        """most feasible for live trading, assumes the data passed is in right dates range"""
         if len(data) < self.period:
             return {ticker: 0 for ticker in data.columns}
         results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[-1]
         return dict(zip(data.columns, results))
 
 
-class ZScoreMeanReversion(MeanReversionStrategy):
+class ZScoreMeanReversion(Strategy):
     def __init__(
         self,
         lookback_period=20,
         entry_threshold=2.0,
         exit_threshold=0.5,
-        is_filter: bool = False,
+        is_positive: bool = False,
     ):
-        super().__init__(Strategies.Z_SCORE_MEAN_REVERSION, is_filter)
+        super().__init__(StrategyTypes.Z_SCORE_MEAN_REVERSION, is_positive)
         self.lookback_period = lookback_period
         self.entry_threshold = entry_threshold
         self.exit_threshold = exit_threshold
@@ -225,7 +192,7 @@ class ZScoreMeanReversion(MeanReversionStrategy):
 
     def get_signals(self, prices: np.ndarray) -> np.ndarray:
         z_scores = TechnicalIndicators.zscore(prices, self.lookback_period)
-        filter_signal = -1 if self.is_filter else 1
+        filter_signal = -1 if self.is_positive else 1
         return (
             np.where(
                 z_scores > self.entry_threshold,

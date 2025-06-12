@@ -106,4 +106,22 @@ def get_last_business_days(year=None):
     results["year_end"] = results["month_ends"][-1]  # Last month end is year end
 
     return results
-    return results
+
+
+def make_json_serializable(obj):
+    """Convert enum objects to their string values for JSON serialization.
+
+    Args:
+        obj: Object to make JSON serializable (dict, list, enum, or any other type)
+
+    Returns:
+        JSON-serializable version of the object
+    """
+    if isinstance(obj, dict):
+        return {key: make_json_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [make_json_serializable(item) for item in obj]
+    elif hasattr(obj, "value"):  # This handles enum objects
+        return obj.value
+    else:
+        return obj

@@ -1,5 +1,5 @@
-# use signal in reverse! -> filter
 import traceback
+from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from copy import deepcopy
 from typing import Any, List, Optional
@@ -10,35 +10,44 @@ from tqdm import tqdm
 
 from backtesting.backtest import Backtest
 from backtesting.scenarios import Scenario
-from config import DEFAULT_GRID_SEARCH_PARAMS, StrategyConfig
+from strategies.strategy import Strategy, StrategyTypes
 
 
 class GridSearch:
-    def __init__(self, base_scenario: Scenario, max_workers: Optional[int] = None):
+    def __init__(
+        self,
+        base_scenario: Scenario,
+        max_workers: Optional[int] = None,
+        verbose: bool = False,
+    ):
         self.base_scenario = base_scenario
         self.max_workers = max_workers
-        self.grid_params = DEFAULT_GRID_SEARCH_PARAMS
+        self.grid_params = None
         self.results = []
+        self.verbose = verbose
 
     def set_grid_params(self, grid_params: list[dict[str, Any]]):
         self.grid_params = grid_params
 
     def _generate_grid_params_combo(
         self,
-        grid_params: list[StrategyConfig],
+        grid_params: list[dict[str, Any]],
     ):
         """not the classic auto cartesian product way YET"""
+        param_names = []
+        param_values = []
+        for param in grid_params:
+            name_map = {True: "Pos", False: "Neg"}
+            strategy_names = defaultdict(list)
+            for strategy, is_positive in param.items():
+                strategy_names[name_map[is_positive]].append(strategy.value)
+            param_values.append(param)
+            param_names.append(strategy_names)
+
         param_names = [
-            " | ".join(
-                [
-                    f"{k}: " + ", ".join(v.value for v in values)
-                    for k, values in param.to_dict().items()
-                    if len(values) > 0
-                ]
-            )
-            for param in grid_params
+            " ".join([f"**{key}: {' || '.join(value)}" for key, value in param.items()])
+            for param in param_names
         ]
-        param_values = [param.to_strategies() for param in grid_params]
         return param_names, param_values
 
     def _create_scenarios(self) -> List[Scenario]:
@@ -95,6 +104,7 @@ class GridSearch:
                     as_completed(future_to_scenario),
                     total=len(scenarios),
                     desc="Grid search progress",
+                    disable=not self.verbose,
                 ):
                     result = future.result()
                     if result is not None:

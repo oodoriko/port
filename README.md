@@ -31,12 +31,22 @@ TODO:
 1. A cost model dependent on prev day volume -> done
 2. Shares -> done
 3. add capital, fracitional shares (divide capital across shares) -> DONE
-4. FIX GRAPH STYLING -> DONE 
-6. SET UP GRID SEARCH ->DONE
-7. SET UP GRID SESARH REP -> DONE
+4. FIX GRAPH STYLING -> DONE
+5. SET UP GRID SEARCH ->DONE
+6. SET UP GRID SESARH REP -> DONE
+7. REFACTOR FOR CLARITY - CURRENTLY TOO NESTED -> done
 
-8. CHECK ACCRUACY
-9.   - VOTING/SUMMING ALGO
-     - METRICS CALCULATION
-10. RUN REAL GS
-11. WRITE DOCS FOR EVERYTHING, REFACTOR FOR CLARITY - CURRENTLY TOO NESTED
+8. optimizing strategy calculation, more vectorization and try online [P3]
+9. generate more data for analytics so that no data is process in report.py [P2]
+10. make date easier to access [P1]
+11. CHECK ACCRUACY
+12. - VOTING/SUMMING ALGO
+    - METRICS CALCULATION
+13. RUN REAL GS
+14. WRITE DOCS FOR EVERYTHING
+
+maybe:
+
+1. logger
+2. immutable class for potfolio
+3. data chunking for backtesting

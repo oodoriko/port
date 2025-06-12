@@ -1,5 +1,7 @@
 """
 Everything probably has to be numpy arrays implicitly indexed by dates when data gets too big... ugh
+
+this is so complicated and why??
 """
 
 import os
@@ -11,7 +13,8 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from constants import END_DATE, START_DATE
+START_DATE = "2014-01-01"
+END_DATE = "2025-06-01"
 
 RATE_LIMITING_AVAILABLE = True
 

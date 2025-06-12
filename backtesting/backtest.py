@@ -2,7 +2,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from backtesting.scenarios import Scenario
-from reporting.portfolio_analytics import AdvancedPortfolioAnalytics, PortfolioAnalytics
+from portfolio.analytics import AdvancedPortfolioAnalytics, PortfolioAnalytics
 from reporting.report import generate_simple_report
 from strategies.strategy import vote_batch, vote_single_date
 
@@ -11,16 +11,21 @@ class Backtest:
     def __init__(
         self,
         scenario: Scenario,
+        verbose: bool = False,
     ):
+        if scenario.get_strategies() is None:
+            raise ValueError("Strategies are not set in scenario")
+
         self.start_date = scenario.start_date
         self.end_date = scenario.end_date
-        self.strategies = scenario.get_strategies()
+        self.strategies = scenario.get_strategies()  # list of Strategy objects
         self.trading_dates = scenario.get_trading_dates()
         self.portfolio = scenario.get_portfolio()
         self.contains_filters = scenario.contains_filters
+        self.verbose = verbose
 
-    def run(self, verbose: bool = True):
-        if verbose:
+    def run(self):
+        if self.verbose:
             print(f"Backtest starting... whomp whomp!")
             print(
                 f"Total trading days: {len(self.trading_dates)}\n"
@@ -41,7 +46,7 @@ class Backtest:
             self.trading_dates,
             desc="Backtesting by date x strategy",
             unit="day",
-            disable=not verbose,
+            disable=not self.verbose,
         ):
             signals = {}
 
@@ -58,7 +63,7 @@ class Backtest:
             trading_plan = dict(zip(universe, trades))
             self.portfolio.trade(date, trades, trading_plan)
 
-        if verbose:
+        if self.verbose:
             print("Ding ding ding! Backtest completed!")
 
     def run_batch(self, verbose: bool = True):
@@ -131,3 +136,6 @@ class Backtest:
             bmk_returns=bmk_returns,
             filename=filename,
         )
+
+    def get_portfolio(self):
+        return self.portfolio
