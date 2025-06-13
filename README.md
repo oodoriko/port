@@ -9,7 +9,7 @@ Assumptions:
 4. rf = .02 bmk=.1
 
 TODO:
-
+0. graph y-axis
 1. move data processing out of report
 2. optimizing strategy calculation using more vectorization/online
 3. check strategy filter logic
