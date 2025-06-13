@@ -17,8 +17,8 @@ DEFAULT_PORTFOLIO_SETUP = PortfolioConfig(
 DEFAULT_CONSTRAINTS = ConstraintsConfig(
     long_only=True,
     cash_pct=0.0,
-    max_long_count=0.3,
-    max_short_count=0.3,
+    max_long_trades=0.5,
+    max_short_trades=0.5,
     max_buy_size=0.3,
 )
 
@@ -27,8 +27,8 @@ DEFAULT_BENCHMARK = Benchmarks.SP500
 ##DEFAULT STRATEGY CONFIG
 DEFAULT_STRATEGY_CONFIG = {
     StrategyTypes.MACD_CROSSOVER: True,
-    StrategyTypes.RSI_CROSSOVER: True,
-    StrategyTypes.BOLLINGER_BANDS: True,
+    # StrategyTypes.RSI_CROSSOVER: True,
+    # StrategyTypes.BOLLINGER_BANDS: True,
     StrategyTypes.Z_SCORE_MEAN_REVERSION: True,
 }
 

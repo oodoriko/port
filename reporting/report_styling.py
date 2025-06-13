@@ -1666,6 +1666,8 @@ class ReportStyling:
                 formatted_value = ", ".join([vv.value for vv in value])
             elif isinstance(value, list):
                 formatted_value = ", ".join(str(v) for v in value) if value else "None"
+            elif key == "allocation_method" and value == "equal":
+                formatted_value = "Equally Weighted"
             elif key == "allow_short":
                 formatted_value = "Not allowed" if not value else "Allowed"
             elif isinstance(value, bool):
@@ -1675,6 +1677,7 @@ class ReportStyling:
                 "max_market_cap",
                 "initial_capital",
                 "new_capital_growth_amt",
+                "initial_value",
             ]:
                 if key == "max_market_cap" and value == np.inf:
                     formatted_value = "Uncapped"
@@ -1688,8 +1691,15 @@ class ReportStyling:
                 "max_market_cap",
                 "new_capital_growth_amt",
                 "Overall Sharpe Ratio",
+                "initial_value",
             ]:
                 formatted_value = f"{value:.2%}"
+                if key in ["max_long_trades", "max_short_trades"]:
+                    formatted_value += " (of holdings in shares)"
+                elif key in ["max_buy_size"]:
+                    formatted_value += " (of available capital)"
+                elif key in ["new_capital_growth_pct"]:
+                    formatted_value += " (of initial capital)"
             elif isinstance(value, (int, float)):
                 formatted_value = f"{value:,.2f}"
             else:

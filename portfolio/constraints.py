@@ -9,8 +9,8 @@ import pandas as pd
 class ConstraintsConfig:
     long_only: bool = True
     cash_pct: float = 0.0
-    max_long_count: float = 0.3
-    max_short_count: float = 0.3
+    max_long_trades: float = 0.3
+    max_short_trades: float = 0.3
     max_buy_size: float = 0.3
 
     # not used yet
@@ -28,8 +28,8 @@ class ConstraintsConfig:
         return {
             "long_only": self.long_only,
             "cash_pct": self.cash_pct,
-            "max_long_count": self.max_long_count,
-            "max_short_count": self.max_short_count,
+            "max_long_trades": self.max_long_trades,
+            "max_short_trades": self.max_short_trades,
             "max_buy_size": self.max_buy_size,
             # not used yet
             # "sector_exposure": self.sector_exposure,
@@ -62,9 +62,7 @@ class Constraints:
     def get_constraints(self) -> dict:
         return self.constraints
 
-    def evaluate_trades(
-        self, trades: list[int], positions_size: int, max_holdings: int
-    ) -> bool:
+    def evaluate_trades(self, trades: list[int], positions_size: int, max_holdings: int) -> bool:
         """bad and dumb"""
         if self.constraints is None or len(self.constraints) == 0:
             return True
@@ -72,28 +70,24 @@ class Constraints:
             return True
         value, count = np.unique(trades, return_counts=True)
 
-        max_short_count = max(
-            max_holdings / 2, self.constraints["max_short_count"] * positions_size
+        max_short_trades = max(
+            max_holdings / 2, self.constraints["max_short_trades"] * positions_size
         )
-        max_long_count = max(
-            max_holdings / 2, self.constraints["max_long_count"] * positions_size
+        max_long_trades = max(
+            max_holdings / 2, self.constraints["max_long_trades"] * positions_size
         )
 
         short_count_idx = np.where(value == -1)[0]
         if len(short_count_idx) > 0:
             short_count = count[short_count_idx[0]]
-            if short_count > max_short_count:
-                print(
-                    f"Short trade amount {short_count} too large violates max trade constraint"
-                )
+            if short_count > max_short_trades:
+                print(f"Short trade amount {short_count} too large violates max trade constraint")
                 return False
         long_count_idx = np.where(value == 1)[0]
         if len(long_count_idx) > 0:
             long_count = count[long_count_idx[0]]
-            if long_count > max_long_count:
-                print(
-                    f"Long trade amount {long_count} too large violates max trade constraint"
-                )
+            if long_count > max_long_trades:
+                print(f"Long trade amount {long_count} too large violates max trade constraint")
                 return False
         return True
 
@@ -201,13 +195,9 @@ class Constraints:
                 executed_trading_plan[ticker] = 0
                 continue
 
-            max_affordable_shares = (
-                min(remaining_capital, max_buy_size) / prices[ticker]
-            )
+            max_affordable_shares = min(remaining_capital, max_buy_size) / prices[ticker]
             shares_to_be_traded[ticker] = max_affordable_shares
-            new_holdings_state[ticker] = (
-                new_holdings_state.get(ticker, 0) + max_affordable_shares
-            )
+            new_holdings_state[ticker] = new_holdings_state.get(ticker, 0) + max_affordable_shares
             remaining_capital -= max_affordable_shares * prices[ticker]
 
         # Allocate any remaining capital to the top priority ticker
@@ -217,9 +207,7 @@ class Constraints:
             shares_to_be_traded[top_ticker] = (
                 shares_to_be_traded.get(top_ticker) + additional_shares
             )
-            new_holdings_state[top_ticker] = (
-                new_holdings_state.get(top_ticker) + additional_shares
-            )
+            new_holdings_state[top_ticker] = new_holdings_state.get(top_ticker) + additional_shares
             remaining_capital -= additional_shares * prices[top_ticker]
 
         return remaining_capital
