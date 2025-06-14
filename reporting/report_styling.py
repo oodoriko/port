@@ -240,6 +240,8 @@ class ReportStyling:
         normal_style=None,
         show_crisis_periods=True,
         graph_type="D",
+        y_axis_limits=None,
+        y_axis_ticks=None,
     ):
         """
         Unified generic function to create line charts for any time series data
@@ -513,6 +515,12 @@ class ReportStyling:
                             columnspacing=0.8,  # Reduce space between columns
                             handletextpad=0.5,  # Reduce space between legend marker and text
                         )
+
+                # Set y-axis limits and ticks if provided
+                if y_axis_limits is not None:
+                    ax.set_ylim(y_axis_limits)
+                if y_axis_ticks is not None:
+                    ax.set_yticks(y_axis_ticks)
             else:
                 # No data available
                 if data_key is not None:
@@ -897,6 +905,8 @@ class ReportStyling:
         legend_ncol=3,
         no_data_message="No data available",
         normal_style=None,
+        y_axis_limits=None,
+        y_axis_ticks=None,
     ):
         """
         Generic function to create multi-line charts (like sector exposure over time)
@@ -1008,6 +1018,12 @@ class ReportStyling:
                     )
 
                 plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+
+                # Set y-axis limits and ticks if provided
+                if y_axis_limits is not None:
+                    ax.set_ylim(y_axis_limits)
+                if y_axis_ticks is not None:
+                    ax.set_yticks(y_axis_ticks)
             else:
                 ax.text(
                     0.5,
