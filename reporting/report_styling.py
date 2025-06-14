@@ -240,6 +240,8 @@ class ReportStyling:
         normal_style=None,
         show_crisis_periods=True,
         graph_type="D",
+        y_axis_limits=None,
+        y_axis_ticks=None,
     ):
         """
         Unified generic function to create line charts for any time series data
@@ -513,6 +515,12 @@ class ReportStyling:
                             columnspacing=0.8,  # Reduce space between columns
                             handletextpad=0.5,  # Reduce space between legend marker and text
                         )
+
+                # Set y-axis limits and ticks if provided
+                if y_axis_limits is not None:
+                    ax.set_ylim(y_axis_limits)
+                if y_axis_ticks is not None:
+                    ax.set_yticks(y_axis_ticks)
             else:
                 # No data available
                 if data_key is not None:
@@ -897,6 +905,8 @@ class ReportStyling:
         legend_ncol=3,
         no_data_message="No data available",
         normal_style=None,
+        y_axis_limits=None,
+        y_axis_ticks=None,
     ):
         """
         Generic function to create multi-line charts (like sector exposure over time)
@@ -1008,6 +1018,12 @@ class ReportStyling:
                     )
 
                 plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+
+                # Set y-axis limits and ticks if provided
+                if y_axis_limits is not None:
+                    ax.set_ylim(y_axis_limits)
+                if y_axis_ticks is not None:
+                    ax.set_yticks(y_axis_ticks)
             else:
                 ax.text(
                     0.5,
@@ -1300,6 +1316,10 @@ class ReportStyling:
         bar_position_ratio=0.80,  # Position bars at 80% of bottom value
         bar_height_ratio=0.15,  # Bars take 15% of chart height
         right_axis_zero_line=False,  # Add horizontal line at 0 for right axis
+        y_axis_limits_left=None,  # NEW: Limits for left y-axis
+        y_axis_limits_right=None,  # NEW: Limits for right y-axis
+        y_axis_ticks_left=None,  # NEW: Ticks for left y-axis
+        y_axis_ticks_right=None,  # NEW: Ticks for right y-axis
     ):
         """
         Create a generic dual y-axis line chart with optional bar chart below
@@ -1329,11 +1349,14 @@ class ReportStyling:
         - bar_width: Width of bars
         - bar_position_ratio: Position bars at this ratio of bottom chart value
         - bar_height_ratio: Bar height as ratio of chart height
-        - right_axis_zero_line: Add horizontal line at 0 for right axis (useful for returns)
+        - right_axis_zero_line: Add horizontal line at 0 for right axis
+        - y_axis_limits_left: Tuple (min, max) for left y-axis limits
+        - y_axis_limits_right: Tuple (min, max) for right y-axis limits
+        - y_axis_ticks_left: List of tick values for left y-axis
+        - y_axis_ticks_right: List of tick values for right y-axis
         """
         try:
             self.setup_matplotlib_style()
-
             fig, ax1 = plt.subplots(figsize=figsize)
 
             # Prepare data for left axis
@@ -1612,6 +1635,16 @@ class ReportStyling:
             # Add grid
             ax1.grid(True, alpha=0.3)
 
+            # Apply y-axis limits and ticks if provided
+            if y_axis_limits_left is not None:
+                ax1.set_ylim(y_axis_limits_left)
+            if y_axis_limits_right is not None:
+                ax2.set_ylim(y_axis_limits_right)
+            if y_axis_ticks_left is not None:
+                ax1.set_yticks(y_axis_ticks_left)
+            if y_axis_ticks_right is not None:
+                ax2.set_yticks(y_axis_ticks_right)
+
             # Adjust layout
             plt.tight_layout()
 
@@ -1666,6 +1699,8 @@ class ReportStyling:
                 formatted_value = ", ".join([vv.value for vv in value])
             elif isinstance(value, list):
                 formatted_value = ", ".join(str(v) for v in value) if value else "None"
+            elif key == "allocation_method" and value == "equal":
+                formatted_value = "Equally Weighted"
             elif key == "allow_short":
                 formatted_value = "Not allowed" if not value else "Allowed"
             elif isinstance(value, bool):
@@ -1675,6 +1710,7 @@ class ReportStyling:
                 "max_market_cap",
                 "initial_capital",
                 "new_capital_growth_amt",
+                "initial_value",
             ]:
                 if key == "max_market_cap" and value == np.inf:
                     formatted_value = "Uncapped"
@@ -1687,9 +1723,24 @@ class ReportStyling:
                 "min_market_cap",
                 "max_market_cap",
                 "new_capital_growth_amt",
-                "Overall Sharpe Ratio",
+                "Sharpe Ratio",
+                "Information Ratio",
+                "initial_value",
+                "Risk-Free Rate",
+                "Benchmark Return",
             ]:
                 formatted_value = f"{value:.2%}"
+                if key in ["max_long_trades", "max_short_trades"]:
+                    formatted_value += " (of holdings in shares)"
+                elif key in ["max_buy_size"]:
+                    formatted_value += " (of available capital)"
+                elif key in ["new_capital_growth_pct"]:
+                    formatted_value += " (of initial capital)"
+            elif key in ["Sharpe Ratio", "Information Ratio"]:
+                if key == "Sharpe Ratio":
+                    formatted_value = f"{value} (rf:{data_dict['Risk-Free Rate']})"
+                elif key == "Information Ratio":
+                    formatted_value = f"{value} (bmk:{data_dict['Benchmark Return']})"
             elif isinstance(value, (int, float)):
                 formatted_value = f"{value:,.2f}"
             else:

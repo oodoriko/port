@@ -47,10 +47,8 @@ class PortfolioConfig:
     # below are used to reduce trading universe, different from exposure constraints
     min_market_cap: float = 0
     max_market_cap: float = float("inf")
-    exclude_sectors: List[Sectors] = field(default_factory=list)
-    include_countries: List[Countries] = field(
-        default_factory=lambda: [Countries.UNITED_STATES]
-    )
+    excluded_sectors: List[Sectors] = field(default_factory=list)
+    included_countries: List[Countries] = field(default_factory=lambda: [Countries.UNITED_STATES])
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -61,8 +59,8 @@ class PortfolioConfig:
             "new_capital_growth_pct": self.new_capital_growth_pct,
             "new_capital_growth_amt": self.new_capital_growth_amt,
             "allocation_method": self.allocation_method,
-            "exclude_sectors": self.exclude_sectors,
-            "include_countries": self.include_countries,
+            "excluded_sectors": self.excluded_sectors,
+            "included_countries": self.included_countries,
             "min_market_cap": self.min_market_cap,
             "max_market_cap": self.max_market_cap,
         }
@@ -94,9 +92,7 @@ class Portfolio:
 
         # Data
         self.universe, self.product_data = self._initialize_universe()
-        self.open_prices, self.close_prices, self.volumes = (
-            self._initialize_price_data()
-        )
+        self.open_prices, self.close_prices, self.volumes = self._initialize_price_data()
         self._setup_constraints_data()
 
         # Trading history tracking
@@ -123,18 +119,14 @@ class Portfolio:
         return universe, filtered_data
 
     def _apply_universe_filters(self, product_data: pd.DataFrame) -> pd.DataFrame:
-        exclude_sectors = [
-            sector.value for sector in self.setup.get("exclude_sectors", [])
-        ]
-        include_countries = [
-            country.value for country in self.setup.get("include_countries", [])
-        ]
+        excluded_sectors = [sector.value for sector in self.setup.get("excluded_sectors", [])]
+        included_countries = [country.value for country in self.setup.get("included_countries", [])]
 
-        sector_filter = ~product_data.sector.isin(exclude_sectors)
-        market_cap_filter = (
-            product_data.marketCap >= self.setup.get("min_market_cap")
-        ) & (product_data.marketCap <= self.setup.get("max_market_cap"))
-        country_filter = product_data.country.isin(include_countries)
+        sector_filter = ~product_data.sector.isin(excluded_sectors)
+        market_cap_filter = (product_data.marketCap >= self.setup.get("min_market_cap")) & (
+            product_data.marketCap <= self.setup.get("max_market_cap")
+        )
+        country_filter = product_data.country.isin(included_countries)
 
         combined_filter = sector_filter & market_cap_filter & country_filter
         return product_data[combined_filter]
@@ -174,9 +166,7 @@ class Portfolio:
             price_data, end_date, start_date, lookback_window, lookahead_window
         )
 
-    def trade(
-        self, date: np.datetime64, trades: List[int], trading_plan: Dict[str, int]
-    ) -> None:
+    def trade(self, date: np.datetime64, trades: List[int], trading_plan: Dict[str, int]) -> None:
         if not self._can_execute_trades(trades):
             self.trading_status[date] = -1
             return
@@ -215,9 +205,7 @@ class Portfolio:
         )
 
     def _can_execute_trades(self, trades: List[int]) -> bool:
-        positions_size = (
-            len(self.universe) if len(self.holdings) == 0 else len(self.holdings)
-        )
+        positions_size = len(self.universe) if len(self.holdings) == 0 else len(self.holdings)
         max_holdings = len(self.universe)
 
         return self.constraints.evaluate_trades(trades, positions_size, max_holdings)

@@ -1,7 +1,10 @@
+import os
 import traceback
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from copy import deepcopy
+from datetime import datetime
+from itertools import combinations, product
 from typing import Any, List, Optional
 
 import numpy as np
@@ -10,7 +13,7 @@ from tqdm import tqdm
 
 from backtesting.backtest import Backtest
 from backtesting.scenarios import Scenario
-from strategies.strategy import Strategy, StrategyTypes
+from strategies.strategy import StrategyTypes
 
 
 class GridSearch:
@@ -26,8 +29,48 @@ class GridSearch:
         self.results = []
         self.verbose = verbose
 
-    def set_grid_params(self, grid_params: list[dict[str, Any]]):
+    def set_grid_params(
+        self,
+        grid_params: list[dict[str, Any]] | list[StrategyTypes],
+        max_signal: int = 4,
+        max_filter: int = 4,
+        min_signal: int = 0,
+        min_filter: int = 0,
+    ):
+        if (
+            grid_params is not None
+            and len(grid_params) > 0
+            and isinstance(grid_params[0], StrategyTypes)
+        ):
+            grid_params = self._generate_grid_params(
+                grid_params,
+                max_signal=max_signal,
+                max_filter=max_filter,
+                min_signal=min_signal,
+                min_filter=min_filter,
+            )
         self.grid_params = grid_params
+
+    def _generate_grid_params(
+        self,
+        strategy_types: list[StrategyTypes],
+        max_signal: int,
+        max_filter: int,
+        min_signal: int,
+        min_filter: int,
+    ):
+        all_combinations = []
+        for r in range(1, len(strategy_types) + 1):
+            for combo in combinations(strategy_types, r):
+                for truth_values in product([True, False], repeat=len(combo)):
+                    true_count = truth_values.count(True)
+                    false_count = truth_values.count(False)
+                    if (min_signal <= true_count <= max_signal) and (
+                        min_filter <= false_count <= max_filter
+                    ):
+                        all_combinations.append(dict(zip(combo, truth_values)))
+        print(f"Generated {len(all_combinations)} grid parameter combinations")
+        return all_combinations
 
     def _generate_grid_params_combo(
         self,
@@ -41,6 +84,9 @@ class GridSearch:
             strategy_names = defaultdict(list)
             for strategy, is_positive in param.items():
                 strategy_names[name_map[is_positive]].append(strategy.value)
+            strategy_names = {
+                k: strategy_names[k] for k in ["Pos", "Neg"] if len(strategy_names[k]) > 0
+            }  # enforced key order for formatting
             param_values.append(param)
             param_names.append(strategy_names)
 
@@ -122,10 +168,7 @@ class GridSearch:
 
     def get_grid_search_schedule(self) -> pd.DataFrame:
         return pd.DataFrame(
-            [
-                {"grid_num": k, "param_name": v["param_name"]}
-                for k, v in self.results.items()
-            ]
+            [{"grid_num": k, "param_name": v["param_name"]} for k, v in self.results.items()]
         ).sort_values(by="grid_num", ascending=True)
 
     def results_to_dataframe(self) -> pd.DataFrame:
@@ -147,3 +190,44 @@ class GridSearch:
             data.append(row)
 
         return pd.DataFrame(data).sort_values(by="grid_num", ascending=True)
+
+    def results_to_csv(self, filename: str = None):
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"outputs/grid_search/gs_results_{timestamp}.csv"
+        elif not filename.endswith(".csv"):
+            filename = f"outputs/grid_search/{filename}.csv"
+        else:
+            filename = f"outputs/grid_search/{filename}"
+
+        os.makedirs("outputs/grid_search", exist_ok=True)
+        df = self.results_to_dataframe()
+        df.sort_values(by="annualized_return", ascending=False, inplace=True)
+        df.to_csv(filename, index=False)
+
+    def results_to_text(self, filename: str = None):
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"outputs/grid_search/gs_results_{timestamp}.txt"
+        elif not filename.endswith(".txt"):
+            filename = f"outputs/grid_search/{filename}.txt"
+        else:
+            filename = f"outputs/grid_search/{filename}"
+
+        os.makedirs("outputs/grid_search", exist_ok=True)
+
+        d = self.results_to_dataframe()
+        d.sort_values(by="annualized_return", ascending=False, inplace=True)
+        d[["total_return", "annualized_return"]] = d[
+            ["total_return", "annualized_return"]
+        ].applymap(lambda x: f"{x*100:.2f}%")
+        d[["annualized_sharpe", "annualized_ir"]] = d[
+            ["annualized_sharpe", "annualized_ir"]
+        ].applymap(lambda x: f"{x:.2f}")
+        d[["average_holding_period", "max_holding_amount"]] = d[
+            ["average_holding_period", "max_holding_amount"]
+        ].applymap(lambda x: f"{x:.0f}")
+
+        print(d.to_string(index=False))
+        with open(filename, "w") as f:
+            f.write(d.to_string(index=False))
