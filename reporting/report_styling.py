@@ -1690,8 +1690,11 @@ class ReportStyling:
                 "min_market_cap",
                 "max_market_cap",
                 "new_capital_growth_amt",
-                "Overall Sharpe Ratio",
+                "Sharpe Ratio",
+                "Information Ratio",
                 "initial_value",
+                "Risk-Free Rate",
+                "Benchmark Return",
             ]:
                 formatted_value = f"{value:.2%}"
                 if key in ["max_long_trades", "max_short_trades"]:
@@ -1700,6 +1703,11 @@ class ReportStyling:
                     formatted_value += " (of available capital)"
                 elif key in ["new_capital_growth_pct"]:
                     formatted_value += " (of initial capital)"
+            elif key in ["Sharpe Ratio", "Information Ratio"]:
+                if key == "Sharpe Ratio":
+                    formatted_value = f"{value} (rf:{data_dict['Risk-Free Rate']})"
+                elif key == "Information Ratio":
+                    formatted_value = f"{value} (bmk:{data_dict['Benchmark Return']})"
             elif isinstance(value, (int, float)):
                 formatted_value = f"{value:,.2f}"
             else:

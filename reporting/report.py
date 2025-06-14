@@ -55,9 +55,7 @@ class SimpleReportGenerator:
         self.sector_trading_data = None
         if not self.trades_by_ticker.empty and hasattr(self.portfolio, "product_data"):
             # Merge trading data with sector information once
-            sector_trading_df = self.trades_by_ticker[
-                ["ticker", "return", "duration"]
-            ].dropna()
+            sector_trading_df = self.trades_by_ticker[["ticker", "return", "duration"]].dropna()
             self.sector_trading_data = sector_trading_df.merge(
                 self.portfolio.product_data[["ticker", "sector"]],
                 on="ticker",
@@ -65,17 +63,13 @@ class SimpleReportGenerator:
             )
             if len(self.sector_trading_data) > 0:
                 # Pre-compute return percentage
-                self.sector_trading_data["return_pct"] = (
-                    self.sector_trading_data["return"] * 100
-                )
+                self.sector_trading_data["return_pct"] = self.sector_trading_data["return"] * 100
 
     def _cache_portfolio_data(self):
         """Cache processed portfolio data to avoid redundant processing"""
         # Cache portfolio value as pandas Series (used in multiple charts)
         self.portfolio_value_series = pd.Series(self.portfolio_value_history)
-        self.portfolio_value_series.index = pd.to_datetime(
-            self.portfolio_value_series.index
-        )
+        self.portfolio_value_series.index = pd.to_datetime(self.portfolio_value_series.index)
         self.portfolio_value_series = self.portfolio_value_series.sort_index()
 
         # Cache monthly resampled data
@@ -145,6 +139,8 @@ class SimpleReportGenerator:
             "Information Ratio": f"{self.metrics['annualized_ir']:.2f}",
             "Win Rate": f"{self.metrics['win_rate']:.2%}",
             "Daily Avg Win": f"{self.metrics['avg_win']:.2%}",
+            "Benchmark Return": f"{self.analytics.bmk_returns:.2f}",
+            "Risk-Free Rate": f"{self.analytics.rf:.2f}",
         }
         return performance_data
 
@@ -158,9 +154,7 @@ class SimpleReportGenerator:
         """Create the title page (Page 1)"""
         story = []
         story.append(Spacer(1, 2.5 * inch))
-        story.append(
-            Paragraph(report_name or self.portfolio_name, self.title_page_title_style)
-        )
+        story.append(Paragraph(report_name or self.portfolio_name, self.title_page_title_style))
 
         info_style = ParagraphStyle(
             "TitlePageInfo",
@@ -198,9 +192,7 @@ class SimpleReportGenerator:
         config_data = self.portfolio_config
         performance_data = self.create_key_performance_data()
 
-        config_elements = self.styling.create_formatted_list(
-            config_data, "Portfolio Configuration"
-        )
+        config_elements = self.styling.create_formatted_list(config_data, "Portfolio Configuration")
         performance_elements = self.styling.create_formatted_list(
             performance_data, "Key Performance Metrics"
         )
@@ -215,9 +207,7 @@ class SimpleReportGenerator:
 
         for i in range(max_rows):
             config_item = config_elements[i] if i < len(config_elements) else ""
-            performance_item = (
-                performance_elements[i] if i < len(performance_elements) else ""
-            )
+            performance_item = performance_elements[i] if i < len(performance_elements) else ""
             combined_data.append([config_item, performance_item])
 
         combined_table = Table(combined_data, colWidths=[section_width, section_width])
@@ -247,8 +237,7 @@ class SimpleReportGenerator:
     def create_portfolio_overview_page_performance(self) -> BytesIO:
         # Use cached portfolio value data
         portfolio_value_dict = {
-            date.strftime("%Y-%m-%d"): value
-            for date, value in self.monthly_portfolio_value.items()
+            date.strftime("%Y-%m-%d"): value for date, value in self.monthly_portfolio_value.items()
         }
 
         # Use cached monthly returns data
@@ -259,8 +248,7 @@ class SimpleReportGenerator:
 
         # Use cached holdings data
         holdings_dict = {
-            date.strftime("%Y-%m-%d"): value
-            for date, value in self.monthly_holdings.items()
+            date.strftime("%Y-%m-%d"): value for date, value in self.monthly_holdings.items()
         }
 
         # Use the enhanced generic dual axis function
@@ -380,9 +368,7 @@ class SimpleReportGenerator:
         )
 
         # Top 10 lowest average returns
-        lowest_returns = self.trades_by_ticker.nsmallest(10, "return")[
-            ["ticker", "return"]
-        ]
+        lowest_returns = self.trades_by_ticker.nsmallest(10, "return")[["ticker", "return"]]
         lowest_data = [["Ticker", "Avg Return"]]
         for _, row in lowest_returns.iterrows():
             return_pct = f"{row['return']:.2%}" if pd.notna(row["return"]) else "N/A"
@@ -408,9 +394,7 @@ class SimpleReportGenerator:
         non_zero_mask = holdings_counts_arr > 0
 
         if np.any(non_zero_mask):
-            min_holdings_idx = np.argmin(
-                np.where(non_zero_mask, holdings_counts_arr, np.inf)
-            )
+            min_holdings_idx = np.argmin(np.where(non_zero_mask, holdings_counts_arr, np.inf))
             min_holdings = holdings_counts[min_holdings_idx]
             min_date = holdings_dates[min_holdings_idx]
         else:
@@ -483,8 +467,7 @@ class SimpleReportGenerator:
             if len(self.holdings_summary) // 365 <= 2
             else (
                 3
-                if len(self.holdings_summary) // 365 > 2
-                and len(self.holdings_summary) // 365 <= 5
+                if len(self.holdings_summary) // 365 > 2 and len(self.holdings_summary) // 365 <= 5
                 else 4
             )
         )
@@ -505,10 +488,7 @@ class SimpleReportGenerator:
 
     def create_top_duration_tables(self) -> tuple[Table, Table]:
         """Create tables for top 10 longest and shortest durations with professional styling"""
-        if (
-            not hasattr(self.analytics, "ticker_analysis")
-            or not self.analytics.ticker_analysis
-        ):
+        if not hasattr(self.analytics, "ticker_analysis") or not self.analytics.ticker_analysis:
             return None, None
 
         duration_data = []
@@ -544,9 +524,7 @@ class SimpleReportGenerator:
         )
 
         # Top 10 shortest durations
-        shortest_durations = duration_df.nsmallest(10, "duration")[
-            ["ticker", "duration"]
-        ]
+        shortest_durations = duration_df.nsmallest(10, "duration")[["ticker", "duration"]]
         shortest_data = [["Ticker", "Duration (Days)"]]
         for _, row in shortest_durations.iterrows():
             shortest_data.append([str(row["ticker"]), f"{row['duration']:.1f}"])
@@ -578,9 +556,7 @@ class SimpleReportGenerator:
             # Calculate basic metrics
             total_trading_days = len(trades_df) if not trades_df.empty else 0
             avg_buy_trades_per_day = (
-                trades_df["buy"].mean()
-                if not trades_df.empty and "buy" in trades_df.columns
-                else 0
+                trades_df["buy"].mean() if not trades_df.empty and "buy" in trades_df.columns else 0
             )
             avg_sell_trades_per_day = (
                 trades_df["sell"].mean()
@@ -600,27 +576,17 @@ class SimpleReportGenerator:
             avg_return_all_sell_trades = pnl.mean()
 
             # Calculate trading status percentages
-            cancelled_trades_count = self.trading_metrics_cached.get(
-                "cancelled_trades_count", 0
-            )
+            cancelled_trades_count = self.trading_metrics_cached.get("cancelled_trades_count", 0)
             no_trades_count = self.trading_metrics_cached.get("no_trades_count", 0)
-            successful_trades_count = self.trading_metrics_cached.get(
-                "successful_trades_count", 0
-            )
+            successful_trades_count = self.trading_metrics_cached.get("successful_trades_count", 0)
             total_trade_attempts = (
                 cancelled_trades_count + no_trades_count + successful_trades_count
             )
 
             cancelled_trade_pct = (
-                cancelled_trades_count / total_trade_attempts
-                if total_trade_attempts > 0
-                else 0
+                cancelled_trades_count / total_trade_attempts if total_trade_attempts > 0 else 0
             )
-            no_trade_pct = (
-                no_trades_count / total_trade_attempts
-                if total_trade_attempts > 0
-                else 0
-            )
+            no_trade_pct = no_trades_count / total_trade_attempts if total_trade_attempts > 0 else 0
 
             # Create table data
             summary_data = [
@@ -670,9 +636,7 @@ class SimpleReportGenerator:
             story.append(Paragraph(section_name, self.section_header_style))
             story.append(Spacer(1, 20))
 
-    def create_trading_activity_chart(
-        self, title: str = None, graph_type: str = "D"
-    ) -> BytesIO:
+    def create_trading_activity_chart(self, title: str = None, graph_type: str = "D") -> BytesIO:
         """Create trading activity bar chart with buy/sell bars and second chart with total/net trades lines"""
         plt.style.use("default")
         fig, (ax1, ax2) = plt.subplots(
@@ -696,12 +660,8 @@ class SimpleReportGenerator:
 
                 trades_df = trades_df.sort_index()
 
-                trades_df["buy"] = pd.to_numeric(
-                    trades_df["buy"], errors="coerce"
-                ).fillna(0)
-                trades_df["sell"] = pd.to_numeric(
-                    trades_df["sell"], errors="coerce"
-                ).fillna(0)
+                trades_df["buy"] = pd.to_numeric(trades_df["buy"], errors="coerce").fillna(0)
+                trades_df["sell"] = pd.to_numeric(trades_df["sell"], errors="coerce").fillna(0)
                 trades_df["net_trades"] = trades_df["buy"] - trades_df["sell"]
                 trades_df["total_trades"] = trades_df["buy"] + trades_df["sell"]
 
@@ -709,11 +669,7 @@ class SimpleReportGenerator:
                 interval = (
                     1
                     if len(trades_df) // 365 <= 2
-                    else (
-                        3
-                        if len(trades_df) // 365 > 2 and len(trades_df) // 365 <= 5
-                        else 4
-                    )
+                    else (3 if len(trades_df) // 365 > 2 and len(trades_df) // 365 <= 5 else 4)
                 )
 
                 if graph_type == "M" and len(trades_df.resample("M").last()) <= 1:
@@ -776,16 +732,11 @@ class SimpleReportGenerator:
                 )
 
                 ax2.set_ylabel("Number of Trades")
-                if (
-                    graph_type in ["D", "M"]
-                    and len(trades_df.resample("M").last()) <= 1
-                ):
+                if graph_type in ["D", "M"] and len(trades_df.resample("M").last()) <= 1:
                     ax2.xaxis.set_major_locator(mdates.DayLocator(interval=interval))
                     ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
                 elif graph_type == "Q" and len(trades_df.resample("Q").last()) <= 1:
-                    ax2.xaxis.set_major_locator(
-                        mdates.QuarterLocator(interval=interval)
-                    )
+                    ax2.xaxis.set_major_locator(mdates.QuarterLocator(interval=interval))
                     ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
                 elif graph_type == "Y" and len(trades_df.resample("Y").last()) <= 1:
                     ax2.xaxis.set_major_locator(mdates.YearLocator(interval=interval))
@@ -856,9 +807,7 @@ class SimpleReportGenerator:
 
         return buf
 
-    def create_cashflow_over_time_chart(
-        self, title: str = None, graph_type: str = "D"
-    ) -> BytesIO:
+    def create_cashflow_over_time_chart(self, title: str = None, graph_type: str = "D") -> BytesIO:
         """Create cashflow over time chart with cashflow/transaction costs in top panel and net cashflow in bottom panel"""
         plt.style.use("default")
         fig, (ax1, ax2) = plt.subplots(
@@ -895,11 +844,7 @@ class SimpleReportGenerator:
                 interval = (
                     1
                     if len(cashflow_df) // 365 <= 2
-                    else (
-                        3
-                        if len(cashflow_df) // 365 > 2 and len(cashflow_df) // 365 <= 5
-                        else 4
-                    )
+                    else (3 if len(cashflow_df) // 365 > 2 and len(cashflow_df) // 365 <= 5 else 4)
                 )
 
                 # Resample if needed based on graph_type
@@ -960,16 +905,11 @@ class SimpleReportGenerator:
                 )
 
                 ax2.set_ylabel("Net Cashflow ($)")
-                if (
-                    graph_type in ["D", "M"]
-                    and len(cashflow_df.resample("M").last()) <= 1
-                ):
+                if graph_type in ["D", "M"] and len(cashflow_df.resample("M").last()) <= 1:
                     ax2.xaxis.set_major_locator(mdates.DayLocator(interval=interval))
                     ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
                 elif graph_type == "Q" and len(cashflow_df.resample("Q").last()) <= 1:
-                    ax2.xaxis.set_major_locator(
-                        mdates.QuarterLocator(interval=interval)
-                    )
+                    ax2.xaxis.set_major_locator(mdates.QuarterLocator(interval=interval))
                     ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
                 elif graph_type == "Y" and len(cashflow_df.resample("Y").last()) <= 1:
                     ax2.xaxis.set_major_locator(mdates.YearLocator(interval=interval))
@@ -1049,9 +989,7 @@ class SimpleReportGenerator:
             sector_df.index = pd.to_datetime(holdings_dates)
             sector_df = sector_df.sort_index()
 
-            sector_pct_df = (
-                sector_df.div(sector_df[sector_df.columns].sum(axis=1), axis=0) * 100
-            )
+            sector_pct_df = sector_df.div(sector_df[sector_df.columns].sum(axis=1), axis=0) * 100
             sector_pct_df = sector_pct_df.fillna(0)
 
             # Calculate appropriate interval
@@ -1113,16 +1051,13 @@ class SimpleReportGenerator:
         """Create box plot showing duration distribution by sector"""
         try:
             # Use cached sector-trading data
-            if (
-                self.sector_trading_data is not None
-                and len(self.sector_trading_data) > 0
-            ):
+            if self.sector_trading_data is not None and len(self.sector_trading_data) > 0:
                 # Create data dictionary for generic boxplot
                 sectors = self.sector_trading_data["sector"].dropna().unique()
                 sector_data_dict = {
-                    sector: self.sector_trading_data[
-                        self.sector_trading_data["sector"] == sector
-                    ]["duration"].tolist()
+                    sector: self.sector_trading_data[self.sector_trading_data["sector"] == sector][
+                        "duration"
+                    ].tolist()
                     for sector in sectors
                 }
 
@@ -1158,17 +1093,14 @@ class SimpleReportGenerator:
         """Create box plot showing return distribution by sector"""
         try:
             # Use cached sector-trading data
-            if (
-                self.sector_trading_data is not None
-                and len(self.sector_trading_data) > 0
-            ):
+            if self.sector_trading_data is not None and len(self.sector_trading_data) > 0:
                 # Create data dictionary for generic boxplot
                 sectors = self.sector_trading_data["sector"].dropna().unique()
                 sector_data_dict = {
                     sector: (
-                        self.sector_trading_data[
-                            self.sector_trading_data["sector"] == sector
-                        ]["return"]
+                        self.sector_trading_data[self.sector_trading_data["sector"] == sector][
+                            "return"
+                        ]
                         * 100
                     ).tolist()  # Convert to percentage
                     for sector in sectors
@@ -1206,10 +1138,7 @@ class SimpleReportGenerator:
         """Create scatter plot with return vs duration, colored by sector"""
         try:
             # Use cached sector-trading data
-            if (
-                self.sector_trading_data is not None
-                and len(self.sector_trading_data) > 0
-            ):
+            if self.sector_trading_data is not None and len(self.sector_trading_data) > 0:
                 return self.styling.create_generic_scatter_plot(
                     data_df=self.sector_trading_data,
                     x_column="return_pct",
@@ -1252,10 +1181,7 @@ class SimpleReportGenerator:
 
     def create_top_traded_tables(self) -> tuple[Table, Table, Table]:
         """Create tables for top 10 most bought, most sold, and most traded tickers"""
-        if (
-            not hasattr(self.analytics, "ticker_analysis")
-            or not self.analytics.ticker_analysis
-        ):
+        if not hasattr(self.analytics, "ticker_analysis") or not self.analytics.ticker_analysis:
             return None, None, None
 
         # Prepare data for analysis
@@ -1344,13 +1270,13 @@ class SimpleReportGenerator:
         """Generate the complete 5-page report"""
         if filename is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"reports/portfolio_report_{timestamp}.pdf"
+            filename = f"outputs/backtest/portfolio_report_{timestamp}.pdf"
         elif not filename.endswith(".pdf"):
-            filename = f"reports/{filename}.pdf"
+            filename = f"outputs/backtest/{filename}.pdf"
         else:
-            filename = f"reports/{filename}"
+            filename = f"outputs/backtest/{filename}"
 
-        os.makedirs("reports", exist_ok=True)
+        os.makedirs("outputs/backtest", exist_ok=True)
 
         # Add page number function (define before using it)
         def add_page_number(canvas, doc):
@@ -1366,9 +1292,7 @@ class SimpleReportGenerator:
 
             canvas.setStrokeColor(Colors.MEDIUM_GRAY)
             canvas.setLineWidth(0.5)
-            canvas.line(
-                0.75 * inch, 0.7 * inch, landscape(A4)[0] - 0.75 * inch, 0.7 * inch
-            )
+            canvas.line(0.75 * inch, 0.7 * inch, landscape(A4)[0] - 0.75 * inch, 0.7 * inch)
 
             # Add portfolio info in footer
             period = f"{self.start_date_str} to {self.end_date_str}"
@@ -1379,9 +1303,7 @@ class SimpleReportGenerator:
             canvas.drawString(0.75 * inch, 0.5 * inch, footer_text)
 
             # Add page number (just the number)
-            canvas.drawRightString(
-                landscape(A4)[0] - 0.75 * inch, 0.5 * inch, f"{doc.page}"
-            )
+            canvas.drawRightString(landscape(A4)[0] - 0.75 * inch, 0.5 * inch, f"{doc.page}")
             canvas.restoreState()
 
         # Create document with same setup as old report
@@ -1415,9 +1337,7 @@ class SimpleReportGenerator:
         story.append(PageBreak())
 
         # Page 2: Portfolio Config and Metrics
-        self.add_page_header(
-            story, section_name="Portfolio Overview - Config and Key Metrics"
-        )
+        self.add_page_header(story, section_name="Portfolio Overview - Config and Key Metrics")
         overview_page = self.create_portfolio_overview_page_config_and_metrics()
         story.extend(overview_page)
         story.append(PageBreak())
@@ -1434,9 +1354,7 @@ class SimpleReportGenerator:
         story.append(PageBreak())
 
         # Page 4: Return Analysis - Monthly Return Distribution
-        self.add_page_header(
-            story, section_name="Return Analysis - Monthly Return Distribution"
-        )
+        self.add_page_header(story, section_name="Return Analysis - Monthly Return Distribution")
         distribution_chart = self.create_monthly_return_distribution_chart()
         story.append(Image(distribution_chart, width=10 * inch, height=6 * inch))
         story.append(PageBreak())
@@ -1451,9 +1369,7 @@ class SimpleReportGenerator:
         story.append(PageBreak())
 
         # Page 6: Return Analysis - Top 10 Returns by Tickers
-        self.add_page_header(
-            story, section_name="Return Analysis - Top 10 Returns by Tickers"
-        )
+        self.add_page_header(story, section_name="Return Analysis - Top 10 Returns by Tickers")
         highest_table, lowest_table = self.create_top_return_tables()
 
         if highest_table and lowest_table:
@@ -1532,17 +1448,13 @@ class SimpleReportGenerator:
         story.append(PageBreak())
 
         # Page 8: Holdings Analysis - Holdings Over Time
-        self.add_page_header(
-            story, section_name="Holdings Analysis - Holdings Over Time"
-        )
+        self.add_page_header(story, section_name="Holdings Analysis - Holdings Over Time")
         holdings_chart = self.create_holdings_analysis_chart()
         story.append(Image(holdings_chart, width=10 * inch, height=6 * inch))
         story.append(PageBreak())
 
         # Page 9: Holdings Analysis - Top 10 Duration Tables
-        self.add_page_header(
-            story, section_name="Holdings Analysis - Top 10 Duration by Tickers"
-        )
+        self.add_page_header(story, section_name="Holdings Analysis - Top 10 Duration by Tickers")
 
         # Create top duration tables
         longest_table, shortest_table = self.create_top_duration_tables()
@@ -1552,9 +1464,7 @@ class SimpleReportGenerator:
             longest_title = self.styling.create_table_title(
                 "Top 10 Longest Hold", Colors.SLATE_BLUE
             )
-            shortest_title = self.styling.create_table_title(
-                "Top 10 Shortest Hold", Colors.EMERALD
-            )
+            shortest_title = self.styling.create_table_title("Top 10 Shortest Hold", Colors.EMERALD)
 
             # Create containers with titles and tables
             style = TableStyle(
@@ -1578,9 +1488,7 @@ class SimpleReportGenerator:
 
             # Add spacer between the two tables
             spacer_cell = Table([[Spacer(1, 1)]], colWidths=[2.0 * inch])
-            duration_tables_data = [
-                [longest_container, spacer_cell, shortest_container]
-            ]
+            duration_tables_data = [[longest_container, spacer_cell, shortest_container]]
             combined_duration_table = Table(
                 duration_tables_data, colWidths=[3.6 * inch, 2.0 * inch, 3.6 * inch]
             )
@@ -1617,19 +1525,13 @@ class SimpleReportGenerator:
         story.append(PageBreak())
 
         # Page 12: Trading Analysis - Cashflow Over Time
-        self.add_page_header(
-            story, section_name="Trading Analysis - Cashflow Over Time"
-        )
+        self.add_page_header(story, section_name="Trading Analysis - Cashflow Over Time")
         cashflow_chart = self.create_cashflow_over_time_chart(graph_type="D")
         story.append(Image(cashflow_chart, width=10 * inch, height=6.4 * inch))
 
         # Page 13: Trading Analysis - Top 10 Most Traded
-        self.add_page_header(
-            story, section_name="Trading Analysis - Top 10 Most Traded"
-        )
-        most_bought_table, most_sold_table, most_traded_table = (
-            self.create_top_traded_tables()
-        )
+        self.add_page_header(story, section_name="Trading Analysis - Top 10 Most Traded")
+        most_bought_table, most_sold_table, most_traded_table = self.create_top_traded_tables()
 
         if most_bought_table and most_sold_table and most_traded_table:
             # Create titles for the top traded tables
@@ -1705,25 +1607,19 @@ class SimpleReportGenerator:
         story.append(PageBreak())
 
         # Page 14: Sector Analysis - Sector exposure over time
-        self.add_page_header(
-            story, section_name="Sector Analysis - Sector Exposure Over Time"
-        )
+        self.add_page_header(story, section_name="Sector Analysis - Sector Exposure Over Time")
         sector_exposure_chart = self.create_sector_exposure_chart()
         story.append(Image(sector_exposure_chart, width=10 * inch, height=6 * inch))
         story.append(PageBreak())
 
         # Page 15: Sector Analysis - Average composition
-        self.add_page_header(
-            story, section_name="Sector Analysis - Average Composition"
-        )
+        self.add_page_header(story, section_name="Sector Analysis - Average Composition")
         sector_composition_chart = self.create_sector_composition_pie()
         story.append(Image(sector_composition_chart, width=8 * inch, height=6 * inch))
         story.append(PageBreak())
 
         # Page 16: Sector Analysis - Exposure versus holding
-        self.add_page_header(
-            story, section_name="Sector Analysis - Exposure Versus Holding"
-        )
+        self.add_page_header(story, section_name="Sector Analysis - Exposure Versus Holding")
         sector_duration_chart = self.create_sector_duration_boxplot()
         story.append(Image(sector_duration_chart, width=10 * inch, height=6 * inch))
         story.append(PageBreak())

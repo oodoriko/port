@@ -70,12 +70,8 @@ class Constraints:
             return True
         value, count = np.unique(trades, return_counts=True)
 
-        max_short_trades = max(
-            max_holdings / 2, self.constraints["max_short_trades"] * positions_size
-        )
-        max_long_trades = max(
-            max_holdings / 2, self.constraints["max_long_trades"] * positions_size
-        )
+        max_short_trades = max(max_holdings, self.constraints["max_short_trades"] * positions_size)
+        max_long_trades = max(max_holdings, self.constraints["max_long_trades"] * positions_size)
 
         short_count_idx = np.where(value == -1)[0]
         if len(short_count_idx) > 0:
