@@ -1316,6 +1316,10 @@ class ReportStyling:
         bar_position_ratio=0.80,  # Position bars at 80% of bottom value
         bar_height_ratio=0.15,  # Bars take 15% of chart height
         right_axis_zero_line=False,  # Add horizontal line at 0 for right axis
+        y_axis_limits_left=None,  # NEW: Limits for left y-axis
+        y_axis_limits_right=None,  # NEW: Limits for right y-axis
+        y_axis_ticks_left=None,  # NEW: Ticks for left y-axis
+        y_axis_ticks_right=None,  # NEW: Ticks for right y-axis
     ):
         """
         Create a generic dual y-axis line chart with optional bar chart below
@@ -1345,11 +1349,14 @@ class ReportStyling:
         - bar_width: Width of bars
         - bar_position_ratio: Position bars at this ratio of bottom chart value
         - bar_height_ratio: Bar height as ratio of chart height
-        - right_axis_zero_line: Add horizontal line at 0 for right axis (useful for returns)
+        - right_axis_zero_line: Add horizontal line at 0 for right axis
+        - y_axis_limits_left: Tuple (min, max) for left y-axis limits
+        - y_axis_limits_right: Tuple (min, max) for right y-axis limits
+        - y_axis_ticks_left: List of tick values for left y-axis
+        - y_axis_ticks_right: List of tick values for right y-axis
         """
         try:
             self.setup_matplotlib_style()
-
             fig, ax1 = plt.subplots(figsize=figsize)
 
             # Prepare data for left axis
@@ -1627,6 +1634,16 @@ class ReportStyling:
 
             # Add grid
             ax1.grid(True, alpha=0.3)
+
+            # Apply y-axis limits and ticks if provided
+            if y_axis_limits_left is not None:
+                ax1.set_ylim(y_axis_limits_left)
+            if y_axis_limits_right is not None:
+                ax2.set_ylim(y_axis_limits_right)
+            if y_axis_ticks_left is not None:
+                ax1.set_yticks(y_axis_ticks_left)
+            if y_axis_ticks_right is not None:
+                ax2.set_yticks(y_axis_ticks_right)
 
             # Adjust layout
             plt.tight_layout()

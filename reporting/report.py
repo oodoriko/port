@@ -234,7 +234,7 @@ class SimpleReportGenerator:
         story.append(combined_table)
         return story
 
-    def create_portfolio_overview_page_performance(self) -> BytesIO:
+    def create_portfolio_overview_page_performance(self, **kwargs):
         # Use cached portfolio value data
         portfolio_value_dict = {
             date.strftime("%Y-%m-%d"): value for date, value in self.monthly_portfolio_value.items()
@@ -271,6 +271,7 @@ class SimpleReportGenerator:
             bar_label="Holdings Count",
             bar_color="lightgray",
             right_axis_zero_line=True,  # Add zero line for returns
+            **kwargs,
         )
 
     def create_monthly_return_distribution_chart(self) -> BytesIO:
@@ -284,7 +285,7 @@ class SimpleReportGenerator:
             normal_style=self.normal_style,
         )
 
-    def create_monthly_sharpe_ir_chart(self) -> BytesIO:
+    def create_monthly_sharpe_ir_chart(self, **kwargs):
         """Create monthly Sharpe and Information Ratio dual axis chart"""
 
         # Prepare monthly Sharpe data - assuming pandas Series with date index
@@ -339,6 +340,7 @@ class SimpleReportGenerator:
             show_crisis_periods=True,
             interval=interval,
             graph_type="M",
+            **kwargs,
         )
 
     def create_top_return_tables(self) -> tuple[Table, Table]:
@@ -472,18 +474,18 @@ class SimpleReportGenerator:
             )
         )
 
-        return self.styling.create_generic_dual_axis_chart(
-            data_dict_left=self.holdings_summary,
-            left_y_label="Number of Holdings",
-            left_color=Colors.CHART_NAVY,
-            left_linewidth=1,
-            figsize=(10, 6),
+        return self.styling.create_generic_line_chart(
+            data_dict=self.holdings_summary,
+            title="Holdings Over Time",
+            color=Colors.CHART_NAVY,
+            linewidth=1,
             resample_freq=None,
             no_data_message="No holdings data available",
             normal_style=self.normal_style,
             show_crisis_periods=True,
             interval=interval,
             graph_type="D",
+            y_label="Number of Holdings",
         )
 
     def create_top_duration_tables(self) -> tuple[Table, Table]:
