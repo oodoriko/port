@@ -5,6 +5,7 @@ import pandas as pd
 class TransactionCost:
     def __init__(
         self,
+        fixed_cost: float = 0.005,
         base_volatility: float = 0.02,
         temporary_impact_coeff: float = 0.142,
         temporary_exponent: float = 0.6,
@@ -14,6 +15,7 @@ class TransactionCost:
         self.beta = temporary_exponent
         self.timing_factor = timing_cost_factor
         self.base_volatility = base_volatility
+        self.fixed_cost = fixed_cost
 
     def calculate_transaction_costs(
         self,
@@ -24,14 +26,11 @@ class TransactionCost:
     ) -> dict[str, float]:
         if len(shares) == 0:
             return 0
-
         cost_multiple = self.get_cost_multiple(volume, shares, execution_time_days)
-        total_cost = sum(
-            [
-                abs(val) * price[ticker] * cost_multiple[ticker]
-                for ticker, val in shares.items()
-            ]
-        )
+        total_cost = {
+            ticker: abs(val) * price[ticker] * (cost_multiple[ticker] + self.fixed_cost)
+            for ticker, val in shares.items()
+        }
         return total_cost
 
     def get_cost_multiple(
@@ -42,7 +41,7 @@ class TransactionCost:
     ) -> dict[str, float]:
         if len(volume) != len(shares):
             volume = volume[shares.keys()]
-        participation_rate = list(shares.values()) / volume
+        participation_rate = np.array(list(shares.values())) / volume
         liquidity_factor = volume.apply(self.get_liquidity_factor)
         temporary_impact = (
             (participation_rate.abs() / execution_time_days) ** self.beta

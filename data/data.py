@@ -6,7 +6,7 @@ this is so complicated and why??
 
 import os
 import pickle
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 
 import numpy as np
@@ -204,9 +204,7 @@ class PriceData(DataCacher):
                 self.save_cache()
 
         results_dict = self.get_from_cache(tickers)
-        dates = results_dict[tickers[0]][
-            "Date"
-        ]  # assume all tickers have the same dates
+        dates = pd.to_datetime(results_dict[tickers[0]]["Date"]).date
         return {
             "open": pd.DataFrame(
                 {ticker: price["Open"] for ticker, price in results_dict.items()}
@@ -308,8 +306,8 @@ class BenchmarkData(DataCacher):
 
 def get_prices_by_dates(
     prices: pd.DataFrame,
-    end_date: str = None,
-    start_date: str = None,
+    end_date: date = None,
+    start_date: date = None,
     lookback_window: int = np.inf,
     lookahead_window: int = np.inf,
 ) -> pd.DataFrame:

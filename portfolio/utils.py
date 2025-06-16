@@ -1,10 +1,6 @@
 import calendar
 from datetime import datetime, timedelta
 
-import numpy as np
-import pandas as pd
-from dateutil.parser import parse
-
 
 def is_business_period_end(date=None):
     """
@@ -24,12 +20,6 @@ def is_business_period_end(date=None):
     """
     if date is None:
         date = datetime.now().date()
-    elif isinstance(date, datetime):
-        date = date.date()
-    elif isinstance(date, np.datetime64):
-        date = pd.to_datetime(date)
-    else:
-        date = parse(date)
 
     # Skip if not a business day
     if date.weekday() > 4:  # Saturday=5, Sunday=6

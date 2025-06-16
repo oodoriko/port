@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 import numpy as np
 import pandas as pd
@@ -9,13 +9,9 @@ import pandas as pd
 class ConstraintsConfig:
     long_only: bool = True
     cash_pct: float = 0.0
-    max_long_trades: float = 0.3
-    max_short_trades: float = 0.3
-    max_buy_size: float = 0.3
-
+    max_position_size: float = 0.3
+    max_drawdown_limit: float = 0.3
     # not used yet
-    # max_position_size: float = 0.3
-    # max_drawdown_limit: float = 0.3
     # rebalance_threshold: float = 0.05
     # max_daily_trades: int = 100
     # blackout_dates: List[str] = field(default_factory=list)
@@ -28,14 +24,11 @@ class ConstraintsConfig:
         return {
             "long_only": self.long_only,
             "cash_pct": self.cash_pct,
-            "max_long_trades": self.max_long_trades,
-            "max_short_trades": self.max_short_trades,
-            "max_buy_size": self.max_buy_size,
+            "max_position_size": self.max_position_size,
+            "max_drawdown_limit": self.max_drawdown_limit,
             # not used yet
             # "sector_exposure": self.sector_exposure,
             # "country_exposure": self.country_exposure,
-            # "max_position_size": self.max_position_size,
-            # "max_drawdown_limit": self.max_drawdown_limit,
             # "rebalance_threshold": self.rebalance_threshold,
             # "max_daily_trades": self.max_daily_trades,
             # "blackout_dates": self.blackout_dates,
@@ -44,112 +37,107 @@ class ConstraintsConfig:
 
 
 class Constraints:
-    def __init__(self, constraints: dict):
+    def __init__(
+        self,
+        trailing_stop_loss_pct: float,
+        constraints: dict,
+        product_data: pd.DataFrame,
+    ):
+        self.trailing_stop_loss_pct = trailing_stop_loss_pct
         self.constraints = constraints
-        self.product_data = None
-        self.price = None
-        self.volume = None
-
-    def set_product_data(self, product_data: pd.DataFrame):
         self.product_data = product_data
-
-    def set_price(self, price: pd.DataFrame):
-        self.price = price
-
-    def set_volume(self, volume: pd.DataFrame):
-        self.volume = volume
 
     def get_constraints(self) -> dict:
         return self.constraints
 
-    def evaluate_trades(self, trades: list[int], positions_size: int, max_holdings: int) -> bool:
-        """bad and dumb"""
+    def trigger_max_drawdown(
+        self, portfolio_value: float, portfolio_value_curve: dict
+    ) -> bool:
+        """good!"""
         if self.constraints is None or len(self.constraints) == 0:
-            return True
-        if trades is None or len(trades) == 0:
-            return True
-        value, count = np.unique(trades, return_counts=True)
+            return False
+        if portfolio_value_curve is None or len(portfolio_value_curve) == 0:
+            return False
+        min_value = min(list(portfolio_value_curve.values()))
 
-        max_short_trades = max(max_holdings, self.constraints["max_short_trades"] * positions_size)
-        max_long_trades = max(max_holdings, self.constraints["max_long_trades"] * positions_size)
+        max_drawdown = (min_value - portfolio_value) / min_value
+        if max_drawdown > self.constraints["max_drawdown_limit"]:
+            return True
+        return False
 
-        short_count_idx = np.where(value == -1)[0]
-        if len(short_count_idx) > 0:
-            short_count = count[short_count_idx[0]]
-            if short_count > max_short_trades:
-                print(f"Short trade amount {short_count} too large violates max trade constraint")
-                return False
-        long_count_idx = np.where(value == 1)[0]
-        if len(long_count_idx) > 0:
-            long_count = count[long_count_idx[0]]
-            if long_count > max_long_trades:
-                print(f"Long trade amount {long_count} too large violates max trade constraint")
-                return False
-        return True
+    def check_stop_loss(self, active_positions: dict, price: pd.Series) -> dict:
+        """since we are implementing trailing stop loss, whenever a the stop price is
+        triggered, all positions are closed for the ticker. But the logic here assumes a fixed
+        stop price for each positions, meaning there is a high chance only a part of the position
+        whose stop price is triggered is closed. keeping this logic because it is more generic
+        """
+        closed_positions = {}
+        for ticker, positions in active_positions.items():
+            today_open_price = price[ticker]
+            for date, position in positions.items():
+                if today_open_price < position.stop_price:
+                    closed_positions[ticker] = closed_positions.get(ticker, []) + [date]
+        return closed_positions
 
     def allocate_capital_to_buy(
         self,
-        date,
         capital: float,
-        trading_plan: dict[str, int],
-        new_holdings_state: dict[str, int],
-        shares_to_be_traded: dict[str, int],
-        executed_trading_plan: dict[str, int],
+        portfolio_value: float,
+        new_positions: list[str],
         allocation_method: str,
-    ) -> float:
+        prices: pd.Series,
+        volumes: pd.Series,
+        cost_function: Callable,
+    ) -> dict:
         available_capital = capital * (1 - self.constraints.get("cash_pct", 0.0))
-        to_buy = [ticker for ticker, signal in trading_plan.items() if signal == 1]
-
-        if not to_buy:
-            return available_capital
-
-        prices = self.price.loc[date, to_buy]
-
         return self._execute_allocation_strategy(
-            allocation_method,
-            available_capital,
-            to_buy,
-            prices,
-            date,
-            new_holdings_state,
-            shares_to_be_traded,
-            executed_trading_plan,
+            capital=available_capital,
+            portfolio_value=portfolio_value,
+            tickers=new_positions,
+            method=allocation_method,
+            prices=prices,
+            volumes=volumes,
+            cost_function=cost_function,
         )
 
     def _execute_allocation_strategy(
         self,
-        method: str,
         capital: float,
+        portfolio_value: float,
         tickers: list[str],
+        method: str,
         prices: pd.Series,
-        date,
-        new_holdings: dict[str, int],
-        shares_to_be_traded: dict[str, int],
-        executed_trading_plan: dict[str, int],
-    ) -> float:
+        volumes: pd.Series,
+        cost_function: Callable,
+    ) -> dict:
         if method == "equal":
             return self._allocate_equal_weights(
-                capital, tickers, prices, new_holdings, shares_to_be_traded
+                capital=capital,
+                tickers=tickers,
+                volumes=volumes,
+                prices=prices,
+                portfolio_value=portfolio_value,
+                cost_function=cost_function,
             )
         elif method == "max_market_cap":
             priority_list = self._get_market_cap_priority(tickers)
             return self._allocate_by_priority(
-                capital,
-                priority_list,
-                prices,
-                new_holdings,
-                shares_to_be_traded,
-                executed_trading_plan,
+                capital=capital,
+                priority_list=priority_list,
+                volumes=volumes,
+                prices=prices,
+                portfolio_value=portfolio_value,
+                cost_function=cost_function,
             )
         elif method == "highest_volume":
-            priority_list = self._get_volume_priority(date, tickers)
+            priority_list = self._get_volume_priority(volumes)
             return self._allocate_by_priority(
-                capital,
-                priority_list,
-                prices,
-                new_holdings,
-                shares_to_be_traded,
-                executed_trading_plan,
+                capital=capital,
+                priority_list=priority_list,
+                volumes=volumes,
+                prices=prices,
+                portfolio_value=portfolio_value,
+                cost_function=cost_function,
             )
         elif method == "optimizer":
             raise NotImplementedError("Optimizer not implemented")
@@ -161,52 +149,86 @@ class Constraints:
         capital: float,
         tickers: list[str],
         prices: pd.Series,
-        new_holdings: dict[str, int],
-        shares_to_be_traded: dict[str, int],
-    ) -> float:
-        amount_per_ticker = capital / len(tickers)
+        volumes: pd.Series,
+        portfolio_value: float,
+        cost_function: Callable,
+    ) -> dict:
+        stop_loss_pct = self.trailing_stop_loss_pct
+        max_position_size = portfolio_value * self.constraints["max_position_size"]
+        budget_per_ticker = capital / len(tickers)
+        budget_per_ticker = max(0, min(budget_per_ticker, max_position_size))
         remaining_capital = capital
+        transaction_entries = {}
+        # first iteration, allocate capital to each ticker based on risk
         for ticker in tickers:
-            shares = amount_per_ticker / prices[ticker]
-            shares_to_be_traded[ticker] = shares
-            new_holdings[ticker] = new_holdings.get(ticker, 0) + shares
-            remaining_capital -= shares * prices[ticker]
-        return remaining_capital
+            risk_per_share = prices[ticker] * stop_loss_pct
+            max_shares_by_risk = budget_per_ticker / risk_per_share
+            transaction_entries[ticker] = max_shares_by_risk
+
+        # second iteration, allocate capital to each ticker based on cash (using risk_based_shares
+        transaction_costs = cost_function(
+            shares=transaction_entries,
+            volume=volumes,
+            price=prices,
+        )
+        for ticker, shares in transaction_entries.items():
+            budget = max(0, budget_per_ticker - transaction_costs[ticker] / shares)
+            max_shares_by_cash = budget / prices[ticker]
+            transaction_entries[ticker] = max_shares_by_cash
+            remaining_capital -= transaction_entries[ticker] * prices[ticker]
+        return transaction_entries
 
     def _allocate_by_priority(
         self,
         capital: float,
         priority_list: list[str],
+        volumes: pd.Series,
         prices: pd.Series,
-        new_holdings_state: dict[str, int],
-        shares_to_be_traded: dict[str, int],
-        executed_trading_plan: dict[str, int],
-    ) -> float:
-        """allocate capital based on priority order with max buy size constraints."""
+        portfolio_value: float,
+        cost_function: Callable,
+    ) -> dict:
+        max_position_size = portfolio_value * self.constraints["max_position_size"]
         remaining_capital = capital
-        max_buy_size = self.constraints.get("max_buy_size", 1) * capital
 
+        transaction_entries = {}
+        # first iteration, allocate capital to each ticker based on risk
         for ticker in priority_list:
             if remaining_capital <= 0:
-                executed_trading_plan[ticker] = 0
+                transaction_entries[ticker] = 0
                 continue
 
-            max_affordable_shares = min(remaining_capital, max_buy_size) / prices[ticker]
-            shares_to_be_traded[ticker] = max_affordable_shares
-            new_holdings_state[ticker] = new_holdings_state.get(ticker, 0) + max_affordable_shares
-            remaining_capital -= max_affordable_shares * prices[ticker]
+            risk_per_share = prices[ticker] * self.trailing_stop_loss_pct
+            budget_per_ticker = max(0, min(remaining_capital, max_position_size))
+            max_shares_by_risk = budget_per_ticker / risk_per_share
+            transaction_entries[ticker] = max_shares_by_risk
+            remaining_capital -= max_shares_by_risk * prices[ticker]
 
-        # Allocate any remaining capital to the top priority ticker
+        ## Allocate any remaining capital to the top priority ticker
         if remaining_capital > 0 and priority_list:
             top_ticker = priority_list[0]
-            additional_shares = remaining_capital / prices[top_ticker]
-            shares_to_be_traded[top_ticker] = (
-                shares_to_be_traded.get(top_ticker) + additional_shares
-            )
-            new_holdings_state[top_ticker] = new_holdings_state.get(top_ticker) + additional_shares
-            remaining_capital -= additional_shares * prices[top_ticker]
+            risk_per_share = prices[top_ticker] * self.trailing_stop_loss_pct
+            budget_per_ticker = max(0, min(remaining_capital, max_position_size))
+            max_shares_by_risk = budget_per_ticker / risk_per_share
+            transaction_entries[top_ticker] = max_shares_by_risk
+            remaining_capital -= max_shares_by_risk * prices[top_ticker]
 
-        return remaining_capital
+        # second iteration, allocate capital to each ticker based on cash (using risk_based_shares
+        remaining_capital = capital
+        transaction_costs = cost_function(
+            shares=transaction_entries,
+            volume=volumes,
+            price=prices,
+        )
+        for ticker, _ in transaction_entries.items():
+            budget_per_ticker = (
+                max(0, min(remaining_capital, max_position_size))
+                - transaction_costs[ticker]
+            )
+            max_shares_by_cash = max(0, budget_per_ticker) / prices[ticker]
+            transaction_entries[ticker] = max_shares_by_cash
+            remaining_capital -= max_shares_by_cash * prices[ticker]
+
+        return transaction_entries
 
     def _get_market_cap_priority(self, tickers: list[str]) -> list[str]:
         if self.product_data is None:
@@ -218,9 +240,5 @@ class Constraints:
             .ticker.tolist()
         )
 
-    def _get_volume_priority(self, date, tickers: list[str]) -> list[str]:
-        if self.volume is None:
-            raise ValueError("Volume data not set. Call set_volume() first.")
-
-        volume = self.volume.loc[date, tickers]
-        return volume.sort_values(ascending=False).index.tolist()
+    def _get_volume_priority(self, volumes: pd.Series) -> list[str]:
+        return volumes.sort_values(ascending=False).index.tolist()

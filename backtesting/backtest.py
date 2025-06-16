@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pandas as pd
 from tqdm import tqdm
 
@@ -23,8 +25,10 @@ class Backtest:
         self.portfolio = scenario.get_portfolio()
         self.contains_filters = scenario.contains_filters
         self.verbose = verbose
+        self.scenario = scenario
 
     def run(self):
+        actual_trading_dates = []
         if self.verbose:
             print(f"Backtest starting... whomp whomp!")
             print(
@@ -38,9 +42,7 @@ class Backtest:
         # get data
         universe = self.portfolio.get_universe()
         max_lookback = max(strategy.min_window for strategy in self.strategies)
-        data_start_date = pd.Timestamp(self.start_date) - pd.Timedelta(
-            days=max_lookback
-        )
+        data_start_date = self.start_date - timedelta(days=max_lookback)
 
         for date in tqdm(
             self.trading_dates,
@@ -61,10 +63,14 @@ class Backtest:
                 signals[strategy.name.value] = signal
             trades = vote_single_date(pd.DataFrame(signals), self.contains_filters)
             trading_plan = dict(zip(universe, trades))
-            self.portfolio.trade(date, trades, trading_plan)
-
+            trade_disabled = self.portfolio.trade(date, trading_plan)
+            actual_trading_dates.append(date)
+            if trade_disabled:
+                print(f"Hit max drawdown on {date}")
+                break
         if self.verbose:
             print("Ding ding ding! Backtest completed!")
+        self.scenario.set_actual_trading_dates(actual_trading_dates)
 
     def run_batch(self, verbose: bool = True):
         if verbose:
@@ -81,9 +87,7 @@ class Backtest:
 
         # Generate signals for all dates
         max_lookback = max(strategy.min_window for strategy in self.strategies)
-        data_start_date = pd.Timestamp(self.start_date) - pd.Timedelta(
-            days=max_lookback
-        )
+        data_start_date = self.start_date - timedelta(days=max_lookback)
 
         # price include today's price, make sure to exclude it in signal generation
         prices = self.portfolio.get_prices(
@@ -108,26 +112,33 @@ class Backtest:
             signals.append(signal)
         trading_plan = vote_batch(signals, self.contains_filters)
 
-        self.portfolio.trade_batch(trading_plan)
+        trade_disabled, actual_trading_dates = self.portfolio.trade_batch(trading_plan)
+        if trade_disabled:
+            print(f"Hit max drawdown on {self.trading_dates[-1]}")
+
         if verbose:
             print("Backtest completed!")
+
+        self.scenario.set_actual_trading_dates(actual_trading_dates)
 
     def generate_analytics(self, rf=0.02, bmk_returns=0.1):
         return PortfolioAnalytics(
             self.portfolio,
-            self.start_date,
-            self.end_date,
             rf=rf,
             bmk_returns=bmk_returns,
+            trading_dates=self.scenario.get_actual_trading_dates(),
         )
 
-    def generate_advanced_analytics(self):
+    def generate_advanced_analytics(self, rf=0.02, bmk_returns=0.1):
         return AdvancedPortfolioAnalytics(
-            self.portfolio, self.start_date, self.end_date
+            self.portfolio,
+            rf=rf,
+            bmk_returns=bmk_returns,
+            trading_dates=self.scenario.get_actual_trading_dates(),
         )
 
     def generate_report(self, rf=0.02, bmk_returns=0.1, filename=None):
-        analytics = self.generate_advanced_analytics()
+        analytics = self.generate_advanced_analytics(rf=rf, bmk_returns=bmk_returns)
         return generate_simple_report(
             analytics,
             start_date=self.start_date,

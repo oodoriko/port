@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from typing import Optional
 
 import numpy as np
@@ -24,8 +25,8 @@ class Scenario:
     ):
         self.name = name
         self.strategies = None
-        self.start_date = start_date
-        self.end_date = end_date
+        self.start_date = pd.to_datetime(start_date).date()
+        self.end_date = pd.to_datetime(end_date).date()
         self.scenario_description = ""
         self.portfolio = Portfolio(
             name=portfolio_name,
@@ -37,6 +38,7 @@ class Scenario:
         self.trading_dates = self.get_trading_dates()
         self.contains_filters = False
         self.verbose = verbose
+        self.actual_trading_dates = []
 
     def get_start_date(self) -> str:
         return self.start_date
@@ -82,10 +84,16 @@ class Scenario:
         self.strategies = strategies
         self.contains_filters = any(strategy.is_positive for strategy in strategies)
 
-    def get_trading_dates(self) -> list[np.datetime64]:
-        return list(
+    def set_actual_trading_dates(self, actual_trading_dates: list[date]):
+        self.actual_trading_dates = actual_trading_dates
+
+    def get_actual_trading_dates(self) -> list[date] | None:
+        return self.actual_trading_dates
+
+    def get_trading_dates(self) -> list[date]:
+        return pd.to_datetime(
             np.intersect1d(
-                self.portfolio.open_prices.index,
+                pd.to_datetime(self.portfolio.open_prices.index),
                 pd.date_range(self.start_date, self.end_date),
             )
-        )
+        ).date

@@ -85,7 +85,9 @@ class GridSearch:
             for strategy, is_positive in param.items():
                 strategy_names[name_map[is_positive]].append(strategy.value)
             strategy_names = {
-                k: strategy_names[k] for k in ["Pos", "Neg"] if len(strategy_names[k]) > 0
+                k: strategy_names[k]
+                for k in ["Pos", "Neg"]
+                if len(strategy_names[k]) > 0
             }  # enforced key order for formatting
             param_values.append(param)
             param_names.append(strategy_names)
@@ -111,12 +113,16 @@ class GridSearch:
         try:
             backtest = Backtest(scenario)
             backtest.run_batch(verbose=False)
-            analytics = backtest.generate_analytics()
+            analytics = backtest.generate_analytics(
+                rf=scenario.portfolio.setup.get("rf", 0.02),
+                bmk_returns=scenario.portfolio.setup.get("bmk_returns", 0.1),
+                trading_dates=scenario.get_actual_trading_dates(),
+            )
 
             performance_metrics = analytics.performance_metrics()
-            holdings_metrics = analytics.holdings_metrics()
-            average_holding_period = np.mean(list(holdings_metrics.values()))
-            max_holding_amount = max(holdings_metrics.values())
+            _, capital_curve, holdings_curve = analytics.get_curves()
+            average_holding_period = np.mean(list(holdings_curve.values()))
+            max_holding_amount = max(holdings_curve.values())
 
             return {
                 "grid_num": scenario.name,
@@ -127,6 +133,7 @@ class GridSearch:
                 "annualized_ir": performance_metrics["annualized_ir"],
                 "average_holding_period": average_holding_period,
                 "max_holding_amount": max_holding_amount,
+                "remaining_capital": capital_curve[-1],
             }
         except Exception as e:
             print(traceback.format_exc())
@@ -168,7 +175,10 @@ class GridSearch:
 
     def get_grid_search_schedule(self) -> pd.DataFrame:
         return pd.DataFrame(
-            [{"grid_num": k, "param_name": v["param_name"]} for k, v in self.results.items()]
+            [
+                {"grid_num": k, "param_name": v["param_name"]}
+                for k, v in self.results.items()
+            ]
         ).sort_values(by="grid_num", ascending=True)
 
     def results_to_dataframe(self) -> pd.DataFrame:
@@ -186,6 +196,7 @@ class GridSearch:
                 "annualized_ir": result["annualized_ir"],
                 "average_holding_period": result["average_holding_period"],
                 "max_holding_amount": result["max_holding_amount"],
+                "remaining_capital": result["remaining_capital"],
             }
             data.append(row)
 
@@ -224,8 +235,8 @@ class GridSearch:
         d[["annualized_sharpe", "annualized_ir"]] = d[
             ["annualized_sharpe", "annualized_ir"]
         ].applymap(lambda x: f"{x:.2f}")
-        d[["average_holding_period", "max_holding_amount"]] = d[
-            ["average_holding_period", "max_holding_amount"]
+        d[["average_holding_period", "max_holding_amount", "remaining_capital"]] = d[
+            ["average_holding_period", "max_holding_amount", "remaining_capital"]
         ].applymap(lambda x: f"{x:.0f}")
 
         print(d.to_string(index=False))
