@@ -74,10 +74,11 @@ class PortfolioConfig:
         }
 
 
-class ExitReason(Enum):
+class TransactionType(Enum):
     SELL = "sell"
     STOP_LOSS = "stop_loss"
     MAX_DRAWDOWN = "max_drawdown"
+    BUY = "buy"
 
 
 @dataclass
@@ -90,7 +91,6 @@ class Position:
     exit_price: float = 0
     exit_shares: float = 0
     stop_price: float = 0
-    exit_reason: ExitReason = None
     highest_price: float = 0
 
 
@@ -262,9 +262,10 @@ class Portfolio:
         )
         if stop_loss_closed_positions:
             sell_proceeds, transaction_entries = self._close_positions(
-                close_reason=ExitReason.STOP_LOSS,
+                close_reason=TransactionType.STOP_LOSS,
                 closed_positions=stop_loss_closed_positions,
                 date=date,
+                executed_trading_plan=executed_trading_plan,
             )
             self.capital += sell_proceeds
             self.stop_loss_history[date] = transaction_entries
@@ -277,7 +278,7 @@ class Portfolio:
         # execute sell orders
         if sell_closed_positions:
             sell_proceeds, transaction_entries = self._close_positions(
-                close_reason=ExitReason.SELL,
+                close_reason=TransactionType.SELL,
                 closed_positions=sell_closed_positions,
                 date=date,
                 executed_trading_plan=executed_trading_plan,
@@ -302,7 +303,6 @@ class Portfolio:
                 )
                 self.capital = remaining_capital
                 self.buy_history[date] = transaction_entries
-
         # update portfolio state with closing prices
         self._mark_portfolio_to_market(self.close_prices.loc[date])
         self._update_portfolio_state(
@@ -382,7 +382,7 @@ class Portfolio:
 
     def _close_positions(
         self,
-        close_reason: ExitReason,
+        close_reason: TransactionType,
         closed_positions: Dict[str, list[date]],
         date: date,
         executed_trading_plan: Dict[str, int] = None,
@@ -404,7 +404,6 @@ class Portfolio:
                 position.exit_price = today_open_price
                 position.exit_shares = position.entry_shares
                 position.exit_reason = close_reason
-
                 self.closed_positions[date][ticker] = self.closed_positions[date].get(
                     ticker, []
                 ) + [position]
@@ -415,21 +414,22 @@ class Portfolio:
                 volume=self.volumes.loc[date, [ticker]],
                 price=self.open_prices.loc[date, [ticker]],
             )
+
             sell_proceeds += (
                 today_open_price * shares_to_sell - transaction_costs[ticker]
             )
             transaction_entries[ticker] = {
-                "exit_shares": shares_to_sell,
-                "exit_price": today_open_price,
-                "transaction_costs": transaction_costs[ticker],
-                "sell_proceeds": sell_proceeds,
-                "exit_reason": close_reason.value,
+                "shares": shares_to_sell,
+                "price": today_open_price,
+                "costs": transaction_costs[ticker],
+                "proceeds": sell_proceeds,
+                "type": close_reason,
             }
 
         for ticker, d in positions_to_delete:
-            if close_reason == ExitReason.STOP_LOSS:
+            if close_reason == TransactionType.STOP_LOSS:
                 executed_trading_plan[ticker] = "Stop loss"
-            elif close_reason == ExitReason.MAX_DRAWDOWN:
+            elif close_reason == TransactionType.MAX_DRAWDOWN:
                 executed_trading_plan[ticker] = "Max drawdown"
 
             del self.active_positions[ticker][d]
@@ -480,10 +480,11 @@ class Portfolio:
 
             purchase_proceeds = shares * current_price - transaction_costs[ticker]
             transaction_entries[ticker] = {
-                "entry_price": current_price,
-                "entry_shares": shares,
-                "transaction_costs": transaction_costs[ticker],
-                "purchase_proceeds": purchase_proceeds,
+                "price": current_price,
+                "shares": shares,
+                "costs": transaction_costs[ticker],
+                "proceeds": purchase_proceeds,
+                "type": TransactionType.BUY,
             }
             remaining_capital -= purchase_proceeds
 
@@ -503,7 +504,7 @@ class Portfolio:
         if type == "close":
             closed_positions = {k: -abs(v) for k, v in self.holdings.items()}
             sell_proceeds, _ = self._close_positions(
-                close_reason=ExitReason.MAX_DRAWDOWN,
+                close_reason=TransactionType.MAX_DRAWDOWN,
                 closed_positions=closed_positions,
                 date=date,
                 executed_trading_plan=executed_trading_plan,

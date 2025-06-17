@@ -114,16 +114,14 @@ class GridSearch:
             backtest = Backtest(scenario)
             backtest.run_batch(verbose=False)
             analytics = backtest.generate_analytics(
-                rf=scenario.portfolio.setup.get("rf", 0.02),
-                bmk_returns=scenario.portfolio.setup.get("bmk_returns", 0.1),
-                trading_dates=scenario.get_actual_trading_dates(),
+                rf=0.04,
+                bmk_returns=0.1,
             )
 
             performance_metrics = analytics.performance_metrics()
             _, capital_curve, holdings_curve = analytics.get_curves()
             average_holding_period = np.mean(list(holdings_curve.values()))
             max_holding_amount = max(holdings_curve.values())
-
             return {
                 "grid_num": scenario.name,
                 "param_name": scenario.portfolio.name,
@@ -133,7 +131,7 @@ class GridSearch:
                 "annualized_ir": performance_metrics["annualized_ir"],
                 "average_holding_period": average_holding_period,
                 "max_holding_amount": max_holding_amount,
-                "remaining_capital": capital_curve[-1],
+                "remaining_capital": capital_curve[list(capital_curve.keys())[-1]],
             }
         except Exception as e:
             print(traceback.format_exc())

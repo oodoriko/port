@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from backtesting.scenarios import Scenario
 from portfolio.analytics import AdvancedPortfolioAnalytics, PortfolioAnalytics
-from reporting.report import generate_simple_report
+from reporting.report_generating import ReportGenerator
 from strategies.strategy import vote_batch, vote_single_date
 
 
@@ -121,32 +121,32 @@ class Backtest:
 
         self.scenario.set_actual_trading_dates(actual_trading_dates)
 
-    def generate_analytics(self, rf=0.02, bmk_returns=0.1):
+    def generate_analytics(self, rf=0.04, bmk_returns=0.1):
         return PortfolioAnalytics(
             self.portfolio,
             rf=rf,
             bmk_returns=bmk_returns,
-            trading_dates=self.scenario.get_actual_trading_dates(),
+            actual_trading_dates=self.scenario.get_actual_trading_dates(),
         )
 
-    def generate_advanced_analytics(self, rf=0.02, bmk_returns=0.1):
+    def generate_advanced_analytics(
+        self, rf=0.04, bmk_returns=0.1, actual_trading_dates=None
+    ):
         return AdvancedPortfolioAnalytics(
             self.portfolio,
             rf=rf,
             bmk_returns=bmk_returns,
-            trading_dates=self.scenario.get_actual_trading_dates(),
+            actual_trading_dates=actual_trading_dates,
         )
 
-    def generate_report(self, rf=0.02, bmk_returns=0.1, filename=None):
-        analytics = self.generate_advanced_analytics(rf=rf, bmk_returns=bmk_returns)
-        return generate_simple_report(
-            analytics,
-            start_date=self.start_date,
-            end_date=self.end_date,
+    def generate_report(self, rf=0.04, bmk_returns=0.1, filename=None):
+        analytics = self.generate_advanced_analytics(
             rf=rf,
             bmk_returns=bmk_returns,
-            filename=filename,
+            actual_trading_dates=self.scenario.get_actual_trading_dates(),
         )
+        report = ReportGenerator(analytics, dpi=300)
+        return report.generate_report(filename=filename)
 
     def get_portfolio(self):
         return self.portfolio

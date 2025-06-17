@@ -1,10 +1,10 @@
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 import numpy as np
 import pandas as pd
 
 from portfolio.metrics_calculator import calculate_ir, calculate_sharpe, get_return
-from portfolio.portfolio import ExitReason
+from portfolio.portfolio import TransactionType
 
 
 class PortfolioAnalytics:
@@ -13,14 +13,17 @@ class PortfolioAnalytics:
         portfolio,
         rf=0.02,
         bmk_returns=0.1,  # we need to source a real bmk
-        trading_dates=None,
+        actual_trading_dates=None,
     ):
         self.portfolio = portfolio
 
         self.product_data = portfolio.product_data
         self.rf = rf
         self.bmk_returns = bmk_returns
-        self.trading_dates = trading_dates
+        self.actual_trading_dates = actual_trading_dates
+        self.portfolio_value_curve, self.capital_curve, self.holdings_curve = (
+            self.get_curves()
+        )
 
     def get_curves(self):
         portfolio_value_curve = self.portfolio.portfolio_value_curve
@@ -51,18 +54,12 @@ class PortfolioAnalytics:
 
 
 class AdvancedPortfolioAnalytics(PortfolioAnalytics):
-    def __init__(self, portfolio, rf=0.02, bmk_returns=0.1, trading_dates=None):
-        super().__init__(portfolio, rf, bmk_returns, trading_dates)
+    def __init__(self, portfolio, rf=0.02, bmk_returns=0.1, actual_trading_dates=None):
+        super().__init__(portfolio, rf, bmk_returns, actual_trading_dates)
 
-        self.cashflow_stats_ts, self.ticker_level_records_ts = (
+        self.cashflow_stats_ts, self.ticker_level_records_ts, self.daily_pnl_ts = (
             self._process_trades_data()
         )
-        # self.cashflow_history = self._calculate_cashflow()
-        # self.transaction_cost_history = self._calculate_cost()
-        # self.pnl_details_history = self._calculate_daily_pnl()
-        # self.pnl_history = self._calculate_pnl()
-        # self.pnl_by_ticker = self._process_ticker_level_trades_data()
-        # self.ticker_analysis = self._process_ticker_level_trades_data()
 
     def signal_metrics_ts(self):
         signal_counts = defaultdict(int)
@@ -89,13 +86,6 @@ class AdvancedPortfolioAnalytics(PortfolioAnalytics):
                 "no_signal": no_signal,
             }
         return signal_counts
-
-    def ticker_metrics(self):
-        holdings_by_ticker = defaultdict(dict)
-        for date, holdings in self.portfolio.holdings_history.items():
-            for ticker, position in holdings.items():
-                holdings_by_ticker[ticker][date] = position
-        return holdings_by_ticker
 
     def performance_metrics(self):
         result = super().performance_metrics()
@@ -164,6 +154,10 @@ class AdvancedPortfolioAnalytics(PortfolioAnalytics):
                 "no_short": (trades_arr == "No short sell").sum(),
             }
         ticker_metrics = []
+        sell_trades_metrics = defaultdict(list)
+        stop_loss_trades_metrics = defaultdict(list)
+        max_drawdown_trades_metrics = defaultdict(list)
+
         for ticker, trades in self.ticker_level_records_ts.items():
             df = pd.DataFrame(trades).T
             ticker_metrics.append(
@@ -173,13 +167,22 @@ class AdvancedPortfolioAnalytics(PortfolioAnalytics):
                     "sell": len(df),
                     "duration": df["holding_period"].mean(),
                     "return": df["return"].mean(),
+                    "return_net_of_cost": df["return_net_of_cost"].mean(),
                     "profit": df["profit"].mean(),
+                    "profit_net_of_cost": df["profit_net_of_cost"].mean(),
                     "stop_loss_count": df[
-                        df["exit_reason"] == ExitReason.STOP_LOSS
+                        df["exit_reason"] == TransactionType.STOP_LOSS.value
                     ].shape[0],
-                    
+                    "total_trades": len(df) + df["total_long_trades"].sum(),
                 }
             )
+            for date, trade in trades.items():
+                if trade["exit_reason"] == "sell":
+                    sell_trades_metrics[date].append(trade)
+                elif trade["exit_reason"] == "stop_loss":
+                    stop_loss_trades_metrics[date].append(trade)
+                elif trade["exit_reason"] == "max_drawdown":
+                    max_drawdown_trades_metrics[date].append(trade)
         trades_by_ticker = pd.DataFrame(ticker_metrics)
         no_signal_days = sum(
             [
@@ -192,109 +195,144 @@ class AdvancedPortfolioAnalytics(PortfolioAnalytics):
             "trades_ts": trades_ts,  # {date: {buy: int, sell: int, ...}
             "trades_by_ticker": trades_by_ticker,
             "no_signal_days": no_signal_days,
+            "sell_trades_metrics": sell_trades_metrics,
+            "stop_loss_trades_metrics": stop_loss_trades_metrics,
+            "max_drawdown_trades_metrics": max_drawdown_trades_metrics,
         }
 
     def sector_metrics(self):
-        total_unique_holdings = set(
-            holding
-            for holdings in self.portfolio.holdings_history.values()
-            for holding in holdings
-        )
-        filtered_product_data = self.product_data[
-            self.product_data.ticker.isin(total_unique_holdings)
-        ]
+        trades_by_ticker = self.trading_metrics()["trades_by_ticker"]
+        prd_data = trades_by_ticker.merge(self.product_data, on="ticker", how="left")
+        prd_data.set_index("ticker", inplace=True)
+
         # Sector
         sector_ts = []
-        sectors = filtered_product_data.sector.unique()
+        sectors = prd_data.sector.unique()
         for holdings in self.portfolio.holdings_history.values():
-            prd = filtered_product_data[filtered_product_data.ticker.isin(holdings)]
+            prd = prd_data.loc[holdings.keys()]
             sector_counts = prd.groupby("sector").size()
             sectors_dict = {sector: sector_counts.get(sector, 0) for sector in sectors}
             sector_ts.append(sectors_dict)
 
         return {
             "sector_ts": sector_ts,
+            "sector_trading_data": prd_data,
         }
 
-    def _get_cashflow_curve(self) -> dict:
+    def get_cashflow_curve(self) -> dict:
         transaction_costs_ts = {
-            d: k["transaction_costs"] for d, k in self.cashflow_stats_ts.items()
+            d: k["costs"] for d, k in self.cashflow_stats_ts.items()
+        }
+        buy_proceeds_ts = {
+            d: k["buy_proceeds"] for d, k in self.cashflow_stats_ts.items()
         }
         sell_proceeds_ts = {
             d: k["sell_proceeds"] for d, k in self.cashflow_stats_ts.items()
         }
-        purchase_proceeds_ts = {
-            d: k["purchase_proceeds"] for d, k in self.cashflow_stats_ts.items()
-        }
         return {
             "transaction_costs_ts": transaction_costs_ts,
+            "buy_proceeds_ts": buy_proceeds_ts,
             "sell_proceeds_ts": sell_proceeds_ts,
-            "purchase_proceeds_ts": purchase_proceeds_ts,
         }
 
-    def _get_pnl_curve(self) -> dict:
+    def get_pnl_curve(self) -> dict:
         realized_gain_sell_ts = {
-            d: k["realized_gain_sell"] for d, k in self.cashflow_stats_ts.items()
+            d: k["realized_gain_sell"] for d, k in self.daily_pnl_ts.items()
         }
         realized_loss_sell_ts = {
-            d: k["realized_loss_sell"] for d, k in self.cashflow_stats_ts.items()
+            d: k["realized_loss_sell"] for d, k in self.daily_pnl_ts.items()
         }
         realized_gain_stop_loss_ts = {
-            d: k["realized_gain_stop_loss"] for d, k in self.cashflow_stats_ts.items()
+            d: k["realized_gain_stop_loss"] for d, k in self.daily_pnl_ts.items()
         }
         realized_loss_stop_loss_ts = {
-            d: k["realized_loss_stop_loss"] for d, k in self.cashflow_stats_ts.items()
+            d: k["realized_loss_stop_loss"] for d, k in self.daily_pnl_ts.items()
+        }
+        realized_return_ts = {
+            d: k["realized_return"] for d, k in self.daily_pnl_ts.items()
+        }
+        realized_return_net_of_cost_ts = {
+            d: k["realized_return_net_of_cost"] for d, k in self.daily_pnl_ts.items()
+        }
+        realized_return_pct_ts = {
+            d: k["realized_return_pct"] for d, k in self.daily_pnl_ts.items()
+        }
+        realized_return_net_of_cost_pct_ts = {
+            d: k["realized_return_net_of_cost_pct"]
+            for d, k in self.daily_pnl_ts.items()
         }
         return {
             "realized_gain_sell_ts": realized_gain_sell_ts,
             "realized_loss_sell_ts": realized_loss_sell_ts,
             "realized_gain_stop_loss_ts": realized_gain_stop_loss_ts,
             "realized_loss_stop_loss_ts": realized_loss_stop_loss_ts,
+            "realized_return_ts": realized_return_ts,
+            "realized_return_net_of_cost_ts": realized_return_net_of_cost_ts,
+            "realized_return_pct_ts": realized_return_pct_ts,
+            "realized_return_net_of_cost_pct_ts": realized_return_net_of_cost_pct_ts,
         }
 
     def _process_trades_data(self):
         all_positions = []
         all_transactions = []
 
-        for date in self.trading_dates:
+        # first flatten the data structure for positions and transactions
+        # a position represents a single long event, whereas transaction represents a single
+        # sell event that may have sell more than one positions e.g. a ticker is bought twice then sold all
+        for date in self.actual_trading_dates:
             for ticker, sell_record in self.portfolio.sell_history.get(
                 date, {}
             ).items():
                 closed_positions = self.portfolio.closed_positions.get(date, {}).get(
-                    ticker, []
+                    ticker
                 )
                 if not closed_positions:
                     raise ValueError(
                         f"Ticker {ticker} has no closed positions on date {date} but has sell record"
                     )
 
+                # Count number of positions closed in this sell event
+                total_positions_closed = len(closed_positions)
+
                 for pos in closed_positions:
-                    all_positions.append(
+                    position_data = {
+                        "date": pd.to_datetime(date),
+                        "ticker": ticker,
+                        "entry_date": pd.to_datetime(pos.entry_date),
+                        "entry_price": pos.entry_price,
+                        "entry_shares": pos.entry_shares,
+                        "exit_date": pd.to_datetime(pos.exit_date),
+                        "exit_price": pos.exit_price,
+                        "exit_shares": pos.exit_shares,
+                        "exit_reason": pos.exit_reason.value,
+                        "total_positions_in_cycle": total_positions_closed,  # Add this to track positions per cycle
+                    }
+                    # Calculate holding period for each position individually
+                    position_data["holding_period"] = (
+                        position_data["exit_date"] - position_data["entry_date"]
+                    ).days
+                    all_positions.append(position_data)
+
+                stop_loss_sell = self.portfolio.stop_loss_history.get(date, {}).get(
+                    ticker
+                )
+                if stop_loss_sell:
+                    all_transactions.append(
                         {
                             "date": pd.to_datetime(date),
                             "ticker": ticker,
-                            "entry_date": pd.to_datetime(pos.entry_date),
-                            "entry_price": pos.entry_price,
-                            "entry_shares": pos.entry_shares,
-                            "exit_date": pd.to_datetime(pos.exit_date),
-                            "exit_price": pos.exit_price,
-                            "exit_shares": pos.exit_shares,
-                            "exit_reason": pos.exit_reason,
+                            "costs": stop_loss_sell.get("costs"),
+                            "proceeds": stop_loss_sell.get("proceeds"),
+                            "type": TransactionType.STOP_LOSS.value,
                         }
                     )
-
-                stop_loss_sell = self.portfolio.stop_loss_history.get(date, {}).get(
-                    ticker, {}
-                )
                 all_transactions.append(
                     {
                         "date": pd.to_datetime(date),
                         "ticker": ticker,
-                        "transaction_costs": sell_record["transaction_costs"]
-                        + stop_loss_sell.get("transaction_costs", 0),
-                        "sell_proceeds": sell_record["sell_proceeds"]
-                        + stop_loss_sell.get("sell_proceeds", 0),
-                        "purchase_proceeds": 0,
+                        "costs": sell_record.get("costs"),
+                        "proceeds": sell_record.get("proceeds"),
+                        "type": TransactionType.SELL.value,
                     }
                 )
 
@@ -303,9 +341,9 @@ class AdvancedPortfolioAnalytics(PortfolioAnalytics):
                     {
                         "date": pd.to_datetime(date),
                         "ticker": ticker,
-                        "transaction_costs": buy_record["transaction_costs"],
-                        "sell_proceeds": 0,
-                        "purchase_proceeds": buy_record["purchase_proceeds"],
+                        "costs": buy_record["costs"],
+                        "proceeds": buy_record["proceeds"],
+                        "type": TransactionType.BUY.value,
                     }
                 )
 
@@ -322,9 +360,9 @@ class AdvancedPortfolioAnalytics(PortfolioAnalytics):
 
             def categorize_pnl(row):
                 pnl = row["realized_return"]
-                if row["exit_reason"] == ExitReason.SELL:
+                if row["exit_reason"] == TransactionType.SELL.value:
                     return max(pnl, 0), min(pnl, 0), 0, 0
-                elif row["exit_reason"] == ExitReason.STOP_LOSS:
+                elif row["exit_reason"] == TransactionType.STOP_LOSS.value:
                     return 0, 0, max(pnl, 0), min(pnl, 0)
                 return 0, 0, 0, 0
 
@@ -345,7 +383,6 @@ class AdvancedPortfolioAnalytics(PortfolioAnalytics):
                     {
                         "entry_date": "min",
                         "exit_date": "max",
-                        "entry_shares": "sum",
                         "exit_shares": "sum",
                         "realized_return": "sum",
                         "realized_return_pct": lambda x: (
@@ -360,79 +397,205 @@ class AdvancedPortfolioAnalytics(PortfolioAnalytics):
                         "realized_loss_sell": "sum",
                         "realized_gain_stop_loss": "sum",
                         "realized_loss_stop_loss": "sum",
+                        "holding_period": "mean",  # Average holding period for multiple positions
+                        "total_positions_in_cycle": "first",  # Just take the first since they're all the same for a cycle
                     }
                 )
                 .reset_index()
             )
 
-            grouped["holding_period"] = (
-                grouped["exit_date"] - grouped["entry_date"]
-            ).dt.days
+            # Merge costs for transaction costs calculation
+            costs_df = (
+                transactions_df[transactions_df.type == TransactionType.BUY.value]
+                .merge(
+                    grouped[["ticker", "entry_date", "exit_date"]],
+                    right_on=["entry_date", "ticker"],
+                    left_on=["date", "ticker"],
+                    how="left",
+                )
+                .groupby(["ticker", "exit_date"])
+                .agg({"costs": "sum"})
+                .reset_index()
+            ).merge(
+                transactions_df[transactions_df.type != TransactionType.BUY.value],
+                left_on=["ticker", "exit_date"],
+                right_on=["ticker", "date"],
+                how="inner",
+            )
+            costs_df["costs"] = costs_df.apply(lambda x: x.costs_x + x.costs_y, axis=1)
 
-            daily_pnl = grouped.groupby("date").agg(
+            grouped_costs = grouped.merge(
+                costs_df[["ticker", "exit_date", "costs"]],
+                left_on=["ticker", "exit_date"],
+                right_on=["ticker", "exit_date"],
+                how="left",
+            )
+
+            grouped_costs["realized_return_net_of_cost"] = (
+                grouped_costs["realized_return"] - grouped_costs["costs"]
+            )
+            grouped_costs["realized_return_net_of_cost_pct"] = grouped_costs[
+                "realized_return_net_of_cost"
+            ] / (grouped_costs["entry_price"] * grouped_costs["exit_shares"])
+
+            daily_pnl = grouped_costs.groupby("date").agg(
                 {
                     "realized_gain_sell": "sum",
                     "realized_loss_sell": "sum",
                     "realized_gain_stop_loss": "sum",
                     "realized_loss_stop_loss": "sum",
                     "realized_return": "sum",
+                    "realized_return_net_of_cost": "sum",
+                    "realized_return_pct": "mean",
+                    "realized_return_net_of_cost_pct": "mean",
                 }
             )
 
             ticker_level_records_ts = defaultdict(dict)
-            for _, row in grouped.iterrows():
+            for _, row in grouped_costs.iterrows():
                 ticker_level_records_ts[row["ticker"]][row["date"]] = {
                     "holding_start_date": row["entry_date"],
                     "holding_end_date": row["exit_date"],
                     "holding_period": row["holding_period"],
                     "cost_basis": row["entry_price"],
-                    "total_long_trades": 1,
+                    "total_long_trades": row[
+                        "total_positions_in_cycle"
+                    ],  # Use the count of positions closed in this cycle
                     "profit": row["realized_return"],
                     "return": row["realized_return_pct"],
+                    "profit_net_of_cost": row["realized_return_net_of_cost"],
+                    "return_net_of_cost": row["realized_return_net_of_cost_pct"],
+                    "transaction_costs": row["costs"],
                     "exit_reason": row["exit_reason"],
                 }
 
-        if not transactions_df.empty:
-            cashflow_stats = (
-                transactions_df.groupby("date")
-                .agg(
-                    {
-                        "transaction_costs": "sum",
-                        "sell_proceeds": "sum",
-                        "purchase_proceeds": "sum",
+            daily_pnl_ts = daily_pnl.to_dict(orient="index")
+
+            if not transactions_df.empty:
+                cashflow_stats = (
+                    transactions_df.groupby(["date", "type"])
+                    .agg({"costs": "sum", "proceeds": "sum"})
+                    .reset_index()
+                    .to_dict(orient="records")
+                )
+                cashflow_stats_ts = defaultdict(
+                    lambda: {
+                        "costs": 0,
+                        "sell_proceeds": 0,
+                        "buy_proceeds": 0,
                     }
                 )
-                .to_dict("index")
-            )
 
-            cashflow_stats_ts = defaultdict(
-                lambda: {
-                    "profit": 0,
-                    "transaction_costs": 0,
-                    "sell_proceeds": 0,
-                    "purchase_proceeds": 0,
-                    "realized_gain_sell": 0,
-                    "realized_loss_sell": 0,
-                    "realized_gain_stop_loss": 0,
-                    "realized_loss_stop_loss": 0,
-                }
-            )
+                for entry in cashflow_stats:
+                    if entry["type"] == TransactionType.BUY.value:
+                        cashflow_stats_ts[entry["date"]]["buy_proceeds"] = entry[
+                            "proceeds"
+                        ]
+                    elif entry["type"] == TransactionType.SELL.value:
+                        cashflow_stats_ts[entry["date"]]["sell_proceeds"] = entry[
+                            "proceeds"
+                        ]
+                    cashflow_stats_ts[entry["date"]]["costs"] = entry["costs"]
 
-            for date, stats in cashflow_stats.items():
-                cashflow_stats_ts[date].update(stats)
-                if date in daily_pnl.index:
-                    pnl_stats = daily_pnl.loc[date]
-                    cashflow_stats_ts[date].update(
-                        {
-                            "profit": pnl_stats["realized_return"],
-                            "realized_gain_sell": pnl_stats["realized_gain_sell"],
-                            "realized_loss_sell": pnl_stats["realized_loss_sell"],
-                            "realized_gain_stop_loss": pnl_stats[
-                                "realized_gain_stop_loss"
-                            ],
-                            "realized_loss_stop_loss": pnl_stats[
-                                "realized_loss_stop_loss"
-                            ],
-                        }
-                    )
-        return cashflow_stats_ts, ticker_level_records_ts"
+            return cashflow_stats_ts, ticker_level_records_ts, daily_pnl_ts
+
+    def contribution_metrics(self):
+        """Analyze capital injections and trading activity contributions"""
+        # Get the capital curve which includes injections
+        capital_curve = pd.Series(self.capital_curve)
+        portfolio_value_curve = pd.Series(self.portfolio_value_curve)
+
+        # Calculate total capital injected
+        initial_capital = self.portfolio.setup["initial_capital"]
+        monthly_injection = self.portfolio.setup["new_capital_growth_amt"]
+        total_months = len(
+            pd.date_range(
+                start=capital_curve.index[0], end=capital_curve.index[-1], freq="M"
+            )
+        )
+        total_capital_injected = initial_capital + (monthly_injection * total_months)
+
+        # Calculate final portfolio value and total return
+        final_portfolio_value = portfolio_value_curve.iloc[-1]
+
+        # Use the same total return calculation as performance_metrics
+        total_return, _ = get_return(portfolio_value_curve, annualized=True)
+        total_return_amount = (
+            total_return * initial_capital
+        )  # Convert percentage to amount
+
+        # Calculate return contributions
+        total_return_pct = total_return
+        capital_contribution_pct = (
+            total_capital_injected - initial_capital
+        ) / initial_capital
+        trading_contribution_pct = total_return_pct - capital_contribution_pct
+
+        # Analyze stop losses and regular sells
+        stop_loss_history = self.portfolio.stop_loss_history
+        regular_sell_history = self.portfolio.sell_history
+
+        def analyze_transactions(history):
+            if not history:
+                return 0, 0, 0
+
+            total_proceeds = 0
+            total_cost = 0
+            count = 0
+
+            for transactions in history.values():
+                for details in transactions.values():
+                    if isinstance(details, dict) and "proceeds" in details:
+                        total_proceeds += details["proceeds"]
+                        total_cost += details["costs"]
+                        count += 1
+
+            avg_proceeds = total_proceeds / count if count > 0 else 0
+            return total_proceeds, avg_proceeds, count
+
+        sl_total, sl_avg, sl_count = analyze_transactions(stop_loss_history)
+        sell_total, sell_avg, sell_count = analyze_transactions(regular_sell_history)
+        total_exits = sl_count + sell_count
+        total_trading_proceeds = sl_total + sell_total
+
+        # Calculate trading contribution percentages
+        if total_trading_proceeds > 0:
+            stop_loss_contribution_pct = (
+                sl_total / total_trading_proceeds
+            ) * trading_contribution_pct
+            regular_sell_contribution_pct = (
+                sell_total / total_trading_proceeds
+            ) * trading_contribution_pct
+        else:
+            stop_loss_contribution_pct = 0
+            regular_sell_contribution_pct = 0
+
+        return {
+            "capital_contribution": {
+                "initial_capital": initial_capital,
+                "total_capital_injected": total_capital_injected,
+                "final_portfolio_value": final_portfolio_value,
+                "total_return": total_return_amount,
+                "return_on_capital": total_return,  # This is now the same as performance_metrics
+                "capital_contribution_pct": capital_contribution_pct,
+                "trading_contribution_pct": trading_contribution_pct,
+            },
+            "trading_activity": {
+                "stop_loss": {
+                    "count": sl_count,
+                    "avg_proceeds": sl_avg,
+                    "total_proceeds": sl_total,
+                    "pct_of_exits": (sl_count / total_exits if total_exits > 0 else 0),
+                    "contribution_to_return": stop_loss_contribution_pct,
+                },
+                "regular_sell": {
+                    "count": sell_count,
+                    "avg_proceeds": sell_avg,
+                    "total_proceeds": sell_total,
+                    "pct_of_exits": (
+                        sell_count / total_exits if total_exits > 0 else 0
+                    ),
+                    "contribution_to_return": regular_sell_contribution_pct,
+                },
+            },
+        }

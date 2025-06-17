@@ -1333,10 +1333,7 @@ class ReportStyling:
         except Exception as e:
             plt.close()
             chart_name = title.lower() if title else "chart"
-            if normal_style:
-                return Paragraph(f"Error creating {chart_name}: {str(e)}", normal_style)
-            else:
-                return f"Error creating {chart_name}: {str(e)}"
+            return f"Error creating {chart_name}: {str(e)}"
 
     def create_generic_dual_axis_chart(
         self,
@@ -1856,6 +1853,64 @@ class ReportStyling:
             content.append(item_paragraph)
 
         return content
+
+    def create_basic_table(self, data, colWidths, title=None):
+        """Create a basic table with professional styling"""
+        # Create table with data and column widths
+        table = Table(data, colWidths=colWidths)
+
+        # Define table style
+        style = [
+            # Header row styling (first row)
+            ("BACKGROUND", (0, 0), (-1, 0), Colors.SLATE_BLUE),
+            ("TEXTCOLOR", (0, 0), (-1, 0), Colors.WHITE),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
+            ("TOPPADDING", (0, 0), (-1, 0), 12),
+            # Data rows styling
+            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 1), (-1, -1), 9),
+            ("BOTTOMPADDING", (0, 1), (-1, -1), 8),
+            ("TOPPADDING", (0, 1), (-1, -1), 8),
+            # Grid styling
+            ("GRID", (0, 0), (-1, -1), 1, Colors.MEDIUM_GRAY),
+            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            # Alternating row colors
+            ("ROWBACKGROUNDS", (0, 0), (-1, -1), [Colors.WHITE, Colors.LIGHT_GRAY]),
+        ]
+
+        table.setStyle(TableStyle(style))
+
+        # If title is provided, create a title element
+        if title:
+            title_style = ParagraphStyle(
+                "TableTitle",
+                parent=self.styles["Heading2"],
+                fontSize=12,
+                textColor=Colors.SLATE_BLUE,
+                spaceAfter=10,
+            )
+            title_paragraph = Paragraph(title, title_style)
+
+            # Create a container for title and table
+            elements = [title_paragraph, Spacer(1, 5), table]
+            container = Table(
+                [[element] for element in elements], colWidths=[sum(colWidths)]
+            )
+            container.setStyle(
+                TableStyle(
+                    [
+                        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ]
+                )
+            )
+            return container
+
+        return table
 
 
 class StyleUtility:
