@@ -9,3 +9,4 @@ temp/
 gitignore
 *.toml
 .gitignore
+**/target/
