@@ -10,3 +10,4 @@ gitignore
 *.toml
 .gitignore
 **/target/
+**/Cargo.lock
