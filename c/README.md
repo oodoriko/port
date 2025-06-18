@@ -6,6 +6,8 @@ gs level:
   static(should base on appetite): - cost multiple (market impact + fixed) - ?
   orders: everything in batch
 
+still need a single date version and a batch version
+
 1. indicator generation
    -> pd, preferably np vectorization + talib
    -> make parameters easily parametrizable
