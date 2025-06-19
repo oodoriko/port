@@ -1,8 +1,7 @@
+use crate::params::{PortfolioConstraintParams, PortfolioParams, PositionConstraintParams};
 use crate::position::Position;
 use crate::trade::Trade;
 use crate::utils::ticker_to_constraint;
-use env_logger;
-use log;
 use std::collections::HashMap;
 
 // portfolio::constraint:
@@ -12,33 +11,45 @@ use std::collections::HashMap;
 pub struct Portfolio {
     pub name: String,
     pub positions: Vec<Option<Position>>, // indexed by ticker_id
+    pub holdings: Vec<f64>,               // indexed by ticker_id, just the total shares
     pub equity_curve: Vec<f64>,
     pub cash_curve: Vec<f64>,
     pub notional_curve: Vec<f64>,
     pub cost_curve: Vec<f64>,
     pub realized_pnl_curve: Vec<f64>,
     pub unrealized_pnl_curve: Vec<f64>,
-    pub constraint: HashMap<String, f64>,
+    pub portfolio_params: PortfolioParams,
+    pub portfolio_constraints: PortfolioConstraintParams,
+    pub position_constraints: PositionConstraintParams,
     pub trading_history: HashMap<u64, Vec<Trade>>,
 }
 
 impl Portfolio {
-    pub fn new(name: String, initial_cash: f64) -> Self {
-        let num_assets = 2; // refer to my map later ig
+    pub fn new(
+        name: String,
+        num_assets: usize,
+        portfolio_params: PortfolioParams,
+        portfolio_constraints: PortfolioConstraintParams,
+        position_constraints: PositionConstraintParams,
+    ) -> Self {
+        let initial_cash = portfolio_params.initial_cash;
         Self {
             name,
+            portfolio_params,
+            portfolio_constraints,
+            position_constraints,
             positions: vec![None; num_assets],
+            holdings: vec![0.0; num_assets],
             equity_curve: vec![initial_cash],
             cash_curve: vec![initial_cash],
             notional_curve: vec![initial_cash],
             cost_curve: vec![0.0],
             realized_pnl_curve: vec![0.0],
             unrealized_pnl_curve: vec![0.0],
-            constraint: HashMap::new(),
             trading_history: HashMap::new(),
         }
     }
-
+    // preorder update and check
     fn execute_buy(
         &mut self,
         prices: &[f64],
@@ -76,6 +87,7 @@ impl Portfolio {
                 total_cost += 0.0; // missing model
                 total_cash_spent += cost;
                 trade.update_buy_trade(price, timestamp, cost);
+                self.holdings[idx] += trade.quantity;
             } else {
                 println!("Price not found for ticker: {}", trade.ticker);
                 trade.update_trade_status(
@@ -117,6 +129,7 @@ impl Portfolio {
                         position.avg_entry_price,
                         position.entry_timestamp,
                     );
+                    self.holdings[idx] -= trade.quantity; // bc trade qty is negative
                 } else {
                     println!("Position not found for ticker: {}", trade.ticker);
                     trade.update_trade_status(
@@ -136,4 +149,6 @@ impl Portfolio {
         }
         (total_realized_pnl, total_cost, total_cash_received)
     }
+
+    // postorder update
 }

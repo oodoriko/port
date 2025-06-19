@@ -1,0 +1,180 @@
+// Shared SignalParams enum for all signals
+pub enum SignalParams {
+    EmaRsiMacd {
+        ema_fast: usize,
+        ema_medium: usize,
+        ema_slow: usize,
+        rsi_period: usize,
+        initial_price: f64,
+        rsi_ob: f64,
+        rsi_os: f64,
+        rsi_bull_div: f64,
+        macd_fast: usize,
+        macd_slow: usize,
+        macd_signal: usize,
+    },
+    BbRsiOversold {
+        name: String,
+        std_dev: f32,
+        initial_close: f32,
+        rsi_period: usize,
+        initial_price: f64,
+        rsi_ob: f64,
+        rsi_os: f64,
+        rsi_bull_div: f64,
+    },
+    BbRsiOverbought {
+        name: String,
+        std_dev: f32,
+        initial_close: f32,
+        rsi_period: usize,
+        initial_price: f64,
+        rsi_ob: f64,
+        rsi_os: f64,
+        rsi_bull_div: f64,
+    },
+    PatternRsiMacd {
+        name: String,
+        resistance_threshold: f32,
+        support_threshold: f32,
+        initial_high: f32,
+        initial_low: f32,
+        initial_close: f32,
+        rsi_period: usize,
+        initial_price: f64,
+        rsi_ob: f64,
+        rsi_os: f64,
+        rsi_bull_div: f64,
+        macd_fast: usize,
+        macd_slow: usize,
+        macd_signal: usize,
+    },
+    TripleEmaPatternMacdRsi {
+        name: String,
+        ema_fast: usize,
+        ema_medium: usize,
+        ema_slow: usize,
+        initial_price: f64,
+        resistance_threshold: f32,
+        support_threshold: f32,
+        initial_high: f32,
+        initial_low: f32,
+        initial_close: f32,
+        macd_fast: usize,
+        macd_slow: usize,
+        macd_signal: usize,
+        rsi_period: usize,
+        rsi_ob: f64,
+        rsi_os: f64,
+        rsi_bull_div: f64,
+    },
+    BbSqueezeBreakout {
+        name: String,
+        std_dev: f32,
+        initial_close: f32,
+        macd_fast: usize,
+        macd_slow: usize,
+        macd_signal: usize,
+        initial_price: f64,
+        squeeze_threshold: f32,
+    },
+    RsiOversoldReversal {
+        name: String,
+        rsi_period: usize,
+        initial_price: f64,
+        rsi_ob: f64,
+        rsi_os: f64,
+        rsi_bull_div: f64,
+        ema_fast: usize,
+        ema_medium: usize,
+        ema_slow: usize,
+    },
+    SupportBounce {
+        name: String,
+        resistance_threshold: f32,
+        support_threshold: f32,
+        initial_high: f32,
+        initial_low: f32,
+        initial_close: f32,
+        macd_fast: usize,
+        macd_slow: usize,
+        macd_signal: usize,
+        initial_price: f64,
+    },
+    UptrendPattern {
+        name: String,
+        ema_fast: usize,
+        ema_medium: usize,
+        ema_slow: usize,
+        initial_price: f64,
+        resistance_threshold: f32,
+        support_threshold: f32,
+        initial_high: f32,
+        initial_low: f32,
+        initial_close: f32,
+        rsi_period: usize,
+        rsi_ob: f64,
+        rsi_os: f64,
+        rsi_bull_div: f64,
+    },
+    StochOversold {
+        name: String,
+        initial_high: f32,
+        initial_low: f32,
+        initial_close: f32,
+        ema_fast_period: usize,
+        ema_slow_period: usize,
+        initial_price: f64,
+        oversold: f32,
+    },
+}
+#[derive(Debug, Clone)]
+pub struct PositionConstraintParams {
+    pub max_position_size_pct: f64,
+    pub min_trade_size_pct: f64,
+    pub min_holding_candle: u64,
+    pub trailing_stop_loss_pct: f64,
+    pub trailing_stop_update_threshold_pct: f64,
+    pub take_profit_pct: f64,
+    pub risk_per_trade_pct: f64,
+    pub sell_fraction: f64,
+}
+
+impl Default for PositionConstraintParams {
+    fn default() -> Self {
+        Self {
+            max_position_size_pct: 1.0,
+            min_trade_size_pct: 0.05,
+            min_holding_candle: 15,
+            trailing_stop_loss_pct: 0.05,
+            trailing_stop_update_threshold_pct: 0.02,
+            take_profit_pct: 0.2,
+            risk_per_trade_pct: 0.05,
+            sell_fraction: 0.5,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PortfolioConstraintParams {
+    pub rebalance_threshold_pct: f64,
+    pub min_cash_pct: f64,
+    pub max_drawdown_pct: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct PortfolioParams {
+    pub initial_cash: f64,
+    pub capital_growth_pct: f64,
+    pub capital_growth_amount: f64,
+    pub capital_growth_frequency: Frequency,
+}
+
+#[derive(Debug, Clone)]
+pub enum Frequency {
+    Daily,
+    Weekly,
+    Monthly,
+    Quarterly,
+    Yearly,
+}
