@@ -1,10 +1,35 @@
 ![](./haha.png)
 
-to-do:
+todo tmo:
+1. optimize backend (enforce nd array, try to avoid hashmap and vec)
+2. properly set up request shape
+3. properly set up service
+4. ui for configurating strategy
 
-1. cash logic
-2. numbers are wrong apparently
-3. apparently note optimized....
+other to-do:
+-1. testssss?
+0. fix numbers
+1. cash logic, cost logic, take profit logic
+3. ui for result page
+
+4. cache backtest data(meta: bk id, set up) (key perf) (full results)
+- probably should use objecct...)
+5. ui and api for showing past backtest (with filter and sort)
+6. grid search? need to think it through
+- dont think indicator's param should be touched
+- strategy combo -> easy, a list
+- constraints and port setup, select a range and interval?
+- show number of combo to run? and prune by priority?
+- show aggregate kep results, also list of backtest?
+- gs table ( gs id to bk id)
+5. job to cache daily coinbase data
+
+7. a live simulator! this must be funnnn
+- at t0, initiation with t-1 data, 
+- at tk, initiation done, 
+- at tk + 1, fetch tk data and simulation starts (k periods gap)
+- need to optimize initiation too
+- dont worry abt this lol
 
 gs level:
 
