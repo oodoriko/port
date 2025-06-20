@@ -5,14 +5,15 @@ use crate::data::data::InfluxDBHandler;
 use crate::trading::portfolio::Portfolio;
 use crate::trading::strategy::Strategy;
 use chrono::{DateTime, Utc};
-use std::collections::HashMap;
 
+#[inline(always)]
 pub async fn backtest(
     strategy_name: String,
     portfolio_name: String,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
-    strategies: HashMap<String, Vec<SignalParams>>,
+    tickers: Vec<String>,
+    strategies: Vec<Vec<SignalParams>>,
     portfolio_params: PortfolioParams,
     portfolio_constraints_params: PortfolioConstraintParams,
     position_constraints_params: Vec<PositionConstraintParams>,
@@ -20,16 +21,11 @@ pub async fn backtest(
     cadence: u64, // in minutes
 ) -> Result<Portfolio, Box<dyn std::error::Error>> {
     let handler = InfluxDBHandler::new()?;
-    let tickers: Vec<String> = strategies.keys().cloned().collect();
-    let strategies_vec: Vec<Vec<SignalParams>> = tickers
-        .iter()
-        .map(|ticker| strategies[ticker].clone())
-        .collect();
 
     let ticker_refs: Vec<&str> = tickers.iter().map(|s| s.as_str()).collect();
     let (data, timestamps) = handler.load_data(&ticker_refs, start, end).await?;
-    let warm_up_price_data: Vec<Vec<Vec<f32>>> =
-        data.iter().take(warm_up_period).cloned().collect();
+
+    let warm_up_price_data: Vec<Vec<Vec<f32>>> = data[..warm_up_period].to_vec();
 
     let mut strategy = Strategy::new(
         &strategy_name,
@@ -37,7 +33,7 @@ pub async fn backtest(
         portfolio_params,
         portfolio_constraints_params,
         position_constraints_params,
-        &strategies_vec,
+        &strategies,
     );
 
     let mut portfolio = strategy.create_portfolio();
@@ -45,94 +41,139 @@ pub async fn backtest(
     constraint.set_cadence(cadence * 60);
     strategy.warm_up_signals(&warm_up_price_data);
 
-    let mut exit = false;
-    for idx in warm_up_period..timestamps.len() {
-        let time = timestamps[idx];
+    let n_assets = tickers.len();
+    let mut close_prices = Vec::with_capacity(n_assets);
+    let mut open_prices = Vec::with_capacity(n_assets);
+    let mut signals_adjusted = Vec::with_capacity(n_assets);
 
-        let close_prices: Vec<f32> = data[idx].iter().map(|asset_ohlcv| asset_ohlcv[3]).collect();
+    let data_len = data.len();
+    let mut exit = false;
+
+    for idx in warm_up_period..data_len {
+        let time = timestamps[idx];
+        let mut available_cash = *portfolio.cash_curve.last().unwrap();
+        let mut total_cost = 0.0;
+        let mut total_realized_pnl = 0.0;
+
+        // Fast price extraction using unsafe for bounds check elimination?? what is this?
+        close_prices.clear();
+        open_prices.clear();
+
+        unsafe {
+            let prev_data = data.get_unchecked(idx - 1);
+            for asset_ohlcv in prev_data {
+                close_prices.push(*asset_ohlcv.get_unchecked(3)); // close
+                open_prices.push(*asset_ohlcv.get_unchecked(0)); // open
+            }
+        }
 
         if exit {
-            let mut liquidation_trades =
-                portfolio.trading_history[portfolio.trading_history.len() - 1].clone();
+            let mut liquidation_trades = portfolio.trading_history.last().unwrap().clone();
             portfolio.liquidation(&close_prices, &mut liquidation_trades, time as u64);
+            println!("江南皮革厂倒闭啦！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！");
             break;
         }
 
         portfolio.pre_order_update(&data[idx]);
-        let (is_exit, mut priority_sell_trades) = constraint.pre_order_check(
+        let (is_exit, risk_trades) = constraint.pre_order_check(
             &close_prices,
             &portfolio.positions,
-            portfolio.equity_curve[portfolio.equity_curve.len() - 1],
+            *portfolio.equity_curve.last().unwrap(),
+            time as u64,
         );
 
         if is_exit {
             exit = true;
-            // overwrite any existing pending trades from last period
-            portfolio.post_order_update(&close_prices, &Vec::new(), &priority_sell_trades);
+            portfolio.post_order_update(
+                &close_prices,
+                &Vec::new(),
+                &risk_trades,
+                available_cash,
+                total_cost,
+                total_realized_pnl,
+            );
             continue;
         }
-        // execute priority sell trades
-        portfolio.execute_trades(&mut priority_sell_trades, &close_prices, time as u64);
 
-        // generate signals
-        strategy.update_signals(data[idx].clone());
+        // generate signal use t-1 close
+        strategy.update_signals(data[idx - 1].clone());
         let signals = strategy.generate_signals();
-        let mut signals_adjusted = signals.clone();
-        for trade in priority_sell_trades.iter() {
-            signals_adjusted[trade.ticker_id] = 0;
+
+        signals_adjusted.clear();
+        signals_adjusted.extend_from_slice(&signals);
+
+        for trade in &risk_trades {
+            // hold off trading ticker in risk trades
+            if trade.ticker_id < signals_adjusted.len() {
+                signals_adjusted[trade.ticker_id] = 0;
+            }
         }
 
-        // generate trading plan, positions level constraint is checked during generate_trades, portfolio level constraint is checked during evaluate_trades
+        // execute t-2 trades using t-1 open at t0 because t-1 is the latest price we can get
+        let trading_history_len = portfolio.trading_history.len();
+        if trading_history_len >= 2 {
+            let mut prev_trades = portfolio.trading_history[trading_history_len - 2].clone();
+            if !prev_trades.is_empty() {
+                (available_cash, total_cost, total_realized_pnl) =
+                    portfolio.execute_trades(&mut prev_trades, &open_prices, time as u64);
+            }
+        }
+
+        portfolio.update_capital(time);
+
         let mut trades = constraint.generate_trades(
             &signals_adjusted,
             &close_prices,
-            portfolio.equity_curve[portfolio.equity_curve.len() - 1],
-            &portfolio.positions,
-        );
-        trades = constraint.evaluate_trades(
-            &trades,
-            &close_prices,
-            portfolio.equity_curve[portfolio.equity_curve.len() - 1],
+            *portfolio.equity_curve.last().unwrap(),
+            available_cash,
             time as u64,
             &portfolio.positions,
         );
+        trades.extend(risk_trades);
 
-        // execute trades from previous period
-        let mut prev_trades =
-            portfolio.trading_history[portfolio.trading_history.len() - 1].clone();
-        if prev_trades.len() > 0 {
-            portfolio.execute_trades(&mut prev_trades, &close_prices, time as u64);
-            prev_trades.extend(priority_sell_trades);
-        }
+        let prev_trades = if trading_history_len >= 2 {
+            portfolio.trading_history[trading_history_len - 2].clone()
+        } else {
+            Vec::new()
+        };
 
-        portfolio.post_order_update(&close_prices, &prev_trades, &trades);
+        portfolio.post_order_update(
+            &close_prices,
+            &prev_trades,
+            &trades,
+            available_cash,
+            total_cost,
+            total_realized_pnl,
+        );
     }
+
     Ok(portfolio)
 }
 
+#[inline(always)]
 pub fn backtest_result(portfolio: Portfolio) {
     println!("=== BACKTEST RESULTS ===\n");
 
     println!("📊 Portfolio: {}", portfolio.name);
-    println!("📈 Total Records: {}", portfolio.equity_curve.len());
+    let equity_len = portfolio.equity_curve.len();
+    println!("📈 Total Records: {}", equity_len);
 
-    if portfolio.equity_curve.is_empty() {
+    if equity_len == 0 {
         println!("❌ No data to display");
         return;
     }
 
-    // Summary statistics
     let initial_value = portfolio.equity_curve[0];
-    let final_value = *portfolio.equity_curve.last().unwrap();
+    let final_value = portfolio.equity_curve[equity_len - 1];
+
+    let (min_equity, max_equity) = portfolio
+        .equity_curve
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), &val| {
+            (min.min(val), max.max(val))
+        });
+
     let total_return = (final_value - initial_value) / initial_value * 100.0;
-    let max_equity = portfolio
-        .equity_curve
-        .iter()
-        .fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-    let min_equity = portfolio
-        .equity_curve
-        .iter()
-        .fold(f32::INFINITY, |a, &b| a.min(b));
 
     println!("\n💰 PERFORMANCE SUMMARY:");
     println!("  Initial Value: ${:.2}", initial_value);
@@ -143,42 +184,4 @@ pub fn backtest_result(portfolio: Portfolio) {
     println!("  Peak Notional: ${:.2}", portfolio.peak_notional);
 
     println!("\n=== END BACKTEST RESULTS ===");
-}
-
-mod tests {
-    use super::backtest;
-    use crate::core::params::{
-        PortfolioConstraintParams, PortfolioParams, PositionConstraintParams,
-    };
-    use crate::utils::utils::create_sample_strategies;
-    use chrono::TimeZone;
-    use chrono::Utc;
-    #[tokio::test]
-    async fn test_backtest() {
-        let start = Utc.with_ymd_and_hms(2025, 6, 17, 16, 0, 0).unwrap();
-        let end = Utc.with_ymd_and_hms(2025, 6, 19, 17, 0, 0).unwrap();
-
-        let strategies = create_sample_strategies();
-
-        let portfolio = backtest(
-            String::from("test_strategy"),
-            String::from("test_portfolio"),
-            start,
-            end,
-            strategies,
-            PortfolioParams::default(),
-            PortfolioConstraintParams::default(),
-            vec![
-                PositionConstraintParams::default(),
-                PositionConstraintParams::default(),
-            ],
-            10,
-            1,
-        )
-        .await
-        .unwrap();
-
-        // Print the backtest results
-        super::backtest_result(portfolio);
-    }
 }

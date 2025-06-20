@@ -3,7 +3,6 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use tower_http::cors::CorsLayer;
 
 use crate::analysis::backtest::backtest;
@@ -18,7 +17,8 @@ pub struct BacktestRequest {
     pub portfolio_name: String,
     pub start: String, // ISO string
     pub end: String,   // ISO string
-    pub strategies: HashMap<String, Vec<SignalParams>>,
+    pub tickers: Vec<String>,
+    pub strategies: Vec<Vec<SignalParams>>,
     pub portfolio_params: PortfolioParams,
     pub portfolio_constraints_params: PortfolioConstraintParams,
     pub position_constraints_params: Vec<PositionConstraintParams>,
@@ -87,6 +87,7 @@ pub async fn backtest_handler(
         request.portfolio_name,
         start_date,
         end_date,
+        request.tickers,
         request.strategies,
         request.portfolio_params,
         request.portfolio_constraints_params,

@@ -3,7 +3,7 @@ use crate::params::{
     PortfolioConstraintParams, PortfolioParams, PositionConstraintParams, SignalParams,
 };
 use crate::portfolio::Portfolio;
-use crate::r#const::{MAX_ASSETS, MAX_SIGNALS_PER_ASSET};
+use crate::r#const::MAX_ASSETS;
 use crate::signals::*;
 
 pub struct Strategy {
@@ -12,8 +12,8 @@ pub struct Strategy {
     pub portfolio_params: PortfolioParams,
     pub portfolio_constraints: PortfolioConstraintParams,
     pub position_constraints: Vec<PositionConstraintParams>,
-    pub strategies: Vec<Vec<SignalParams>>,
-    signal_generator: SignalGenerator,
+    pub signal_generator: SignalGenerator,
+    pub n_assets: usize,
 }
 
 impl Strategy {
@@ -26,6 +26,7 @@ impl Strategy {
         strategies: &[Vec<SignalParams>],
     ) -> Self {
         assert!(strategies.len() <= MAX_ASSETS, "Too many assets");
+        let n_assets = strategies.len();
         let signal_generator = Self::create_signal_generator(strategies);
         Self {
             name: name.to_string(),
@@ -33,17 +34,15 @@ impl Strategy {
             portfolio_params,
             portfolio_constraints,
             position_constraints,
-            strategies: strategies.to_vec(),
             signal_generator,
+            n_assets,
         }
     }
 
     pub fn create_portfolio(&self) -> Portfolio {
-        let num_assets = self.strategies.len();
-
         Portfolio::new(
-            self.portfolio_name.to_string(),
-            num_assets,
+            self.portfolio_name.clone(),
+            self.n_assets,
             self.portfolio_params.clone(),
             self.portfolio_constraints.clone(),
             self.position_constraints.clone(),
@@ -51,13 +50,18 @@ impl Strategy {
     }
 
     pub fn create_constraints(&self) -> Constraint {
-        Constraint::from_position_constraints(&self.position_constraints)
+        Constraint::from_position_constraints(
+            &self.position_constraints,
+            self.portfolio_constraints.clone(),
+        )
     }
 
+    #[inline(always)]
     pub fn update_signals(&mut self, data: Vec<Vec<f32>>) {
-        assert!(data.len() <= MAX_ASSETS, "Too many assets in OHLC data");
         self.signal_generator.update(data);
     }
+
+    #[inline(always)]
     pub fn generate_signals(&self) -> Vec<i8> {
         self.signal_generator.generate_signals()
     }
@@ -66,11 +70,6 @@ impl Strategy {
         let mut signal_generator = SignalGenerator::new(strategies.len());
 
         for (asset_idx, asset_strategies) in strategies.iter().enumerate() {
-            assert!(
-                asset_strategies.len() <= MAX_SIGNALS_PER_ASSET,
-                "Too many signals for asset {}",
-                asset_idx
-            );
             for strategy_params in asset_strategies {
                 if let Some(signal) = create_signal_from_params(strategy_params) {
                     signal_generator.add_signal(asset_idx, signal);
@@ -80,17 +79,27 @@ impl Strategy {
         signal_generator
     }
 
-    pub fn warm_up_signals(&mut self, data: &Vec<Vec<Vec<f32>>>) {
+    #[inline(always)]
+    pub fn warm_up_signals(&mut self, data: &[Vec<Vec<f32>>]) {
+        let n_assets = self.n_assets;
+
         for time_data in data.iter() {
-            for (asset_idx, asset_ohlcv) in time_data.iter().enumerate() {
-                if let Some(signals) = self.signal_generator.signals.get_mut(asset_idx) {
-                    for signal in signals.iter_mut() {
-                        signal.update(
-                            asset_ohlcv[0],
-                            asset_ohlcv[1],
-                            asset_ohlcv[2],
-                            asset_ohlcv[3],
-                        );
+            let signals = &mut self.signal_generator.signals;
+
+            for asset_idx in 0..n_assets.min(time_data.len()) {
+                let asset_ohlcv = &time_data[asset_idx];
+                let (open, high, low, close) = unsafe {
+                    (
+                        *asset_ohlcv.get_unchecked(0),
+                        *asset_ohlcv.get_unchecked(1),
+                        *asset_ohlcv.get_unchecked(2),
+                        *asset_ohlcv.get_unchecked(3),
+                    )
+                };
+
+                if let Some(asset_signals) = signals.get_mut(asset_idx) {
+                    for signal in asset_signals.iter_mut() {
+                        signal.update(open, high, low, close);
                     }
                 }
             }

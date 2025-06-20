@@ -1,4 +1,4 @@
-use crate::params::PositionConstraintParams;
+use crate::params::{PortfolioConstraintParams, PositionConstraintParams};
 use crate::position::Position;
 use crate::trade::Trade;
 
@@ -14,18 +14,25 @@ pub struct Constraint {
     pub risk_per_trade_pct: Vec<f32>,
     pub sell_fraction: Vec<f32>,
     pub candle_time: u64,
+    // Cache for hot path calculations
+    n_assets: usize,
 }
 
 impl Constraint {
-    pub fn from_position_constraints(position_constraints: &[PositionConstraintParams]) -> Self {
-        let mut max_position_size_pct = Vec::new();
-        let mut min_trade_size_pct = Vec::new();
-        let mut min_holding_candle = Vec::new();
-        let mut trailing_stop_loss_pct = Vec::new();
-        let mut trailing_stop_update_threshold_pct = Vec::new();
-        let mut take_profit_pct = Vec::new();
-        let mut risk_per_trade_pct = Vec::new();
-        let mut sell_fraction = Vec::new();
+    pub fn from_position_constraints(
+        position_constraints: &[PositionConstraintParams],
+        portfolio_constraints: PortfolioConstraintParams,
+    ) -> Self {
+        let n_assets = position_constraints.len();
+
+        let mut max_position_size_pct = Vec::with_capacity(n_assets);
+        let mut min_trade_size_pct = Vec::with_capacity(n_assets);
+        let mut min_holding_candle = Vec::with_capacity(n_assets);
+        let mut trailing_stop_loss_pct = Vec::with_capacity(n_assets);
+        let mut trailing_stop_update_threshold_pct = Vec::with_capacity(n_assets);
+        let mut take_profit_pct = Vec::with_capacity(n_assets);
+        let mut risk_per_trade_pct = Vec::with_capacity(n_assets);
+        let mut sell_fraction = Vec::with_capacity(n_assets);
 
         for pc in position_constraints {
             max_position_size_pct.push(pc.max_position_size_pct);
@@ -47,15 +54,19 @@ impl Constraint {
             take_profit_pct,
             risk_per_trade_pct,
             sell_fraction,
-            max_drawdown_pct: 0.0,
-            rebalance_threshold_pct: 0.0,
-            candle_time: 60,
+            max_drawdown_pct: portfolio_constraints.max_drawdown_pct,
+            rebalance_threshold_pct: portfolio_constraints.rebalance_threshold_pct,
+            candle_time: 0,
+            n_assets,
         }
     }
+
+    #[inline(always)]
     pub fn set_cadence(&mut self, candle_time: u64) {
         self.candle_time = candle_time;
     }
 
+    #[inline(always)]
     pub fn calculate_max_pos_size_by_risk(
         &self,
         trades: &[i8],
@@ -63,115 +74,129 @@ impl Constraint {
         portfolio_value: f32,
         holdings: &[f32],
     ) -> Vec<f32> {
-        trades
-            .iter()
-            .enumerate()
-            .map(|(i, trade)| {
-                if *trade == -1 {
-                    holdings[i] * self.sell_fraction[i]
-                } else {
-                    let risk_per_trade = price[i] * self.risk_per_trade_pct[i];
-                    (self.max_position_size_pct[i] * portfolio_value) / risk_per_trade
+        let len = trades.len().min(self.n_assets);
+        let mut result = Vec::with_capacity(len);
+
+        for i in 0..len {
+            let trade_signal = unsafe { *trades.get_unchecked(i) };
+            let result_value = if trade_signal == -1 {
+                unsafe { *holdings.get_unchecked(i) * *self.sell_fraction.get_unchecked(i) }
+            } else {
+                unsafe {
+                    let price_val = *price.get_unchecked(i);
+                    let risk_per_trade = price_val * *self.risk_per_trade_pct.get_unchecked(i);
+                    (*self.max_position_size_pct.get_unchecked(i) * portfolio_value)
+                        / risk_per_trade
                 }
-            })
-            .collect()
+            };
+            result.push(result_value);
+        }
+        result
     }
 
+    #[inline(always)]
     pub fn pre_order_check(
         &self,
         price: &[f32],
         positions: &[Option<Position>],
         peak_portfolio_value: f32,
+        timestamp: u64,
     ) -> (bool, Vec<Trade>) {
-        let mut max_drawdown_trades = Vec::new();
-        let mut stop_loss_trades = Vec::new();
+        let mut max_drawdown_trades = Vec::with_capacity(self.n_assets);
+        let mut stop_loss_trades = Vec::with_capacity(self.n_assets);
         let mut new_market_value = 0.0;
-        for (idx, position) in positions.iter().enumerate() {
+
+        let drawdown_threshold = self.max_drawdown_pct * peak_portfolio_value;
+
+        for (idx, position) in positions.iter().enumerate().take(self.n_assets) {
             if let Some(position) = position {
-                if price[idx] < position.trailing_stop_price {
-                    stop_loss_trades.push(Trade::stop_loss(-position.quantity, idx));
+                let current_price = unsafe { *price.get_unchecked(idx) };
+
+                if position.quantity > 0.0 && current_price < position.trailing_stop_price {
+                    stop_loss_trades.push(Trade::stop_loss(position.quantity, idx, timestamp));
                 }
-                new_market_value += position.quantity * price[idx];
-                max_drawdown_trades.push(Trade::liquidation(-position.quantity, idx));
+
+                let position_value = position.quantity * current_price;
+                new_market_value += position_value;
+                max_drawdown_trades.push(Trade::liquidation(position.quantity, idx, timestamp));
             }
         }
-        if new_market_value < self.max_drawdown_pct * peak_portfolio_value {
-            return (true, max_drawdown_trades);
+
+        if new_market_value != 0.0 && new_market_value < drawdown_threshold {
+            (true, max_drawdown_trades)
+        } else {
+            (false, stop_loss_trades)
         }
-        (false, stop_loss_trades)
     }
 
+    #[inline(always)]
     pub fn generate_trades(
         &mut self,
         signals: &[i8],
         price: &[f32],
         portfolio_value: f32,
-        positions: &[Option<Position>],
-    ) -> Vec<Trade> {
-        let mut new_trades = Vec::new();
-        for (idx, position) in positions.iter().enumerate() {
-            if signals[idx] == 0 {
-                continue;
-            }
-            if signals[idx] == 1 {
-                let max_position_size_pct = self.max_position_size_pct.get(idx).unwrap_or(&0.0);
-                let risk_per_trade_pct = self.risk_per_trade_pct.get(idx).unwrap_or(&0.0);
-                let min_trade_size_pct = self.min_trade_size_pct.get(idx).unwrap_or(&0.0);
-
-                let max_pos_size =
-                    (max_position_size_pct * portfolio_value) / (risk_per_trade_pct * price[idx]);
-                if max_pos_size * price[idx] > min_trade_size_pct * portfolio_value {
-                    new_trades.push(Trade::signal_buy(max_pos_size, idx));
-                }
-            }
-            if signals[idx] == -1 {
-                if let Some(position) = position {
-                    let sell_fraction = self.sell_fraction.get(idx).unwrap_or(&0.0);
-                    new_trades.push(Trade::signal_sell(position.quantity * sell_fraction, idx));
-                }
-            }
-        }
-        new_trades
-    }
-
-    pub fn evaluate_trades(
-        &self,
-        trades: &[Trade],
-        price: &[f32],
-        portfolio_value: f32,
+        available_cash: f32,
         timestamp: u64,
         positions: &[Option<Position>],
     ) -> Vec<Trade> {
-        let mut actual_trades = Vec::new();
+        let mut valid_trades = Vec::with_capacity(self.n_assets / 2);
         let mut total_size = 0.0;
-        for trade in trades {
-            let notional = trade.quantity * price[trade.ticker_id as usize];
 
-            if trade.is_signal_buy.unwrap_or(false) {
-                let mut holding_period = 0;
-                if let Some(position) = positions[trade.ticker_id as usize].clone() {
-                    holding_period = (timestamp - position.entry_timestamp) / self.candle_time;
-                };
-                if holding_period == 0
-                    || holding_period >= *self.min_holding_candle.get(trade.ticker_id).unwrap_or(&0)
-                {
-                    if notional
-                        > self.min_trade_size_pct.get(trade.ticker_id).unwrap_or(&0.0)
-                            * portfolio_value
-                    {
-                        total_size += notional;
-                        actual_trades.push(trade.clone());
+        let rebalance_threshold = self.rebalance_threshold_pct * portfolio_value;
+        let min_available = available_cash.min(portfolio_value);
+        let signal_len = signals.len().min(positions.len()).min(self.n_assets);
+
+        for idx in 0..signal_len {
+            let signal = unsafe { *signals.get_unchecked(idx) };
+            let position = unsafe { positions.get_unchecked(idx) };
+
+            match signal {
+                0 => continue,
+                1 => {
+                    if let Some(pos) = position {
+                        let holding_period = (timestamp - pos.entry_timestamp) / self.candle_time;
+                        let min_holding = unsafe { *self.min_holding_candle.get_unchecked(idx) };
+                        if holding_period < min_holding {
+                            continue;
+                        }
+                    }
+
+                    let current_price = unsafe { *price.get_unchecked(idx) };
+                    let risk_per_trade_pct = unsafe { *self.risk_per_trade_pct.get_unchecked(idx) };
+                    let trailing_stop_pct =
+                        unsafe { *self.trailing_stop_loss_pct.get_unchecked(idx) };
+                    let max_pos_pct = unsafe { *self.max_position_size_pct.get_unchecked(idx) };
+                    let min_trade_pct = unsafe { *self.min_trade_size_pct.get_unchecked(idx) };
+
+                    let max_pos_size = (risk_per_trade_pct * min_available)
+                        / (trailing_stop_pct * current_price).min(max_pos_pct * portfolio_value);
+
+                    let min_trade_threshold = min_trade_pct * portfolio_value;
+                    let trade_value = max_pos_size * current_price;
+
+                    if trade_value > min_trade_threshold {
+                        total_size += trade_value;
+                        valid_trades.push(Trade::signal_buy(max_pos_size, idx, timestamp));
                     }
                 }
-            }
-            if trade.is_signal_sell.unwrap_or(false) {
-                total_size += notional;
-                actual_trades.push(trade.clone());
+                -1 => {
+                    if let Some(pos) = position {
+                        let sell_fraction = unsafe { *self.sell_fraction.get_unchecked(idx) };
+                        let current_price = unsafe { *price.get_unchecked(idx) };
+
+                        let quantity = pos.quantity * sell_fraction;
+                        let trade_value = quantity * current_price;
+
+                        total_size -= trade_value;
+                        valid_trades.push(Trade::signal_sell(quantity, idx, timestamp));
+                    }
+                }
+                _ => {}
             }
         }
 
-        if total_size > self.rebalance_threshold_pct * portfolio_value {
-            actual_trades
+        if total_size > rebalance_threshold {
+            valid_trades
         } else {
             Vec::new()
         }

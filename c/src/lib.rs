@@ -23,6 +23,7 @@ pub mod trading {
 // Analysis modules
 pub mod analysis {
     pub mod backtest;
+    pub mod test;
 }
 
 // Utility modules

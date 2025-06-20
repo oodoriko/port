@@ -1,79 +1,120 @@
-// a record of a single trade, mostly for reporting purposes
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TradeType {
+    SignalBuy,
+    SignalSell,
+    StopLoss,
+    Liquidation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TradeStatus {
+    Pending,
+    Executed,
+    Failed,
+    Rejected,
+}
+
 #[derive(Debug, Clone)]
 pub struct Trade {
     pub ticker_id: usize,
-    pub quantity: f32, // + for buy, - for sell
+    pub quantity: f32,
+    pub trade_type: TradeType,
+    pub trade_status: TradeStatus,
 
-    pub cost: Option<f32>, // transaction cost + slippage?
-    pub execution_timestamp: Option<u64>,
-    pub price: Option<f32>, // when trade is created, price is not available, filled at execution
+    pub generated_at: u64,
+    pub execution_timestamp: u64, // 0 if not executed
+    pub price: f32,               // 0.0 if not executed
+    pub cost: f32,                // 0.0 if not calculated
 
-    // sell trade, most need to reference to Position during execution
-    pub avg_entry_price: Option<f32>,
-    pub holding_period: Option<u64>, // only if position is closed
-    pub realized_pnl: Option<f32>,
+    pub avg_entry_price: f32, // 0.0 if not applicable
+    pub holding_period: u64,  // 0 if not applicable
+    pub realized_pnl: f32,    // 0.0 if not applicable
 
-    pub is_stop_loss: Option<bool>,
-    pub is_liquidation: Option<bool>,
-    pub is_signal_sell: Option<bool>,
-    pub is_signal_buy: Option<bool>,
-
-    pub trade_status: Option<String>,
     pub trade_comment: Option<String>,
 }
 
 impl Trade {
-    pub fn new(quantity: f32, ticker_id: usize) -> Self {
+    #[inline(always)]
+    pub fn signal_buy(quantity: f32, ticker_id: usize, generated_at: u64) -> Self {
         Self {
             ticker_id,
             quantity,
-            cost: None,
-            execution_timestamp: None,
-            price: None,
-            avg_entry_price: None,
-            holding_period: None,
-            realized_pnl: None,
-            is_stop_loss: Some(false),
-            is_liquidation: Some(false),
-            is_signal_sell: Some(false),
-            is_signal_buy: Some(false),
-            trade_status: Some("Pending".to_string()),
-            trade_comment: Some("".to_string()),
+            trade_type: TradeType::SignalBuy,
+            trade_status: TradeStatus::Pending,
+            generated_at,
+            execution_timestamp: 0,
+            price: 0.0,
+            cost: 0.0,
+            avg_entry_price: 0.0,
+            holding_period: 0,
+            realized_pnl: 0.0,
+            trade_comment: None,
         }
     }
 
-    pub fn signal_buy(quantity: f32, ticker_id: usize) -> Self {
-        let mut trade = Self::new(quantity, ticker_id);
-        trade.is_signal_buy = Some(true);
-        trade
+    #[inline(always)]
+    pub fn signal_sell(quantity: f32, ticker_id: usize, generated_at: u64) -> Self {
+        Self {
+            ticker_id,
+            quantity,
+            trade_type: TradeType::SignalSell,
+            trade_status: TradeStatus::Pending,
+            generated_at,
+            execution_timestamp: 0,
+            price: 0.0,
+            cost: 0.0,
+            avg_entry_price: 0.0,
+            holding_period: 0,
+            realized_pnl: 0.0,
+            trade_comment: None,
+        }
     }
 
-    pub fn signal_sell(quantity: f32, ticker_id: usize) -> Self {
-        let mut trade = Self::new(quantity, ticker_id);
-        trade.is_signal_sell = Some(true);
-        trade
+    #[inline(always)]
+    pub fn stop_loss(quantity: f32, ticker_id: usize, generated_at: u64) -> Self {
+        Self {
+            ticker_id,
+            quantity,
+            trade_type: TradeType::StopLoss,
+            trade_status: TradeStatus::Pending,
+            generated_at,
+            execution_timestamp: 0,
+            price: 0.0,
+            cost: 0.0,
+            avg_entry_price: 0.0,
+            holding_period: 0,
+            realized_pnl: 0.0,
+            trade_comment: None,
+        }
     }
 
-    pub fn stop_loss(quantity: f32, ticker_id: usize) -> Self {
-        let mut trade = Self::new(quantity, ticker_id);
-        trade.is_stop_loss = Some(true);
-        trade
+    #[inline(always)]
+    pub fn liquidation(quantity: f32, ticker_id: usize, generated_at: u64) -> Self {
+        Self {
+            ticker_id,
+            quantity,
+            trade_type: TradeType::Liquidation,
+            trade_status: TradeStatus::Pending,
+            generated_at,
+            execution_timestamp: 0,
+            price: 0.0,
+            cost: 0.0,
+            avg_entry_price: 0.0,
+            holding_period: 0,
+            realized_pnl: 0.0,
+            trade_comment: None,
+        }
     }
 
-    pub fn liquidation(quantity: f32, ticker_id: usize) -> Self {
-        let mut trade = Self::new(quantity, ticker_id);
-        trade.is_liquidation = Some(true);
-        trade
-    }
-
+    #[inline(always)]
     pub fn update_buy_trade(&mut self, price: f32, timestamp: u64, cost: f32) {
-        self.price = Some(price);
-        self.execution_timestamp = Some(timestamp);
-        self.cost = Some(cost);
-        self.trade_status = Some("Executed".to_string());
-        self.trade_comment = Some("".to_string());
+        self.price = price;
+        self.execution_timestamp = timestamp;
+        self.cost = cost;
+        self.trade_status = TradeStatus::Executed;
     }
 
+    #[inline(always)]
     pub fn update_sell_trade(
         &mut self,
         price: f32,
@@ -82,18 +123,57 @@ impl Trade {
         avg_entry_price: f32,
         entry_timestamp: u64,
     ) {
-        self.price = Some(price);
-        self.execution_timestamp = Some(timestamp);
-        self.cost = Some(cost);
-        self.holding_period = Some(timestamp - entry_timestamp);
-        self.avg_entry_price = Some(avg_entry_price);
-        self.realized_pnl = Some((price - avg_entry_price) * -self.quantity);
-
-        self.trade_status = Some("Executed".to_string());
-        self.trade_comment = Some("".to_string());
+        self.price = price;
+        self.execution_timestamp = timestamp;
+        self.cost = cost;
+        self.holding_period = timestamp - entry_timestamp;
+        self.avg_entry_price = avg_entry_price;
+        self.realized_pnl = (price - avg_entry_price) * self.quantity;
+        self.trade_status = TradeStatus::Executed;
     }
-    pub fn update_trade_status(&mut self, status: String, comment: String) {
-        self.trade_status = Some(status);
+
+    #[inline(always)]
+    pub fn update_trade_status(&mut self, status: TradeStatus) {
+        self.trade_status = status;
+    }
+
+    #[inline(always)]
+    pub fn set_comment(&mut self, comment: String) {
         self.trade_comment = Some(comment);
+    }
+
+    #[inline(always)]
+    pub fn clear_comment(&mut self) {
+        self.trade_comment = None;
+    }
+
+    #[inline(always)]
+    pub fn is_buy(&self) -> bool {
+        matches!(self.trade_type, TradeType::SignalBuy)
+    }
+
+    #[inline(always)]
+    pub fn is_sell(&self) -> bool {
+        matches!(self.trade_type, TradeType::SignalSell)
+    }
+
+    #[inline(always)]
+    pub fn is_stop_loss(&self) -> bool {
+        matches!(self.trade_type, TradeType::StopLoss)
+    }
+
+    #[inline(always)]
+    pub fn is_liquidation(&self) -> bool {
+        matches!(self.trade_type, TradeType::Liquidation)
+    }
+
+    #[inline(always)]
+    pub fn is_executed(&self) -> bool {
+        matches!(self.trade_status, TradeStatus::Executed)
+    }
+
+    #[inline(always)]
+    pub fn is_pending(&self) -> bool {
+        matches!(self.trade_status, TradeStatus::Pending)
     }
 }
