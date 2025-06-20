@@ -28,7 +28,9 @@ class Strategy:
         self.is_positive = is_positive
 
     @classmethod
-    def create(cls, strategy_name: StrategyTypes, is_positive: bool = False) -> "Strategy":
+    def create(
+        cls, strategy_name: StrategyTypes, is_positive: bool = False
+    ) -> "Strategy":
         if strategy_name == StrategyTypes.MACD_CROSSOVER:
             return MACD(is_positive=is_positive)
         elif strategy_name == StrategyTypes.RSI_CROSSOVER:
@@ -69,7 +71,9 @@ class MACD(Strategy):
         else:
             return 0 * filter_signal
 
-    def generate_signals_batch(self, data: pd.DataFrame, run_start_index: int) -> pd.DataFrame:
+    def generate_signals_batch(
+        self, data: pd.DataFrame, run_start_index: int
+    ) -> pd.DataFrame:
         """data: row is keyed by date, column is ticker, value is close price, full history of data"""
         """Returns dataframe with same structure containing trading signals (-1, 0, 1)"""
 
@@ -78,7 +82,9 @@ class MACD(Strategy):
             np.apply_along_axis(self.get_signal, arr=data_arr[:i, :], axis=0)
             for i in range(run_start_index, len(data_arr))
         ]
-        return pd.DataFrame(signals, index=data.index[run_start_index:], columns=data.columns)
+        return pd.DataFrame(
+            signals, index=data.index[run_start_index:], columns=data.columns
+        )
 
     def generate_signals_single_date(self, data: pd.DataFrame) -> dict[str, int]:
         """data only up to run date"""
@@ -113,9 +119,15 @@ class RSI(Strategy):
             * filter_signal
         )
 
-    def generate_signals_batch(self, data: pd.DataFrame, start_index: int) -> pd.DataFrame:
-        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[start_index:]
-        return pd.DataFrame(results, index=data.index[start_index:], columns=data.columns)
+    def generate_signals_batch(
+        self, data: pd.DataFrame, start_index: int
+    ) -> pd.DataFrame:
+        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[
+            start_index:
+        ]
+        return pd.DataFrame(
+            results, index=data.index[start_index:], columns=data.columns
+        )
 
     def generate_signals_single_date(self, data: pd.DataFrame) -> dict[str, int]:
         if len(data) < self.period:
@@ -134,7 +146,9 @@ class BollingerBands(Strategy):
         self.min_window = (period // 10 + 1) * 10
 
     def get_signals(self, prices: np.ndarray) -> np.ndarray:
-        upper, _, lower = TechnicalIndicators.bollinger_bands(prices, self.period, self.std_dev)
+        upper, _, lower = TechnicalIndicators.bollinger_bands(
+            prices, self.period, self.std_dev
+        )
         filter_signal = -1 if self.is_positive else 1
         return (
             np.where(
@@ -145,9 +159,15 @@ class BollingerBands(Strategy):
             * filter_signal
         )
 
-    def generate_signals_batch(self, data: pd.DataFrame, start_index: int) -> pd.DataFrame:
-        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[start_index:]
-        return pd.DataFrame(results, index=data.index[start_index:], columns=data.columns)
+    def generate_signals_batch(
+        self, data: pd.DataFrame, start_index: int
+    ) -> pd.DataFrame:
+        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[
+            start_index:
+        ]
+        return pd.DataFrame(
+            results, index=data.index[start_index:], columns=data.columns
+        )
 
     def generate_signals_single_date(self, data: pd.DataFrame) -> dict[str, int]:
         if len(data) < self.period:
@@ -182,9 +202,15 @@ class ZScoreMeanReversion(Strategy):
             * filter_signal
         )
 
-    def generate_signals_batch(self, data: pd.DataFrame, start_index: int) -> pd.DataFrame:
-        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[start_index:]
-        return pd.DataFrame(results, index=data.index[start_index:], columns=data.columns)
+    def generate_signals_batch(
+        self, data: pd.DataFrame, start_index: int
+    ) -> pd.DataFrame:
+        results = np.apply_along_axis(self.get_signals, arr=data.to_numpy(), axis=0)[
+            start_index:
+        ]
+        return pd.DataFrame(
+            results, index=data.index[start_index:], columns=data.columns
+        )
 
     def generate_signals_single_date(self, data: pd.DataFrame) -> dict[str, int]:
         """most feasible for live trading, assumes the data passed is in right dates range"""
@@ -194,14 +220,18 @@ class ZScoreMeanReversion(Strategy):
         return dict(zip(data.columns, results))
 
 
-def vote_batch(strategies: Any, contains_filters: bool = False, tie_breaker: int = 0) -> Any:
+def vote_batch(
+    strategies: Any, contains_filters: bool = False, tie_breaker: int = 0
+) -> Any:
     if contains_filters:
         return sum_voting_batch(strategies)
     else:
         return plurality_voting_batch(strategies, tie_breaker)
 
 
-def vote_single_date(strategies: Any, contains_filters: bool = False, tie_breaker: int = 0) -> Any:
+def vote_single_date(
+    strategies: Any, contains_filters: bool = False, tie_breaker: int = 0
+) -> Any:
     if contains_filters:
         return sum_voting_single_date(strategies)
     else:
@@ -228,7 +258,9 @@ def plurality_voting_single_date(strategies: pd.DataFrame, tie_breaker=0) -> lis
     return strategies.Signal.tolist()
 
 
-def plurality_voting_batch(strategies: list[pd.DataFrame], tie_breaker=0) -> pd.DataFrame:
+def plurality_voting_batch(
+    strategies: list[pd.DataFrame], tie_breaker=0
+) -> pd.DataFrame:
     common_index = strategies[0].index
     common_columns = strategies[0].columns
 
@@ -242,7 +274,9 @@ def plurality_voting_batch(strategies: list[pd.DataFrame], tie_breaker=0) -> pd.
     # vectorize
     stacked = np.stack([df.values for df in strategies], axis=2)
     flat_stacked = stacked.reshape(-1, stacked.shape[2])
-    flat_result = np.array([_plurality_voting(row.tolist(), tie_breaker) for row in flat_stacked])
+    flat_result = np.array(
+        [_plurality_voting(row.tolist(), tie_breaker) for row in flat_stacked]
+    )
     result_values = flat_result.reshape(stacked.shape[:2])
     result = pd.DataFrame(result_values, index=common_index, columns=common_columns)
     return result

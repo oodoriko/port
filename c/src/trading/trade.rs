@@ -1,20 +1,17 @@
-use crate::utils::ticker_to_id;
-
 // a record of a single trade, mostly for reporting purposes
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Trade {
-    pub ticker: String,
     pub ticker_id: usize,
-    pub quantity: f64, // + for buy, - for sell
+    pub quantity: f32, // + for buy, - for sell
 
-    pub cost: Option<f64>, // transaction cost + slippage?
+    pub cost: Option<f32>, // transaction cost + slippage?
     pub execution_timestamp: Option<u64>,
-    pub price: Option<f64>, // when trade is created, price is not available, filled at execution
+    pub price: Option<f32>, // when trade is created, price is not available, filled at execution
 
     // sell trade, most need to reference to Position during execution
-    pub avg_entry_price: Option<f64>,
+    pub avg_entry_price: Option<f32>,
     pub holding_period: Option<u64>, // only if position is closed
-    pub realized_pnl: Option<f64>,
+    pub realized_pnl: Option<f32>,
 
     pub is_stop_loss: Option<bool>,
     pub is_liquidation: Option<bool>,
@@ -26,10 +23,9 @@ pub struct Trade {
 }
 
 impl Trade {
-    pub fn new(ticker: &str, quantity: f64) -> Self {
+    pub fn new(quantity: f32, ticker_id: usize) -> Self {
         Self {
-            ticker: ticker.to_string(),
-            ticker_id: ticker_to_id(ticker).unwrap_or(10),
+            ticker_id,
             quantity,
             cost: None,
             execution_timestamp: None,
@@ -46,22 +42,44 @@ impl Trade {
         }
     }
 
-    pub fn update_buy_trade(&mut self, price: f64, timestamp: u64, cost: f64) {
+    pub fn signal_buy(quantity: f32, ticker_id: usize) -> Self {
+        let mut trade = Self::new(quantity, ticker_id);
+        trade.is_signal_buy = Some(true);
+        trade
+    }
+
+    pub fn signal_sell(quantity: f32, ticker_id: usize) -> Self {
+        let mut trade = Self::new(quantity, ticker_id);
+        trade.is_signal_sell = Some(true);
+        trade
+    }
+
+    pub fn stop_loss(quantity: f32, ticker_id: usize) -> Self {
+        let mut trade = Self::new(quantity, ticker_id);
+        trade.is_stop_loss = Some(true);
+        trade
+    }
+
+    pub fn liquidation(quantity: f32, ticker_id: usize) -> Self {
+        let mut trade = Self::new(quantity, ticker_id);
+        trade.is_liquidation = Some(true);
+        trade
+    }
+
+    pub fn update_buy_trade(&mut self, price: f32, timestamp: u64, cost: f32) {
         self.price = Some(price);
         self.execution_timestamp = Some(timestamp);
         self.cost = Some(cost);
         self.trade_status = Some("Executed".to_string());
         self.trade_comment = Some("".to_string());
-        self.is_signal_buy = Some(true);
     }
 
     pub fn update_sell_trade(
         &mut self,
-        price: f64,
+        price: f32,
         timestamp: u64,
-        cost: f64,
-        sell_type: String,
-        avg_entry_price: f64,
+        cost: f32,
+        avg_entry_price: f32,
         entry_timestamp: u64,
     ) {
         self.price = Some(price);
@@ -73,11 +91,7 @@ impl Trade {
 
         self.trade_status = Some("Executed".to_string());
         self.trade_comment = Some("".to_string());
-        self.is_signal_sell = Some(sell_type == "signal_sell");
-        self.is_liquidation = Some(sell_type == "liquidation");
-        self.is_stop_loss = Some(sell_type == "stop_loss");
     }
-
     pub fn update_trade_status(&mut self, status: String, comment: String) {
         self.trade_status = Some(status);
         self.trade_comment = Some(comment);

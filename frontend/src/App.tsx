@@ -1,0 +1,87 @@
+import {
+  Box,
+  Container,
+  Grid,
+  LoadingOverlay,
+  Paper,
+  Stack,
+  Text,
+  Title,
+} from "@mantine/core";
+import { notifications } from "@mantine/notifications";
+import { useState } from "react";
+import { runBacktest } from "./api/backtest";
+import { BacktestForm } from "./components/BacktestForm";
+import { BacktestResults } from "./components/BacktestResults";
+import type { BacktestParams, BacktestResult } from "./types/backtest";
+
+function App() {
+  const [results, setResults] = useState<BacktestResult | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleBacktest = async (params: BacktestParams) => {
+    setLoading(true);
+    try {
+      const result = await runBacktest(params);
+      setResults(result);
+      notifications.show({
+        title: "Backtest Complete",
+        message: "Backtest has been successfully executed",
+        color: "green",
+      });
+    } catch (error) {
+      notifications.show({
+        title: "Backtest Failed",
+        message:
+          error instanceof Error ? error.message : "An unknown error occurred",
+        color: "red",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Container size="xl" py="xl">
+      <Stack gap="xl">
+        <Box>
+          <Title order={1} mb="md">
+            Backtest Runner
+          </Title>
+          <Text c="dimmed">
+            Configure and run backtests for your trading strategies
+          </Text>
+        </Box>
+
+        <Grid>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <Paper shadow="sm" p="lg" radius="md" pos="relative">
+              <LoadingOverlay visible={loading} />
+              <Title order={2} size="h3" mb="md">
+                Configuration
+              </Title>
+              <BacktestForm onSubmit={handleBacktest} loading={loading} />
+            </Paper>
+          </Grid.Col>
+
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <Paper shadow="sm" p="lg" radius="md">
+              <Title order={2} size="h3" mb="md">
+                Results
+              </Title>
+              {results ? (
+                <BacktestResults results={results} />
+              ) : (
+                <Text c="dimmed" ta="center" py="xl">
+                  Run a backtest to see results here
+                </Text>
+              )}
+            </Paper>
+          </Grid.Col>
+        </Grid>
+      </Stack>
+    </Container>
+  );
+}
+
+export default App;

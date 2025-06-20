@@ -1,13 +1,15 @@
+use std::collections::VecDeque;
+
 pub struct _Ema {
     period: usize,
-    multiplier: f64,
-    value: f64,
+    multiplier: f32,
+    value: f32,
     initialized: bool,
 }
 
 impl _Ema {
-    pub fn new(period: usize, initial_price: f64) -> Self {
-        let multiplier = 2.0 / (period as f64 + 1.0);
+    pub fn new(period: usize, initial_price: f32) -> Self {
+        let multiplier = 2.0 / (period as f32 + 1.0);
         Self {
             period,
             multiplier,
@@ -16,7 +18,7 @@ impl _Ema {
         }
     }
 
-    pub fn _update(&mut self, new_price: f64) -> f64 {
+    pub fn _update(&mut self, new_price: f32) -> f32 {
         if !self.initialized {
             self.value = new_price;
             self.initialized = true;
@@ -26,33 +28,33 @@ impl _Ema {
         self.value
     }
 
-    pub fn get(&self) -> f64 {
+    pub fn get(&self) -> f32 {
         self.value
     }
 }
 
 pub struct Rsi {
     period: usize,
-    prev_price: f64,
-    avg_gain: f64,
-    avg_loss: f64,
+    prev_price: f32,
+    avg_gain: f32,
+    avg_loss: f32,
     count: usize,
-    value: f64,
+    value: f32,
     initialized: bool,
-    rsi_overbought: f64,
-    rsi_oversold: f64,
-    rsi_bull_div_threshold: f64,
-    prev_rsi: f64,
-    last_price: f64,
+    rsi_overbought: f32,
+    rsi_oversold: f32,
+    rsi_bull_div_threshold: f32,
+    prev_rsi: f32,
+    last_price: f32,
 }
 
 impl Rsi {
     pub fn new(
         period: usize,
-        initial_price: f64,
-        rsi_overbought: f64,
-        rsi_oversold: f64,
-        rsi_bull_div_threshold: f64,
+        initial_price: f32,
+        rsi_overbought: f32,
+        rsi_oversold: f32,
+        rsi_bull_div_threshold: f32,
     ) -> Self {
         Self {
             period,
@@ -70,7 +72,7 @@ impl Rsi {
         }
     }
 
-    pub fn update(&mut self, new_price: f64) {
+    pub fn update(&mut self, new_price: f32) {
         self.prev_rsi = self.value;
         self.prev_price = self.last_price;
         self.last_price = new_price;
@@ -95,7 +97,7 @@ impl Rsi {
         (price_slope < 0.0 && rsi_slope > 0.0 && self.value < self.rsi_bull_div_threshold) as i8
     }
 
-    fn _update(&mut self, new_price: f64) -> f64 {
+    fn _update(&mut self, new_price: f32) -> f32 {
         let change = new_price - self.prev_price;
         let gain = if change > 0.0 { change } else { 0.0 };
         let loss = if change < 0.0 { -change } else { 0.0 };
@@ -105,16 +107,16 @@ impl Rsi {
             self.avg_loss += loss;
             self.count += 1;
             if self.count == self.period {
-                self.avg_gain /= self.period as f64;
-                self.avg_loss /= self.period as f64;
+                self.avg_gain /= self.period as f32;
+                self.avg_loss /= self.period as f32;
                 self.initialized = true;
             }
             self.value
         } else {
             self.avg_gain =
-                (self.avg_gain * (self.period as f64 - 1.0) + gain) / self.period as f64;
+                (self.avg_gain * (self.period as f32 - 1.0) + gain) / self.period as f32;
             self.avg_loss =
-                (self.avg_loss * (self.period as f64 - 1.0) + loss) / self.period as f64;
+                (self.avg_loss * (self.period as f32 - 1.0) + loss) / self.period as f32;
 
             let rs = if self.avg_loss == 0.0 {
                 100.0
@@ -126,7 +128,7 @@ impl Rsi {
         }
     }
 
-    pub fn get_value(&self) -> f64 {
+    pub fn get_value(&self) -> f32 {
         self.value
     }
 }
@@ -135,12 +137,12 @@ pub struct Macd {
     fast_ema: _Ema,
     slow_ema: _Ema,
     signal_ema: _Ema,
-    macd_line: f64,
-    signal_line: f64,
-    hist: f64,
+    macd_line: f32,
+    signal_line: f32,
+    hist: f32,
     initialized: bool,
     prev_macd_bull: i8,
-    prev_macd_hist: f64,
+    prev_macd_hist: f32,
 }
 
 impl Macd {
@@ -148,9 +150,9 @@ impl Macd {
         fast_period: usize,
         slow_period: usize,
         signal_period: usize,
-        initial_price: f64,
+        initial_price: f32,
         prev_macd_bull: i8,
-        prev_macd_hist: f64,
+        prev_macd_hist: f32,
     ) -> Self {
         let fast_ema = _Ema::new(fast_period, initial_price);
         let slow_ema = _Ema::new(slow_period, initial_price);
@@ -169,7 +171,7 @@ impl Macd {
         }
     }
 
-    pub fn _update(&mut self, new_price: f64) -> (f64, f64, f64) {
+    pub fn _update(&mut self, new_price: f32) -> (f32, f32, f32) {
         let fast = self.fast_ema._update(new_price);
         let slow = self.slow_ema._update(new_price);
         self.macd_line = fast - slow;
@@ -182,7 +184,7 @@ impl Macd {
         (self.macd_line, self.signal_line, self.hist)
     }
 
-    pub fn update(&mut self, new_price: f64) {
+    pub fn update(&mut self, new_price: f32) {
         let (macd_line, signal_line, hist) = self._update(new_price);
         self.prev_macd_bull = (macd_line > signal_line) as i8;
         self.prev_macd_hist = hist;
@@ -209,15 +211,15 @@ impl Macd {
 
 pub struct Atr {
     period: usize,
-    prev_atr: f64,
-    prev_close: f64,
+    prev_atr: f32,
+    prev_close: f32,
     count: usize,
-    sum_tr: f64,
+    sum_tr: f32,
     initialized: bool,
 }
 
 impl Atr {
-    pub fn new(period: usize, initial_close: f64) -> Self {
+    pub fn new(period: usize, initial_close: f32) -> Self {
         Self {
             period,
             prev_atr: 0.0,
@@ -228,7 +230,7 @@ impl Atr {
         }
     }
 
-    pub fn update(&mut self, high: f64, low: f64, close: f64) -> f64 {
+    pub fn update(&mut self, high: f32, low: f32, close: f32) -> f32 {
         let tr = (high - low)
             .max((high - self.prev_close).abs())
             .max((low - self.prev_close).abs());
@@ -236,22 +238,22 @@ impl Atr {
             self.sum_tr += tr;
             self.count += 1;
             if self.count == self.period {
-                self.prev_atr = self.sum_tr / self.period as f64;
+                self.prev_atr = self.sum_tr / self.period as f32;
                 self.initialized = true;
             }
             self.prev_close = close;
             return self.prev_atr;
         }
-        self.prev_atr = (self.prev_atr * (self.period as f64 - 1.0) + tr) / self.period as f64;
+        self.prev_atr = (self.prev_atr * (self.period as f32 - 1.0) + tr) / self.period as f32;
         self.prev_close = close;
         self.prev_atr
     }
 
-    pub fn get(&self) -> f64 {
+    pub fn get(&self) -> f32 {
         self.prev_atr
     }
 
-    pub fn high_volatility(&self, threshold: f64) -> i8 {
+    pub fn high_volatility(&self, threshold: f32) -> i8 {
         (self.prev_atr > threshold) as i8
     }
 }
@@ -260,7 +262,7 @@ pub struct Ema {
     pub ema_fast: _Ema,
     pub ema_medium: _Ema,
     pub ema_slow: _Ema,
-    pub last_price: f64,
+    pub last_price: f32,
 }
 
 impl Ema {
@@ -268,7 +270,7 @@ impl Ema {
         ema_fast_period: usize,
         ema_medium_period: usize,
         ema_slow_period: usize,
-        initial_price: f64,
+        initial_price: f32,
     ) -> Self {
         Self {
             ema_fast: _Ema::new(ema_fast_period, initial_price),
@@ -278,7 +280,7 @@ impl Ema {
         }
     }
 
-    pub fn update(&mut self, new_price: f64) {
+    pub fn update(&mut self, new_price: f32) {
         self.ema_fast._update(new_price);
         self.ema_medium._update(new_price);
         self.ema_slow._update(new_price);
@@ -509,7 +511,6 @@ impl<const SR: usize, const PAT: usize> PatternSignals<SR, PAT> {
         support_threshold: f32,
         initial_high: f32,
         initial_low: f32,
-        _initial_close: f32,
     ) -> Self {
         let mut highs_sr = [0.0; SR];
         let mut lows_sr = [0.0; SR];
@@ -540,7 +541,7 @@ impl<const SR: usize, const PAT: usize> PatternSignals<SR, PAT> {
     }
 
     #[inline(always)]
-    pub fn update(&mut self, high: f32, low: f32, _close: f32) {
+    pub fn update(&mut self, high: f32, low: f32) {
         self.highs_sr[self.sr_idx % SR] = high;
         self.lows_sr[self.sr_idx % SR] = low;
         self.sr_idx += 1;
@@ -604,47 +605,152 @@ impl<const SR: usize, const PAT: usize> PatternSignals<SR, PAT> {
         (price > self.last_resistance) as i8
     }
     #[inline(always)]
-    pub fn support_breakdown(&self, price: f32) -> i8 {
+    pub fn support_breakout(&self, price: f32) -> i8 {
         (price < self.last_support) as i8
     }
     #[inline(always)]
-    pub fn higher_highs(&self) -> i8 {
-        if let Some(prev) = self.prev_highs_pat {
-            (self.last_high_pat > prev) as i8
-        } else {
-            0
-        }
-    }
-    #[inline(always)]
-    pub fn higher_lows(&self) -> i8 {
-        if let Some(prev) = self.prev_lows_pat {
-            (self.last_low_pat > prev) as i8
-        } else {
-            0
-        }
-    }
-    #[inline(always)]
-    pub fn lower_highs(&self) -> i8 {
-        if let Some(prev) = self.prev_highs_pat {
-            (self.last_high_pat < prev) as i8
-        } else {
-            0
-        }
-    }
-    #[inline(always)]
-    pub fn lower_lows(&self) -> i8 {
-        if let Some(prev) = self.prev_lows_pat {
-            (self.last_low_pat < prev) as i8
-        } else {
-            0
-        }
-    }
-    #[inline(always)]
     pub fn uptrend_pattern(&self) -> i8 {
-        self.higher_highs() & self.higher_lows()
+        if let (Some(prev_high), Some(prev_low)) = (self.prev_highs_pat, self.prev_lows_pat) {
+            (self.last_high_pat > prev_high && self.last_low_pat > prev_low) as i8
+        } else {
+            0
+        }
     }
     #[inline(always)]
     pub fn downtrend_pattern(&self) -> i8 {
-        self.lower_highs() & self.lower_lows()
+        if let (Some(prev_high), Some(prev_low)) = (self.prev_highs_pat, self.prev_lows_pat) {
+            (self.last_high_pat < prev_high && self.last_low_pat < prev_low) as i8
+        } else {
+            0
+        }
+    }
+}
+
+pub struct EmaIndicator {
+    _period: usize,
+    alpha: f32,
+    current_value: Option<f32>,
+}
+
+impl EmaIndicator {
+    pub fn new(period: usize) -> Self {
+        let alpha = 2.0 / (period + 1) as f32;
+        Self {
+            _period: period,
+            alpha,
+            current_value: None,
+        }
+    }
+
+    pub fn update(&mut self, value: f32) -> f32 {
+        match self.current_value {
+            Some(prev) => {
+                let new_value = self.alpha * value + (1.0 - self.alpha) * prev;
+                self.current_value = Some(new_value);
+                new_value
+            }
+            None => {
+                self.current_value = Some(value);
+                value
+            }
+        }
+    }
+}
+
+pub struct RsiIndicator {
+    period: usize,
+    gains: VecDeque<f32>,
+    losses: VecDeque<f32>,
+    prev_price: Option<f32>,
+}
+
+impl RsiIndicator {
+    pub fn new(period: usize) -> Self {
+        Self {
+            period,
+            gains: VecDeque::with_capacity(period),
+            losses: VecDeque::with_capacity(period),
+            prev_price: None,
+        }
+    }
+
+    pub fn update(&mut self, price: f32) -> Option<f32> {
+        if let Some(prev_price) = self.prev_price {
+            let change = price - prev_price;
+            if change > 0.0 {
+                self.gains.push_back(change);
+                self.losses.push_back(0.0);
+            } else {
+                self.gains.push_back(0.0);
+                self.losses.push_back(-change);
+            }
+
+            if self.gains.len() > self.period {
+                self.gains.pop_front();
+                self.losses.pop_front();
+            }
+
+            if self.gains.len() == self.period {
+                let avg_gain: f32 = self.gains.iter().sum::<f32>() / self.period as f32;
+                let avg_loss: f32 = self.losses.iter().sum::<f32>() / self.period as f32;
+
+                if avg_loss == 0.0 {
+                    Some(100.0)
+                } else {
+                    let rs = avg_gain / avg_loss;
+                    Some(100.0 - (100.0 / (1.0 + rs)))
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+}
+
+pub struct MacdIndicator {
+    fast_ema: _Ema,
+    slow_ema: _Ema,
+    signal_ema: _Ema,
+    current_macd: Option<f32>,
+    current_signal: Option<f32>,
+}
+
+impl MacdIndicator {
+    pub fn new(
+        fast_period: usize,
+        slow_period: usize,
+        signal_period: usize,
+        initial_price: f32,
+    ) -> Self {
+        Self {
+            fast_ema: _Ema::new(fast_period, initial_price),
+            slow_ema: _Ema::new(slow_period, initial_price),
+            signal_ema: _Ema::new(signal_period, 0.0),
+            current_macd: None,
+            current_signal: None,
+        }
+    }
+
+    pub fn update(&mut self, price: f32) -> (Option<f32>, Option<f32>) {
+        let fast = self.fast_ema._update(price);
+        let slow = self.slow_ema._update(price);
+        let macd = fast - slow;
+        self.current_macd = Some(macd);
+
+        if let Some(macd) = self.current_macd {
+            let signal = self.signal_ema._update(macd);
+            self.current_signal = Some(signal);
+        }
+
+        (self.current_macd, self.current_signal)
+    }
+
+    pub fn get_histogram(&self) -> Option<f32> {
+        match (self.current_macd, self.current_signal) {
+            (Some(macd), Some(signal)) => Some(macd - signal),
+            _ => None,
+        }
     }
 }

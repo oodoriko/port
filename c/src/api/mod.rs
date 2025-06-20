@@ -1,0 +1,153 @@
+use axum::{
+    extract::Json, http::StatusCode, response::Json as ResponseJson, routing::post, Router,
+};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use tower_http::cors::CorsLayer;
+
+use crate::analysis::backtest::backtest;
+use crate::core::params::{
+    PortfolioConstraintParams, PortfolioParams, PositionConstraintParams, SignalParams,
+};
+
+// Request structure that matches the frontend expectations
+#[derive(Debug, Deserialize)]
+pub struct BacktestRequest {
+    pub strategy_name: String,
+    pub portfolio_name: String,
+    pub start: String, // ISO string
+    pub end: String,   // ISO string
+    pub strategies: HashMap<String, Vec<SignalParams>>,
+    pub portfolio_params: PortfolioParams,
+    pub portfolio_constraints_params: PortfolioConstraintParams,
+    pub position_constraints_params: Vec<PositionConstraintParams>,
+    pub warm_up_period: usize,
+    pub cadence: u64, // in minutes
+}
+
+// Response structure that matches the frontend expectations
+#[derive(Debug, Serialize)]
+pub struct BacktestResponse {
+    pub portfolio_name: String,
+    pub initial_value: f32,
+    pub final_value: f32,
+    pub total_return: f32,
+    pub max_value: f32,
+    pub min_value: f32,
+    pub peak_notional: f32,
+    pub equity_curve: Vec<f32>,
+    pub cash_curve: Vec<f32>,
+    pub notional_curve: Vec<f32>,
+    pub cost_curve: Vec<f32>,
+    pub realized_pnl_curve: Vec<f32>,
+    pub unrealized_pnl_curve: Vec<f32>,
+    pub total_records: usize,
+}
+
+// Error response structure
+#[derive(Debug, Serialize)]
+pub struct ErrorResponse {
+    pub error: String,
+    pub message: String,
+}
+
+// Handler for the backtest endpoint
+pub async fn backtest_handler(
+    Json(request): Json<BacktestRequest>,
+) -> Result<ResponseJson<BacktestResponse>, (StatusCode, ResponseJson<ErrorResponse>)> {
+    // Parse dates
+    let start_date = DateTime::parse_from_rfc3339(&request.start)
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                ResponseJson(ErrorResponse {
+                    error: "Invalid start date".to_string(),
+                    message: e.to_string(),
+                }),
+            )
+        })?
+        .with_timezone(&Utc);
+
+    let end_date = DateTime::parse_from_rfc3339(&request.end)
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                ResponseJson(ErrorResponse {
+                    error: "Invalid end date".to_string(),
+                    message: e.to_string(),
+                }),
+            )
+        })?
+        .with_timezone(&Utc);
+
+    // Run the backtest
+    let portfolio = backtest(
+        request.strategy_name,
+        request.portfolio_name,
+        start_date,
+        end_date,
+        request.strategies,
+        request.portfolio_params,
+        request.portfolio_constraints_params,
+        request.position_constraints_params,
+        request.warm_up_period,
+        request.cadence,
+    )
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ResponseJson(ErrorResponse {
+                error: "Backtest failed".to_string(),
+                message: e.to_string(),
+            }),
+        )
+    })?;
+
+    // Convert Portfolio to BacktestResponse
+    let initial_value = portfolio.equity_curve.first().copied().unwrap_or(0.0);
+    let final_value = portfolio.equity_curve.last().copied().unwrap_or(0.0);
+    let total_return = if initial_value != 0.0 {
+        (final_value - initial_value) / initial_value * 100.0
+    } else {
+        0.0
+    };
+
+    let max_value = portfolio
+        .equity_curve
+        .iter()
+        .fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+    let min_value = portfolio
+        .equity_curve
+        .iter()
+        .fold(f32::INFINITY, |a, &b| a.min(b));
+
+    let total_records = portfolio.equity_curve.len();
+
+    let response = BacktestResponse {
+        portfolio_name: portfolio.name,
+        initial_value,
+        final_value,
+        total_return,
+        max_value,
+        min_value,
+        peak_notional: portfolio.peak_notional,
+        equity_curve: portfolio.equity_curve,
+        cash_curve: portfolio.cash_curve,
+        notional_curve: portfolio.notional_curve,
+        cost_curve: portfolio.cost_curve,
+        realized_pnl_curve: portfolio.realized_pnl_curve,
+        unrealized_pnl_curve: portfolio.unrealized_pnl_curve,
+        total_records,
+    };
+
+    Ok(ResponseJson(response))
+}
+
+// Create the API router
+pub fn create_router() -> Router {
+    Router::new()
+        .route("/api/backtest", post(backtest_handler))
+        .layer(CorsLayer::permissive())
+}

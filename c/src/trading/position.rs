@@ -1,5 +1,3 @@
-use crate::trade::Trade;
-use crate::utils::ticker_to_id;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -15,89 +13,91 @@ use std::fmt;
 pub struct Position {
     // initial attributes
     pub ticker: String,
-    pub id: usize,
-    pub quantity: f64,
-    pub avg_entry_price: f64,
+    pub ticker_id: u32,
+    pub quantity: f32,
+    pub avg_entry_price: f32,
     pub entry_timestamp: u64, // earliest entry
-    pub constraint: HashMap<String, f64>,
-    pub peak_price: f64,
-    pub trailing_stop_price: f64,
+    pub constraint: HashMap<String, f32>,
+    pub peak_price: f32,
+    pub trailing_stop_price: f32,
+    pub take_profit_price: f32,
 
     // buy related attributes
-    pub cum_buy_proceeds: f64,
-    pub cum_buy_cost: f64, // transaction cost + slippage?
-    pub unrealized_pnl: Option<f64>,
-    pub last_entry_price: f64,
+    pub cum_buy_proceeds: f32,
+    pub cum_buy_cost: f32, // transaction cost + slippage?
+    pub unrealized_pnl: Option<f32>,
+    pub last_entry_price: f32,
     pub last_entry_timestamp: u64,
 
     // sell related attributes
-    pub cum_sell_proceeds: Option<f64>,
-    pub cum_sell_cost: Option<f64>, // transaction cost + slippage?
-    pub realized_pnl: Option<f64>,
-    pub last_exit_price: Option<f64>,
+    pub cum_sell_proceeds: Option<f32>,
+    pub cum_sell_cost: Option<f32>, // transaction cost + slippage?
+    pub realized_pnl: Option<f32>,
+    pub last_exit_price: Option<f32>,
     pub last_exit_timestamp: Option<u64>,
+
+    // additional attributes
+    pub notional: f32,
 }
 
 impl Position {
     pub fn new(
-        ticker: &str,
-        quantity: f64,
-        avg_entry_price: f64,
-        cost: f64,
-        entry_timestamp: u64,
-        constraint: HashMap<String, f64>,
+        ticker_id: u32,
+        price: f32,
+        quantity: Option<f32>,
+        entry_timestamp: Option<u64>,
+        ticker: Option<&str>,
+        constraint: Option<HashMap<String, f32>>,
     ) -> Self {
         Self {
-            ticker: ticker.to_string(),
-            quantity: quantity,
-            avg_entry_price: avg_entry_price,
-            entry_timestamp: entry_timestamp,
-            peak_price: avg_entry_price,
-            trailing_stop_price: avg_entry_price
-                * (1.0 - constraint.get("trailing_stop_pct").unwrap_or(&0.0).clone()),
-            constraint: constraint,
-            cum_buy_proceeds: avg_entry_price * quantity,
-            cum_buy_cost: cost,
+            ticker: ticker.unwrap_or("").to_string(),
+            ticker_id,
+            quantity: quantity.unwrap_or(0.0),
+            avg_entry_price: price,
+            entry_timestamp: entry_timestamp.unwrap_or(0),
+            peak_price: price,
+            trailing_stop_price: price,
+            take_profit_price: f32::MAX,
+            constraint: constraint.unwrap_or_default(),
+            cum_buy_proceeds: 0.0,
+            cum_buy_cost: 0.0,
             unrealized_pnl: None,
-            last_entry_price: avg_entry_price,
-            last_entry_timestamp: entry_timestamp,
+            last_entry_price: price,
+            last_entry_timestamp: entry_timestamp.unwrap_or(0),
             cum_sell_proceeds: None,
             cum_sell_cost: None,
             realized_pnl: None,
             last_exit_price: None,
             last_exit_timestamp: None,
-            id: ticker_to_id(ticker).unwrap_or(10),
+            notional: 0.0,
         }
     }
 
-    fn update_trailing_stop_price(&mut self, price: f64) {
+    fn update_trailing_stop_price(&mut self, price: f32) {
         if let Some(&trailing_stop_pct) = self.constraint.get("trailing_stop_pct") {
             self.trailing_stop_price = price * trailing_stop_pct;
         }
     }
 
-    fn check_stop_loss(&mut self, price: f64) -> Option<Trade> {
-        if price < self.trailing_stop_price {
-            let trade = Trade::new(&self.ticker, -self.quantity);
-            return Some(trade);
-        } else {
-            return None;
-        }
-    }
-
-    pub fn pre_order_update(&mut self, price: f64) -> Option<Trade> {
-        self.peak_price = price.max(self.peak_price);
+    pub fn pre_order_update(&mut self, price: f32) {
         self.update_trailing_stop_price(price);
-        let sl_trades = self.check_stop_loss(price);
-        sl_trades
-    }
-
-    pub fn post_order_update(&mut self, price: f64) -> (f64, f64) {
+        self.notional = self.quantity * price;
         self.unrealized_pnl = Some((price - self.avg_entry_price) * self.quantity);
-        return (price * self.quantity, self.unrealized_pnl.unwrap_or(0.0));
     }
 
-    pub fn update_buy_position(&mut self, price: f64, quantity: f64, timestamp: u64, cost: f64) {
+    pub fn post_order_update(&mut self, price: f32) -> (f32, f32) {
+        if price > self.last_entry_price {
+            let new_stop = price * 0.95; // 5% trailing stop
+            if new_stop > self.trailing_stop_price {
+                self.trailing_stop_price = new_stop;
+            }
+        }
+        self.notional = self.quantity * price;
+        self.unrealized_pnl = Some((price - self.avg_entry_price) * self.quantity);
+        return (self.notional, self.unrealized_pnl.unwrap_or(0.0));
+    }
+
+    pub fn update_buy_position(&mut self, price: f32, quantity: f32, timestamp: u64, cost: f32) {
         self.quantity += quantity;
         self.avg_entry_price =
             (self.avg_entry_price * self.quantity + price * quantity) / (self.quantity + quantity);
@@ -109,11 +109,11 @@ impl Position {
 
     pub fn update_sell_position(
         &mut self,
-        price: f64,
-        quantity: f64,
+        price: f32,
+        quantity: f32,
         timestamp: u64,
-        cost: f64,
-    ) -> f64 {
+        cost: f32,
+    ) -> f32 {
         self.cum_sell_proceeds = Some(self.cum_sell_proceeds.unwrap_or(0.0) + price * -quantity);
         self.cum_sell_cost = Some(self.cum_sell_cost.unwrap_or(0.0) + cost);
         self.realized_pnl = Some((price - self.avg_entry_price) * -quantity);
@@ -128,9 +128,9 @@ impl fmt::Debug for Position {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Position {{ ticker: {}, id: {}, quantity: {:.4}, avg_entry_price: {:.2}, entry_timestamp: {}, peak_price: {:.2}, trailing_stop_price: {:.2}, cum_buy_proceeds: {:.2}, cum_buy_cost: {:.2}, unrealized_pnl: {:?}, last_entry_price: {:.2}, last_entry_timestamp: {}, cum_sell_proceeds: {:?}, cum_sell_cost: {:?}, realized_pnl: {:?}, last_exit_price: {:?}, last_exit_timestamp: {:?} }}",
+            "Position {{ ticker: {}, ticker_id: {}, quantity: {:.4}, avg_entry_price: {:.2}, entry_timestamp: {}, peak_price: {:.2}, trailing_stop_price: {:.2}, cum_buy_proceeds: {:.2}, cum_buy_cost: {:.2}, unrealized_pnl: {:?}, last_entry_price: {:.2}, last_entry_timestamp: {}, cum_sell_proceeds: {:?}, cum_sell_cost: {:?}, realized_pnl: {:?}, last_exit_price: {:?}, last_exit_timestamp: {:?} }}",
             self.ticker,
-            self.id,
+            self.ticker_id,
             self.quantity,
             self.avg_entry_price,
             self.entry_timestamp,

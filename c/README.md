@@ -1,3 +1,11 @@
+![](./haha.png)
+
+to-do:
+
+1. cash logic
+2. numbers are wrong apparently
+3. apparently note optimized....
+
 gs level:
 
 - indicator generation level: parameters
@@ -22,3 +30,8 @@ still need a single date version and a batch version
    - we need a lot of numpy arrays.... check what xx does
 
 record keeping during trading is important... think through this
+
+failed attempt - but need to pick up later
+
+1. signal strength and weighted vote
+2. pair trading (update signal logic, signal generation logic (matrix instead of array))

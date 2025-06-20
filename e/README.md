@@ -1,3 +1,6 @@
+ref:
+https://en.m.wikipedia.org/wiki/Latent_and_observable_variables
+
 Check out example notebook.
 Cache data first.
 
