@@ -1,10 +1,10 @@
-use crate::constraints::Constraint;
-use crate::params::{
+use crate::core::params::{
     PortfolioConstraintParams, PortfolioParams, PositionConstraintParams, SignalParams,
 };
-use crate::portfolio::Portfolio;
-use crate::r#const::MAX_ASSETS;
-use crate::signals::*;
+use crate::core::r#const::MAX_ASSETS;
+use crate::data::signals::*;
+use crate::trading::constraints::Constraint;
+use crate::trading::portfolio::Portfolio;
 
 pub struct Strategy {
     pub name: String,

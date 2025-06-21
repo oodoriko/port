@@ -1,6 +1,6 @@
-use crate::params::{PortfolioConstraintParams, PositionConstraintParams};
-use crate::position::Position;
-use crate::trade::Trade;
+use crate::core::params::{PortfolioConstraintParams, PositionConstraintParams};
+use crate::trading::position::Position;
+use crate::trading::trade::Trade;
 
 pub struct Constraint {
     pub max_position_size_pct: Vec<f32>,
@@ -110,9 +110,13 @@ impl Constraint {
 
         for (idx, position) in positions.iter().enumerate().take(self.n_assets) {
             if let Some(position) = position {
+                if position.quantity <= 0.0 {
+                    continue;
+                }
+
                 let current_price = unsafe { *price.get_unchecked(idx) };
 
-                if position.quantity > 0.0 && current_price < position.trailing_stop_price {
+                if current_price < position.trailing_stop_price {
                     stop_loss_trades.push(Trade::stop_loss(position.quantity, idx, timestamp));
                 }
 
@@ -160,7 +164,6 @@ impl Constraint {
                             continue;
                         }
                     }
-
                     let current_price = unsafe { *price.get_unchecked(idx) };
                     let risk_per_trade_pct = unsafe { *self.risk_per_trade_pct.get_unchecked(idx) };
                     let trailing_stop_pct =

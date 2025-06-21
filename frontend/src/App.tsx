@@ -1,7 +1,9 @@
 import {
+  Badge,
   Box,
   Container,
   Grid,
+  Group,
   LoadingOverlay,
   Paper,
   Stack,
@@ -49,7 +51,8 @@ function App() {
             Backtest Runner
           </Title>
           <Text c="dimmed">
-            Configure and run backtests for your trading strategies
+            Todo: cache data online, cache backtest results, live trading view,
+            strategy view
           </Text>
         </Box>
 
@@ -57,18 +60,30 @@ function App() {
           <Grid.Col span={{ base: 12, md: 6 }}>
             <Paper shadow="sm" p="lg" radius="md" pos="relative">
               <LoadingOverlay visible={loading} />
-              <Title order={2} size="h3" mb="md">
-                Configuration
-              </Title>
+              <Group justify="space-between" align="center" mb="md">
+                <Title order={2} size="h3" m={0}>
+                  Configuration
+                </Title>
+                <Box w={100} /> {/* dummy element to match badge height */}
+              </Group>
               <BacktestForm onSubmit={handleBacktest} loading={loading} />
             </Paper>
           </Grid.Col>
 
           <Grid.Col span={{ base: 12, md: 6 }}>
-            <Paper shadow="sm" p="lg" radius="md">
-              <Title order={2} size="h3" mb="md">
-                Results
-              </Title>
+            <Paper shadow="sm" p="lg" radius="md" pos="relative">
+              <Group justify="space-between" align="center" mb="md">
+                <Title order={2} size="h3" m={0}>
+                  Results
+                </Title>
+                {results ? (
+                  <Badge variant="light" size="sm">
+                    {results.total_records} records
+                  </Badge>
+                ) : (
+                  <Box w={100} /> // keep layout consistent if no results
+                )}
+              </Group>
               {results ? (
                 <BacktestResults results={results} />
               ) : (

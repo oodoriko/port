@@ -279,6 +279,7 @@ impl InfluxDBHandler {
         tickers: &[&str],
         start: DateTime<Utc>,
         end: DateTime<Utc>,
+        cadence_minutes: Option<u64>, // New parameter for cadence in minutes
     ) -> Result<(Vec<Vec<Vec<f32>>>, Vec<i64>)> {
         let mut coin_data = Vec::with_capacity(tickers.len());
         let mut timestamps = Vec::new();
@@ -287,25 +288,48 @@ impl InfluxDBHandler {
             let asset = ticker.split('-').next().unwrap().to_lowercase();
             let measurement = format!("sample_coinbase_{}", asset);
 
-            println!("\nLoading cached data for {}", ticker);
-            let flux_query = format!(
-                r#"
-                from(bucket:"{}")
-                    |> range(start: {}, stop: {})
-                    |> filter(fn: (r) => r["_measurement"] == "{}")
-                    |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-                    |> sort(columns: ["_time"])
-                "#,
-                self.bucket,
-                start.to_rfc3339(),
-                end.to_rfc3339(),
-                measurement
-            );
+            // println!("\nLoading cached data for {}", ticker);
+
+            // Build the Flux query with optional cadence sampling
+            let flux_query = if let Some(cadence) = cadence_minutes {
+                format!(
+                    r#"
+                    from(bucket:"{}")
+                        |> range(start: {}, stop: {})
+                        |> filter(fn: (r) => r["_measurement"] == "{}")
+                        |> window(every: {}m, createEmpty: false)
+                        |> first()
+                        |> duplicate(column: "_time", as: "_time_orig")
+                        |> window(every: inf, createEmpty: false)
+                        |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+                        |> sort(columns: ["_time"])
+                    "#,
+                    self.bucket,
+                    start.to_rfc3339(),
+                    end.to_rfc3339(),
+                    measurement,
+                    cadence
+                )
+            } else {
+                format!(
+                    r#"
+                    from(bucket:"{}")
+                        |> range(start: {}, stop: {})
+                        |> filter(fn: (r) => r["_measurement"] == "{}")
+                        |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+                        |> sort(columns: ["_time"])
+                    "#,
+                    self.bucket,
+                    start.to_rfc3339(),
+                    end.to_rfc3339(),
+                    measurement
+                )
+            };
 
             let query = Query::new(flux_query);
             let records = self.client.query_raw(Some(query)).await?;
 
-            println!("Found {} candles in cache", records.len());
+            // println!("Found {} candles in cache", records.len());
 
             let mut asset_data = Vec::with_capacity(records.len());
 
@@ -501,7 +525,7 @@ impl InfluxDBHandler {
 //             .await?;
 
 //         println!("\nLoading cached data...");
-//         let (all_data, timestamps) = handler.load_data(tickers, start, end).await?;
+//         let (all_data, timestamps) = handler.load_data(tickers, start, end, None).await?;
 
 //         for (t, asset_data) in all_data.iter().take(3).enumerate() {
 //             println!("\nSample data for time {}:", t);

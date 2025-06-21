@@ -1,6 +1,6 @@
-use crate::params::{PortfolioConstraintParams, PortfolioParams, PositionConstraintParams};
-use crate::position::Position;
-use crate::trade::{Trade, TradeStatus};
+use crate::core::params::{PortfolioConstraintParams, PortfolioParams, PositionConstraintParams};
+use crate::trading::position::Position;
+use crate::trading::trade::{Trade, TradeStatus};
 use crate::utils::utils::is_end_of_period;
 
 #[derive(Debug)]
@@ -14,6 +14,7 @@ pub struct Portfolio {
     pub cost_curve: Vec<f32>,
     pub realized_pnl_curve: Vec<f32>,
     pub unrealized_pnl_curve: Vec<f32>,
+    pub timestamps: Vec<i64>,
     pub portfolio_params: PortfolioParams,
     pub portfolio_constraints: PortfolioConstraintParams,
     pub position_constraints: Vec<PositionConstraintParams>,
@@ -49,6 +50,7 @@ impl Portfolio {
             cost_curve: vec![0.0],
             realized_pnl_curve: vec![0.0],
             unrealized_pnl_curve: vec![0.0],
+            timestamps: Vec::new(),
             trading_history,
             peak_notional: initial_cash,
             num_assets,
@@ -106,6 +108,11 @@ impl Portfolio {
                 unsafe {
                     *self.holdings.get_unchecked_mut(idx) = pos.quantity;
                 }
+            } else {
+                // Clear holdings for positions that no longer exist
+                unsafe {
+                    *self.holdings.get_unchecked_mut(idx) = 0.0;
+                }
             }
         }
 
@@ -126,6 +133,8 @@ impl Portfolio {
         timestamp: u64,
     ) -> (f32, f32, f32) {
         let mut available_cash = *self.cash_curve.last().unwrap_or(&0.0);
+        let min_cash_pct = self.portfolio_constraints.min_cash_pct;
+        available_cash = available_cash * (1.0 - min_cash_pct);
         let mut total_cost = 0.0;
         let mut total_realized_pnl = 0.0;
 
@@ -180,6 +189,10 @@ impl Portfolio {
                         total_realized_pnl += realized_pnl;
                         available_cash += actual_quantity_sold * price - initial_cost;
                         total_cost += initial_cost;
+
+                        if position.quantity <= 0.0 {
+                            self.positions[ticker_id] = None;
+                        }
                     }
                 }
                 None => {
@@ -242,16 +255,17 @@ impl Portfolio {
             return;
         }
 
-        let current_capital = *self.cash_curve.last().unwrap_or(&0.0);
+        let current_equity = *self.equity_curve.last().unwrap_or(&0.0);
+        let current_cash = *self.cash_curve.last().unwrap_or(&0.0);
         let capital_increase = if self.portfolio_params.capital_growth_amount > 0.0 {
             self.portfolio_params.capital_growth_amount
         } else {
-            current_capital * self.portfolio_params.capital_growth_pct
+            current_equity * self.portfolio_params.capital_growth_pct
         };
 
-        let new_capital = current_capital + capital_increase;
+        let new_cash = current_cash + capital_increase;
         let len = self.cash_curve.len();
-        self.cash_curve.insert(len - 1, new_capital);
+        self.cash_curve.insert(len - 1, new_cash);
     }
 
     #[inline(always)]

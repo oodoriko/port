@@ -39,6 +39,25 @@ impl Ema {
     }
 
     #[inline(always)]
+    pub fn new_uninitialized(period: usize) -> Self {
+        let multiplier = 2.0 / (period as f32 + 1.0);
+        Self {
+            period: period as i8,
+            multiplier,
+            value: 0.0,
+            initialized: false,
+            ema_fast: 0.0,
+            ema_medium: 0.0,
+            ema_slow: 0.0,
+            fast_mult: multiplier,
+            medium_mult: multiplier,
+            slow_mult: multiplier,
+            last_price: 0.0,
+            _padding: [0u8; 8],
+        }
+    }
+
+    #[inline(always)]
     pub fn new_triple(
         fast_period: usize,
         medium_period: usize,
@@ -62,7 +81,39 @@ impl Ema {
     }
 
     #[inline(always)]
+    pub fn new_triple_uninitialized(
+        fast_period: usize,
+        medium_period: usize,
+        slow_period: usize,
+    ) -> Self {
+        Self {
+            period: fast_period as i8,
+            multiplier: 2.0 / (fast_period as f32 + 1.0),
+            value: 0.0,
+            initialized: false,
+            ema_fast: 0.0,
+            ema_medium: 0.0,
+            ema_slow: 0.0,
+            fast_mult: 2.0 / (fast_period as f32 + 1.0),
+            medium_mult: 2.0 / (medium_period as f32 + 1.0),
+            slow_mult: 2.0 / (slow_period as f32 + 1.0),
+            last_price: 0.0,
+            _padding: [0u8; 8],
+        }
+    }
+
+    #[inline(always)]
     pub fn update(&mut self, new_price: f32) -> f32 {
+        if !self.initialized {
+            self.value = new_price;
+            self.ema_fast = new_price;
+            self.ema_medium = new_price;
+            self.ema_slow = new_price;
+            self.last_price = new_price;
+            self.initialized = true;
+            return self.value;
+        }
+
         self.value = (new_price - self.value) * self.multiplier + self.value;
 
         self.ema_fast = (new_price - self.ema_fast) * self.fast_mult + self.ema_fast;
@@ -144,7 +195,38 @@ impl Rsi {
     }
 
     #[inline(always)]
+    pub fn new_uninitialized(
+        period: usize,
+        rsi_overbought: f32,
+        rsi_oversold: f32,
+        rsi_bull_div_threshold: f32,
+    ) -> Self {
+        Self {
+            period: period as i8,
+            prev_price: 0.0,
+            avg_gain: 0.0,
+            avg_loss: 0.0,
+            count: 0,
+            value: 50.0,
+            initialized: false,
+            rsi_overbought,
+            rsi_oversold,
+            rsi_bull_div_threshold,
+            prev_rsi: 50.0,
+            last_price: 0.0,
+            _padding: [0u8; 8],
+        }
+    }
+
+    #[inline(always)]
     pub fn update(&mut self, new_price: f32) {
+        // Handle first value for uninitialized RSI
+        if self.prev_price == 0.0 {
+            self.prev_price = new_price;
+            self.last_price = new_price;
+            return; // Don't calculate change on first value
+        }
+
         self.prev_rsi = self.value;
         let change = new_price - self.prev_price;
         let gain = if change > 0.0 { change } else { 0.0 };
@@ -233,6 +315,28 @@ impl Macd {
             fast_ema: Ema::new(fast_period, initial_price),
             slow_ema: Ema::new(slow_period, initial_price),
             signal_ema: Ema::new(signal_period, 0.0),
+            macd_line: 0.0,
+            signal_line: 0.0,
+            histogram: 0.0,
+            initialized: false,
+            prev_macd_bull,
+            prev_macd_hist,
+            _padding: [0u8; 16],
+        }
+    }
+
+    #[inline(always)]
+    pub fn new_uninitialized(
+        fast_period: usize,
+        slow_period: usize,
+        signal_period: usize,
+        prev_macd_bull: i8,
+        prev_macd_hist: f32,
+    ) -> Self {
+        Self {
+            fast_ema: Ema::new_uninitialized(fast_period),
+            slow_ema: Ema::new_uninitialized(slow_period),
+            signal_ema: Ema::new_uninitialized(signal_period),
             macd_line: 0.0,
             signal_line: 0.0,
             histogram: 0.0,
@@ -369,9 +473,22 @@ impl<const N: usize> BollingerBands<N> {
         Self {
             std_dev,
             closes,
-            idx: 1,
+            idx: 0,
             len: 1,
             mean: initial_close,
+            m2: 0.0,
+            _padding: [0u8; 32],
+        }
+    }
+
+    #[inline(always)]
+    pub fn new_uninitialized(std_dev: f32) -> Self {
+        Self {
+            std_dev,
+            closes: [0.0; N],
+            idx: 0,
+            len: 0,
+            mean: 0.0,
             m2: 0.0,
             _padding: [0u8; 32],
         }
@@ -555,6 +672,7 @@ impl<const SR: usize, const PAT: usize> PatternSignals<SR, PAT> {
         let mut lows_sr = [0.0; SR];
         let mut highs_pat = [0.0; PAT];
         let mut lows_pat = [0.0; PAT];
+
         highs_sr[0] = initial_high;
         lows_sr[0] = initial_low;
         highs_pat[0] = initial_high;
@@ -567,8 +685,8 @@ impl<const SR: usize, const PAT: usize> PatternSignals<SR, PAT> {
             lows_sr,
             highs_pat,
             lows_pat,
-            sr_idx: 1,
-            pat_idx: 1,
+            sr_idx: 0,
+            pat_idx: 0,
             sr_len: 1,
             pat_len: 1,
             last_resistance: initial_high,
@@ -577,6 +695,29 @@ impl<const SR: usize, const PAT: usize> PatternSignals<SR, PAT> {
             last_low_pat: initial_low,
             prev_high_pat: initial_high,
             prev_low_pat: initial_low,
+            _padding: [0u8; 8],
+        }
+    }
+
+    #[inline(always)]
+    pub fn new_uninitialized(resistance_threshold: f32, support_threshold: f32) -> Self {
+        Self {
+            resistance_threshold,
+            support_threshold,
+            highs_sr: [0.0; SR],
+            lows_sr: [0.0; SR],
+            highs_pat: [0.0; PAT],
+            lows_pat: [0.0; PAT],
+            sr_idx: 0,
+            pat_idx: 0,
+            sr_len: 0,
+            pat_len: 0,
+            last_resistance: 0.0,
+            last_support: 0.0,
+            last_high_pat: 0.0,
+            last_low_pat: 0.0,
+            prev_high_pat: 0.0,
+            prev_low_pat: 0.0,
             _padding: [0u8; 8],
         }
     }

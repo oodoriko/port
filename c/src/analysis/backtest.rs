@@ -23,7 +23,9 @@ pub async fn backtest(
     let handler = InfluxDBHandler::new()?;
 
     let ticker_refs: Vec<&str> = tickers.iter().map(|s| s.as_str()).collect();
-    let (data, timestamps) = handler.load_data(&ticker_refs, start, end).await?;
+    let (data, timestamps) = handler
+        .load_data(&ticker_refs, start, end, Some(cadence))
+        .await?;
 
     let warm_up_price_data: Vec<Vec<Vec<f32>>> = data[..warm_up_period].to_vec();
 
@@ -49,6 +51,9 @@ pub async fn backtest(
     let data_len = data.len();
     let mut exit = false;
 
+    println!("Start backtesting...");
+    println!("start: {:?}", start);
+    println!("end: {:?}", end);
     for idx in warm_up_period..data_len {
         let time = timestamps[idx];
         let mut available_cash = *portfolio.cash_curve.last().unwrap();
@@ -98,10 +103,8 @@ pub async fn backtest(
         // generate signal use t-1 close
         strategy.update_signals(data[idx - 1].clone());
         let signals = strategy.generate_signals();
-
         signals_adjusted.clear();
         signals_adjusted.extend_from_slice(&signals);
-
         for trade in &risk_trades {
             // hold off trading ticker in risk trades
             if trade.ticker_id < signals_adjusted.len() {
@@ -111,8 +114,9 @@ pub async fn backtest(
 
         // execute t-2 trades using t-1 open at t0 because t-1 is the latest price we can get
         let trading_history_len = portfolio.trading_history.len();
+        let mut prev_trades = Vec::new();
         if trading_history_len >= 2 {
-            let mut prev_trades = portfolio.trading_history[trading_history_len - 2].clone();
+            prev_trades = portfolio.trading_history[trading_history_len - 2].clone();
             if !prev_trades.is_empty() {
                 (available_cash, total_cost, total_realized_pnl) =
                     portfolio.execute_trades(&mut prev_trades, &open_prices, time as u64);
@@ -131,12 +135,6 @@ pub async fn backtest(
         );
         trades.extend(risk_trades);
 
-        let prev_trades = if trading_history_len >= 2 {
-            portfolio.trading_history[trading_history_len - 2].clone()
-        } else {
-            Vec::new()
-        };
-
         portfolio.post_order_update(
             &close_prices,
             &prev_trades,
@@ -147,11 +145,19 @@ pub async fn backtest(
         );
     }
 
+    println!("Backtesting completed");
+    if exit {
+        println!("Early exit due to max drawdown");
+    }
+
+    // Slice timestamps from warm_up_period to data_len
+    portfolio.timestamps = timestamps[warm_up_period..data_len].to_vec();
+
     Ok(portfolio)
 }
 
 #[inline(always)]
-pub fn backtest_result(portfolio: Portfolio) {
+pub fn backtest_result(portfolio: &Portfolio) {
     println!("=== BACKTEST RESULTS ===\n");
 
     println!("📊 Portfolio: {}", portfolio.name);

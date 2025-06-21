@@ -1,19 +1,20 @@
-![](./haha.png)
+![](./ababa/hahaha.png)
 
 todo tmo:
 
 1. optimize backend (enforce nd array, try to avoid hashmap and vec) DONE
-2. properly set up request shape
-3. properly set up service
-4. ui for configurating strategy
+2. properly set up request shape DONE
+3. properly set up service DONE
+4. ui for configurating strategy DONE
 
 other to-do:
 -1. testssss? DONE 0. fix numbers DONE
 
-1. cash logic DONE, cost logic, take profit logic
-2. ui for result page
+1. cash logic DONE,
+2. cost logic, take profit logic
+3. ui for result page
 
-3. cache backtest data(meta: bk id, set up) (key perf) (full results)
+4. cache backtest data(meta: bk id, set up) (key perf) (full results)
 
 - probably should use objecct...)
 

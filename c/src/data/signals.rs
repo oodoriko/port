@@ -1,5 +1,5 @@
+use crate::core::params::SignalParams;
 use crate::data::indicators::*;
-use crate::params::SignalParams;
 use arrayvec::ArrayVec;
 use smallvec::SmallVec;
 
@@ -35,22 +35,21 @@ impl EmaRsiMacdSignal {
             ema_fast,
             ema_medium,
             ema_slow,
-            initial_close,
             rsi_period,
-            rsi_ob,
-            rsi_os,
-            rsi_bull_div,
             macd_fast,
             macd_slow,
             macd_signal,
+            rsi_ob,
+            rsi_os,
+            rsi_bull_div,
             ..
         } = params
         {
             Some(Self {
-                name: "ema_fm__ris_neu__macd_bull",
-                ema: Ema::new_triple(*ema_fast, *ema_medium, *ema_slow, *initial_close),
-                rsi: Rsi::new(*rsi_period, *initial_close, *rsi_ob, *rsi_os, *rsi_bull_div),
-                macd: Macd::new(*macd_fast, *macd_slow, *macd_signal, *initial_close, 0, 0.0),
+                name: "ema_rsi_macd",
+                ema: Ema::new_triple_uninitialized(*ema_fast, *ema_medium, *ema_slow),
+                rsi: Rsi::new_uninitialized(*rsi_period, *rsi_ob, *rsi_os, *rsi_bull_div),
+                macd: Macd::new_uninitialized(*macd_fast, *macd_slow, *macd_signal, 0, 0.0),
             })
         } else {
             None
@@ -92,21 +91,17 @@ impl<const N: usize> BbRsiOversoldSignal<N> {
         if let SignalParams::BbRsiOversold {
             std_dev,
             rsi_period,
-            initial_close,
-            rsi_ob,
             rsi_os,
             rsi_bull_div,
             ..
         } = params
         {
-            let mut bb = BollingerBands::new(*std_dev, *initial_close);
-            let (_upper, _middle, lower) = bb.update(*initial_close);
             Some(Self {
-                name: "bb_below_lower__ris_os",
-                bb,
-                rsi: Rsi::new(*rsi_period, *initial_close, *rsi_ob, *rsi_os, *rsi_bull_div),
-                current_price: *initial_close,
-                current_lower: lower,
+                name: "bb_rsi_oversold",
+                bb: BollingerBands::new_uninitialized(*std_dev),
+                rsi: Rsi::new_uninitialized(*rsi_period, 70.0, *rsi_os, *rsi_bull_div),
+                current_price: 0.0,
+                current_lower: 0.0,
             })
         } else {
             None
@@ -150,22 +145,18 @@ impl<const N: usize> BbRsiOverboughtSignal<N> {
     pub fn from_params(params: &SignalParams) -> Option<Self> {
         if let SignalParams::BbRsiOverbought {
             std_dev,
-            initial_close,
             rsi_period,
             rsi_ob,
-            rsi_os,
             rsi_bull_div,
             ..
         } = params
         {
-            let mut bb = BollingerBands::new(*std_dev, *initial_close);
-            let (upper, _middle, _lower) = bb.update(*initial_close);
             Some(Self {
-                name: "bb_above_upper__ris_ob",
-                bb,
-                rsi: Rsi::new(*rsi_period, *initial_close, *rsi_ob, *rsi_os, *rsi_bull_div),
-                current_price: *initial_close,
-                current_upper: upper,
+                name: "bb_rsi_overbought",
+                bb: BollingerBands::new_uninitialized(*std_dev),
+                rsi: Rsi::new_uninitialized(*rsi_period, *rsi_ob, 30.0, *rsi_bull_div),
+                current_price: 0.0,
+                current_upper: 0.0,
             })
         } else {
             None
@@ -184,9 +175,16 @@ impl<const N: usize> SingleAssetSignal for BbRsiOverboughtSignal<N> {
 
     #[inline(always)]
     fn get_signal(&self) -> i8 {
-        self.bb
+        if self
+            .bb
             .bb_above_upper(self.current_price, self.current_upper)
             & self.rsi.rsi_ob()
+            == 1
+        {
+            -1 // Sell signal when overbought conditions are met
+        } else {
+            0 // Neutral
+        }
     }
 
     #[inline(always)]
@@ -211,11 +209,7 @@ impl<const SR: usize, const PAT: usize> PatternRsiMacdSignal<SR, PAT> {
         if let SignalParams::PatternRsiMacd {
             resistance_threshold,
             support_threshold,
-            initial_high,
-            initial_low,
-            initial_close,
             rsi_period,
-            rsi_ob,
             rsi_os,
             rsi_bull_div,
             macd_fast,
@@ -225,17 +219,15 @@ impl<const SR: usize, const PAT: usize> PatternRsiMacdSignal<SR, PAT> {
         } = params
         {
             Some(Self {
-                name: "res_breakout__ris_lt80__macd_bull",
-                pattern: PatternSignals::new(
+                name: "pattern_rsi_macd",
+                pattern: PatternSignals::new_uninitialized(
                     *resistance_threshold,
                     *support_threshold,
-                    *initial_high,
-                    *initial_low,
                 ),
-                rsi: Rsi::new(*rsi_period, *initial_close, *rsi_ob, *rsi_os, *rsi_bull_div),
-                macd: Macd::new(*macd_fast, *macd_slow, *macd_signal, *initial_close, 0, 0.0),
-                current_price: *initial_close,
-                current_rsi: 50.0,
+                rsi: Rsi::new_uninitialized(*rsi_period, 70.0, *rsi_os, *rsi_bull_div),
+                macd: Macd::new_uninitialized(*macd_fast, *macd_slow, *macd_signal, 0, 0.0),
+                current_price: 0.0,
+                current_rsi: 0.0,
             })
         } else {
             None
@@ -284,9 +276,6 @@ impl<const SR: usize, const PAT: usize> TripleEmaPatternMacdRsiSignal<SR, PAT> {
             ema_slow,
             resistance_threshold,
             support_threshold,
-            initial_high,
-            initial_low,
-            initial_close,
             macd_fast,
             macd_slow,
             macd_signal,
@@ -299,15 +288,13 @@ impl<const SR: usize, const PAT: usize> TripleEmaPatternMacdRsiSignal<SR, PAT> {
         {
             Some(Self {
                 name: "triple_ema_pattern_macd_rsi",
-                ema: Ema::new_triple(*ema_fast, *ema_medium, *ema_slow, *initial_close),
-                pattern: PatternSignals::new(
+                ema: Ema::new_triple_uninitialized(*ema_fast, *ema_medium, *ema_slow),
+                pattern: PatternSignals::new_uninitialized(
                     *resistance_threshold,
                     *support_threshold,
-                    *initial_high,
-                    *initial_low,
                 ),
-                macd: Macd::new(*macd_fast, *macd_slow, *macd_signal, *initial_close, 0, 0.0),
-                rsi: Rsi::new(*rsi_period, *initial_close, *rsi_ob, *rsi_os, *rsi_bull_div),
+                macd: Macd::new_uninitialized(*macd_fast, *macd_slow, *macd_signal, 0, 0.0),
+                rsi: Rsi::new_uninitialized(*rsi_period, *rsi_ob, *rsi_os, *rsi_bull_div),
             })
         } else {
             None

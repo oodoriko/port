@@ -1,5 +1,4 @@
 import {
-  Badge,
   Box,
   Card,
   Grid,
@@ -8,7 +7,6 @@ import {
   Progress,
   Stack,
   Text,
-  Title,
 } from "@mantine/core";
 import {
   IconArrowDown,
@@ -24,14 +22,13 @@ interface BacktestResultsProps {
 
 export function BacktestResults({ results }: BacktestResultsProps) {
   const {
-    portfolio_name,
+    backtest_id,
     initial_value,
     final_value,
     total_return,
     max_value,
     min_value,
     peak_notional,
-    total_records,
   } = results;
 
   const isPositiveReturn = total_return >= 0;
@@ -44,14 +41,9 @@ export function BacktestResults({ results }: BacktestResultsProps) {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="center">
-        <Title order={3} size="h4">
-          {portfolio_name}
-        </Title>
-        <Badge variant="light" size="sm">
-          {total_records} records
-        </Badge>
-      </Group>
+      <Text size="sm" c="dimmed">
+        Backtest ID: {backtest_id}
+      </Text>
 
       <Grid>
         <Grid.Col span={12}>
@@ -142,7 +134,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
           <Card shadow="xs" padding="md" radius="sm">
             <Group justify="space-between" mb="xs">
               <Text size="sm" c="dimmed">
-                Peak Notional
+                High-Water Mark
               </Text>
               <IconTrendingUp size={16} />
             </Group>

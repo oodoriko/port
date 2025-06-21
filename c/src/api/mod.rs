@@ -5,14 +5,15 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tower_http::cors::CorsLayer;
 
-use crate::analysis::backtest::backtest;
+use crate::analysis::backtest::{backtest, backtest_result};
 use crate::core::params::{
     PortfolioConstraintParams, PortfolioParams, PositionConstraintParams, SignalParams,
 };
 
 // Request structure that matches the frontend expectations
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BacktestRequest {
+    pub backtest_id: String,
     pub strategy_name: String,
     pub portfolio_name: String,
     pub start: String, // ISO string
@@ -29,6 +30,7 @@ pub struct BacktestRequest {
 // Response structure that matches the frontend expectations
 #[derive(Debug, Serialize)]
 pub struct BacktestResponse {
+    pub backtest_id: String,
     pub portfolio_name: String,
     pub initial_value: f32,
     pub final_value: f32,
@@ -42,6 +44,7 @@ pub struct BacktestResponse {
     pub cost_curve: Vec<f32>,
     pub realized_pnl_curve: Vec<f32>,
     pub unrealized_pnl_curve: Vec<f32>,
+    pub timestamps: Vec<i64>,
     pub total_records: usize,
 }
 
@@ -105,6 +108,7 @@ pub async fn backtest_handler(
             }),
         )
     })?;
+    backtest_result(&portfolio);
 
     // Convert Portfolio to BacktestResponse
     let initial_value = portfolio.equity_curve.first().copied().unwrap_or(0.0);
@@ -127,6 +131,7 @@ pub async fn backtest_handler(
     let total_records = portfolio.equity_curve.len();
 
     let response = BacktestResponse {
+        backtest_id: request.backtest_id,
         portfolio_name: portfolio.name,
         initial_value,
         final_value,
@@ -140,6 +145,7 @@ pub async fn backtest_handler(
         cost_curve: portfolio.cost_curve,
         realized_pnl_curve: portfolio.realized_pnl_curve,
         unrealized_pnl_curve: portfolio.unrealized_pnl_curve,
+        timestamps: portfolio.timestamps,
         total_records,
     };
 
@@ -152,3 +158,6 @@ pub fn create_router() -> Router {
         .route("/api/backtest", post(backtest_handler))
         .layer(CorsLayer::permissive())
 }
+
+#[cfg(test)]
+mod test;

@@ -1,4 +1,4 @@
-use crate::params::PositionConstraintParams;
+use crate::core::params::PositionConstraintParams;
 use std::fmt;
 
 // one coin per position
@@ -41,6 +41,12 @@ impl Position {
         let qty = quantity.unwrap_or(0.0);
         let timestamp = entry_timestamp.unwrap_or(0);
 
+        let trailing_stop_price = if let Some(ref constraint) = constraint {
+            price * (1.0 - constraint.trailing_stop_loss_pct)
+        } else {
+            price * 0.95
+        };
+
         Self {
             ticker_id,
             quantity: qty,
@@ -48,7 +54,7 @@ impl Position {
             entry_timestamp: timestamp,
             notional: qty * price,
             peak_price: price,
-            trailing_stop_price: price,
+            trailing_stop_price,
             take_profit_price: f32::MAX,
             unrealized_pnl: 0.0,
             cum_buy_proceeds: 0.0,
@@ -72,7 +78,7 @@ impl Position {
 
             let threshold_price = self.peak_price * (1.0 + trailing_stop_update_threshold_pct);
             if price > threshold_price {
-                self.trailing_stop_price = price * (1.0 + trailing_stop_pct);
+                self.trailing_stop_price = price * (1.0 - trailing_stop_pct);
             }
         }
     }

@@ -1,4 +1,4 @@
-use crate::params::{Frequency, SignalParams};
+use crate::core::params::{Frequency, SignalParams};
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use std::collections::HashMap;
 
@@ -37,89 +37,34 @@ pub fn create_sample_strategies() -> Vec<Vec<SignalParams>> {
     let mut strategies = vec![];
 
     // BTC Strategy: Aggressive momentum with RSI and MACD
-    let btc_strategy = vec![
-        SignalParams::EmaRsiMacd {
-            ema_fast: 12,
-            ema_medium: 26,
-            ema_slow: 50,
-            rsi_period: 14,
-            initial_close: 50000.0,
-            rsi_ob: 70.0,
-            rsi_os: 30.0,
-            rsi_bull_div: 40.0,
-            macd_fast: 12,
-            macd_slow: 26,
-            macd_signal: 9,
-        },
-        // SignalParams::BbRsiOversold {
-        //     name: "BTC_BB_RSI".to_string(),
-        //     std_dev: 2.0,
-        //     initial_close: 50000.0,
-        //     rsi_period: 14,
-        //     rsi_ob: 70.0,
-        //     rsi_os: 30.0,
-        //     rsi_bull_div: 35.0,
-        // },
-    ];
+    let btc_strategy = vec![SignalParams::EmaRsiMacd {
+        ema_fast: 12,
+        ema_medium: 26,
+        ema_slow: 50,
+        rsi_period: 14,
+        initial_close: None,
+        rsi_ob: 70.0,
+        rsi_os: 30.0,
+        rsi_bull_div: 40.0,
+        macd_fast: 12,
+        macd_slow: 26,
+        macd_signal: 9,
+    }];
 
     // ETH Strategy: More conservative with pattern recognition
-    let eth_strategy = vec![
-        SignalParams::EmaRsiMacd {
-            ema_fast: 12,
-            ema_medium: 26,
-            ema_slow: 50,
-            rsi_period: 14,
-            initial_close: 50000.0,
-            rsi_ob: 70.0,
-            rsi_os: 30.0,
-            rsi_bull_div: 40.0,
-            macd_fast: 12,
-            macd_slow: 26,
-            macd_signal: 9,
-        },
-        // SignalParams::TripleEmaPatternMacdRsi {
-        //     SignalParams::EmaRsiMacd {
-        //     ema_fast: 12,
-        //     ema_medium: 26,
-        //     ema_slow: 50,
-        //     rsi_period: 14,
-        //     initial_close: 50000.0,
-        //     rsi_ob: 70.0,
-        //     rsi_os: 30.0,
-        //     rsi_bull_div: 40.0,
-        //     macd_fast: 12,
-        //     macd_slow: 26,
-        //     macd_signal: 9,
-        // },
-        //     name: "ETH_TRIPLE_EMA".to_string(),
-        //     ema_fast: 9,
-        //     ema_medium: 21,
-        //     ema_slow: 55,
-        //     resistance_threshold: 0.02,
-        //     support_threshold: 0.02,
-        //     initial_high: 3500.0,
-        //     initial_low: 3000.0,
-        //     initial_close: 3250.0,
-        //     macd_fast: 12,
-        //     macd_slow: 26,
-        //     macd_signal: 9,
-        //     rsi_period: 14,
-        //     rsi_ob: 75.0,
-        //     rsi_os: 25.0,
-        //     rsi_bull_div: 35.0,
-        // },
-        // SignalParams::RsiOversoldReversal {
-        //     name: "ETH_RSI_REVERSAL".to_string(),
-        //     rsi_period: 14,
-        //     initial_close: 3250.0,
-        //     rsi_ob: 75.0,
-        //     rsi_os: 25.0,
-        //     rsi_bull_div: 30.0,
-        //     ema_fast: 12,
-        //     ema_medium: 26,
-        //     ema_slow: 50,
-        // },
-    ];
+    let eth_strategy = vec![SignalParams::EmaRsiMacd {
+        ema_fast: 12,
+        ema_medium: 26,
+        ema_slow: 50,
+        rsi_period: 14,
+        initial_close: None,
+        rsi_ob: 70.0,
+        rsi_os: 30.0,
+        rsi_bull_div: 40.0,
+        macd_fast: 12,
+        macd_slow: 26,
+        macd_signal: 9,
+    }];
 
     strategies.push(btc_strategy);
     strategies.push(eth_strategy);
