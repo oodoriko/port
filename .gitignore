@@ -1,15 +1,35 @@
-__pycache__/
-.venv/
-.vscode/
-data_cache/
-backtesting/portfolio_cache/
-outputs/
-temp/
+# macOS
 .DS_Store
-gitignore
-# *.toml
-.gitignore
+.DS_Store?
+._*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Rust
 **/target/
-# **/Cargo.lock
-**/.env
-**/node_modules/
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+**/data_cache
+**outputs
