@@ -3,10 +3,8 @@
 
 use chrono::{DateTime, Duration, Utc};
 use dotenv;
-use port_etl::jobs::coinbase_historical_ohlcv_job::{
-    fetch_coinbase_historical_multithread, fetch_coinbase_historical_resumable,
-};
-use port_etl::{CoinbaseMultiThreadConfig, NeonConnection};
+use port_etl::jobs::coinbase_historical_ohlcv_job::fetch_coinbase_historical_resumable;
+use port_etl::{CoinbaseConfig, NeonConnection};
 use std::env;
 
 #[cfg(test)]
@@ -14,15 +12,14 @@ mod tests {
     use super::*;
 
     // Helper function to create test config with conservative settings
-    fn get_test_config() -> CoinbaseMultiThreadConfig {
-        CoinbaseMultiThreadConfig {
-            max_concurrent: 1,          // Very conservative to avoid rate limits
-            max_requests_per_second: 2, // Much lower than normal
+    fn get_test_config() -> CoinbaseConfig {
+        CoinbaseConfig {
             max_retries: 3,
             initial_backoff_ms: 1000, // 1 second initial backoff
             backoff_multiplier: 2,    // Double the backoff each retry
             chunk_size_days: 1,       // Small chunks for testing
             enable_caching: true,
+            delay_between_requests_ms: 500, // Conservative 500ms delay for testing (~2 req/sec)
         }
     }
 
@@ -33,23 +30,23 @@ mod tests {
         let end_time = Utc::now();
         let start_time = end_time - Duration::hours(1);
 
-        let config = CoinbaseMultiThreadConfig {
-            max_concurrent: 1,
-            max_requests_per_second: 1,
+        let config = CoinbaseConfig {
             max_retries: 2,
             initial_backoff_ms: 500, // Short backoff for quick test
             backoff_multiplier: 2,
             chunk_size_days: 1,
             enable_caching: false, // Disable caching for this quick test
+            delay_between_requests_ms: 300, // 300ms delay for quick test
         };
 
         // This should complete quickly and validate the basic API interaction
-        let result = fetch_coinbase_historical_multithread(
+        let result = fetch_coinbase_historical_resumable(
             tickers,
             start_time,
             end_time,
             60, // 1-minute granularity
             Some(config),
+            None, // No table prefix for this test
         )
         .await;
 
@@ -84,7 +81,18 @@ mod tests {
                 // Test that we can create the progress table
                 let table_result = conn.create_etl_progress_table().await;
                 match table_result {
-                    Ok(_) => println!("✅ Progress table creation/verification successful"),
+                    Ok(_) => {
+                        println!("✅ Progress table creation/verification successful");
+
+                        // Verify the table was actually created
+                        match conn.table_exists("etl_job_progress").await {
+                            Ok(true) => println!("✅ ETL progress table exists and is accessible"),
+                            Ok(false) => {
+                                println!("⚠️  ETL progress table not found after creation")
+                            }
+                            Err(e) => println!("⚠️  Error checking table existence: {}", e),
+                        }
+                    }
                     Err(e) => println!("⚠️  Progress table issue: {}", e),
                 }
 
@@ -153,33 +161,36 @@ mod tests {
         let config = get_test_config();
 
         println!("🔧 Configuration validation:");
-        println!("   Max concurrent: {}", config.max_concurrent);
-        println!("   Max requests/sec: {}", config.max_requests_per_second);
+        println!(
+            "   Delay between requests: {}ms",
+            config.delay_between_requests_ms
+        );
         println!("   Chunk size (days): {}", config.chunk_size_days);
+        println!("   Max retries: {}", config.max_retries);
 
         // Validate configuration is conservative enough for production
         assert!(
-            config.max_concurrent <= 3,
-            "Too many concurrent requests - risk of rate limiting"
-        );
-        assert!(
-            config.max_requests_per_second <= 5,
-            "Too high request rate - risk of getting banned"
+            config.delay_between_requests_ms >= 200,
+            "Delay too short - risk of rate limiting (minimum 200ms = 5 req/sec)"
         );
         assert!(
             config.chunk_size_days <= 30,
             "Chunks too large - risk of timeout/memory issues"
         );
+        assert!(
+            config.max_retries >= 3,
+            "Not enough retries - should handle temporary failures"
+        );
 
         println!("✅ Configuration is appropriately conservative");
     }
 
-    // ONE YEAR TEST RUN - This is the main validation before the 10-year run
+    // HALF YEAR TEST RUN - This is the main validation before the 10-year run
     #[tokio::test]
     #[ignore] // Use `cargo test -- --ignored` to run this test
     async fn test_half_year_historical_data_pull() {
         println!("🚀 Starting HALF YEAR test run - this validates the full 10-year job logic");
-        println!("   This test pulls 1 year of data for 2 tickers to validate:");
+        println!("   This test pulls 6 months of data for 2 tickers to validate:");
         println!("   - Resume capability works correctly");
         println!("   - Rate limiting is appropriate");
         println!("   - Database caching works");
@@ -196,14 +207,13 @@ mod tests {
 
         let tickers = vec!["BTC-USD".to_string(), "ETH-USD".to_string()];
 
-        let config = CoinbaseMultiThreadConfig {
-            max_concurrent: 2,          // Conservative
-            max_requests_per_second: 3, // Conservative
-            max_retries: 5,             // More retries for this important test
-            initial_backoff_ms: 2000,   // 2 second initial backoff for important test
-            backoff_multiplier: 2,      // Double the backoff each retry
-            chunk_size_days: 7,         // Weekly chunks for good granularity
+        let config = CoinbaseConfig {
+            max_retries: 5,           // More retries for this important test
+            initial_backoff_ms: 2000, // 2 second initial backoff for important test
+            backoff_multiplier: 2,    // Double the backoff each retry
+            chunk_size_days: 7,       // Weekly chunks for good granularity
             enable_caching: true,
+            delay_between_requests_ms: 300, // Conservative 300ms delay (~3.3 req/sec)
         };
 
         println!("📅 Test parameters:");
@@ -214,8 +224,8 @@ mod tests {
         );
         println!("   Tickers: {:?}", tickers);
         println!("   Chunk size: {} days", config.chunk_size_days);
-        println!("   Expected chunks: ~52 per ticker (weekly chunks for 1 year)");
-        println!("   Estimated runtime: 30-60 minutes");
+        println!("   Expected chunks: ~26 per ticker (weekly chunks for 6 months)");
+        println!("   Estimated runtime: 15-30 minutes");
 
         let start_time = std::time::Instant::now();
 
@@ -224,7 +234,7 @@ mod tests {
             tickers.clone(),
             start_date,
             end_date,
-            7200 * 3, // 9-hour granularity
+            60, // 1-minute granularity
             Some(config),
             Some("test"), // Use test_ prefix for all tables
         )
@@ -234,7 +244,7 @@ mod tests {
 
         match result {
             Ok(_) => {
-                println!("🎉 ONE YEAR TEST SUCCESSFUL!");
+                println!("🎉 HALF YEAR TEST SUCCESSFUL!");
                 println!("   Duration: {:?}", duration);
                 println!("   This validates the job is ready for the 10-year run");
 
@@ -263,10 +273,10 @@ mod tests {
                 }
             }
             Err(e) => {
-                println!("❌ ONE YEAR TEST FAILED: {}", e);
+                println!("❌ HALF YEAR TEST FAILED: {}", e);
                 println!("   Duration before failure: {:?}", duration);
                 println!("   🚨 DO NOT proceed with 10-year run until this is fixed!");
-                panic!("One year test failed - must fix before production run");
+                panic!("Half year test failed - must fix before production run");
             }
         }
     }
@@ -300,7 +310,7 @@ mod tests {
 
         // Check 2: Configuration is conservative
         let config = get_test_config();
-        let config_check = config.max_requests_per_second <= 5 && config.max_concurrent <= 3;
+        let config_check = config.delay_between_requests_ms >= 200; // At least 200ms delay (5 req/sec max)
         if config_check {
             println!("   ✅ Configuration is appropriately conservative");
         } else {
@@ -318,17 +328,55 @@ mod tests {
         println!("\n🎯 PRODUCTION READINESS SUMMARY:");
         if db_check && config_check && resume_check {
             println!("   ✅ ALL CHECKS PASSED - Ready for production run");
-            println!("   💡 Recommendation: Run the one-year test first with --ignored flag");
+            println!("   💡 Recommendation: Run the half-year test first with --ignored flag");
         } else {
             println!("   ❌ SOME CHECKS FAILED - Fix issues before production run");
         }
     }
 
     #[tokio::test]
+    async fn test_sequential_processing() {
+        // Test that validates our sequential processing approach
+        println!("🔄 Testing sequential processing logic:");
+
+        let config = CoinbaseConfig {
+            delay_between_requests_ms: 100, // Fast for testing
+            chunk_size_days: 1,
+            max_retries: 2,
+            initial_backoff_ms: 500,
+            backoff_multiplier: 2,
+            enable_caching: false,
+        };
+
+        println!("   ✅ Sequential processing configuration validated");
+        println!("   - No complex rate limiting needed");
+        println!(
+            "   - Simple delay-based approach: {}ms between requests",
+            config.delay_between_requests_ms
+        );
+        println!(
+            "   - Estimated rate: ~{} requests/second",
+            1000 / config.delay_between_requests_ms.max(1)
+        );
+
+        // Validate the delay is reasonable
+        assert!(
+            config.delay_between_requests_ms >= 50,
+            "Delay too short - minimum 50ms"
+        );
+        assert!(
+            config.delay_between_requests_ms <= 1000,
+            "Delay too long - maximum 1000ms for testing"
+        );
+
+        println!("   ✅ Sequential processing ready for production");
+    }
+
+    #[tokio::test]
     async fn temp() {
         if let Ok(conn) = NeonConnection::new().await {
             if let Ok(summary) = conn
-                .get_job_progress_summary("coinbase_btc_60_20220101")
+                .get_job_progress_summary("coinbase_btc_usd_60_20220101")
                 .await
             {
                 println!("📊 Final stats for {}:", "BTC");

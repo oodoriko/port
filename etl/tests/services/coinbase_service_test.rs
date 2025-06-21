@@ -22,7 +22,7 @@ pub async fn coinbase_connection_test() -> Result<()> {
     );
 
     match fetcher
-        .fetch_candles(symbol, start, end, granularity, Some(1), None)
+        .fetch_candles(symbol, start, end, granularity, Some(1))
         .await
     {
         Ok(candles) => {
@@ -120,7 +120,7 @@ async fn test_coinbase_chunking() -> Result<()> {
     );
 
     match fetcher
-        .fetch_candles(symbol, start, end, granularity, Some(1), None)
+        .fetch_candles(symbol, start, end, granularity, Some(1))
         .await
     {
         Ok(candles) => {

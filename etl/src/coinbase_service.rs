@@ -2,49 +2,35 @@ use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
 use chrono_tz::America::New_York;
 use std::cmp::min;
-
-use crate::http_utils::{HttpClient, RetryConfig};
-use futures::future::join_all;
-use governor::{
-    clock::DefaultClock,
-    middleware::NoOpMiddleware,
-    state::{InMemoryState, NotKeyed},
-    RateLimiter,
-};
-use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::time::{sleep, Duration as TokioDuration};
 
-const MAX_CANDLES_PER_REQUEST: u32 = 250;
+use crate::http_utils::{HttpClient, RetryConfig};
 
-pub const MAX_TICKERS: usize = 5;
-const MAX_REQUESTS_PER_SECOND: u32 = 5;
+const MAX_CANDLES_PER_REQUEST: u32 = 250;
 const MAX_RETRY_ATTEMPTS: u32 = 3;
 const INITIAL_BACKOFF_MS: u64 = 1000;
 const BACKOFF_MULTIPLIER: u64 = 2;
 const CHUNK_SIZE_DAYS: i64 = 30;
 
 #[derive(Debug, Clone)]
-pub struct CoinbaseMultiThreadConfig {
-    pub max_concurrent: usize,
+pub struct CoinbaseConfig {
     pub chunk_size_days: i64,
     pub max_retries: u32,
     pub initial_backoff_ms: u64,
     pub backoff_multiplier: u64,
     pub enable_caching: bool,
-    pub max_requests_per_second: u32,
+    pub delay_between_requests_ms: u64,
 }
 
-impl Default for CoinbaseMultiThreadConfig {
+impl Default for CoinbaseConfig {
     fn default() -> Self {
         Self {
-            max_concurrent: MAX_TICKERS,
             chunk_size_days: CHUNK_SIZE_DAYS,
             max_retries: MAX_RETRY_ATTEMPTS,
             initial_backoff_ms: INITIAL_BACKOFF_MS,
             backoff_multiplier: BACKOFF_MULTIPLIER,
             enable_caching: true,
-            max_requests_per_second: MAX_REQUESTS_PER_SECOND,
+            delay_between_requests_ms: 250, // Simple 250ms delay between requests (~4 requests/second)
         }
     }
 }
@@ -85,7 +71,7 @@ impl CoinbaseDataFetcher {
     pub fn new() -> Self {
         Self {
             http_client: HttpClient::with_config(RetryConfig {
-                max_retries: 3, // Conservative for individual requests
+                max_retries: 3,
                 initial_backoff_ms: 1000,
                 backoff_multiplier: 2,
                 timeout_seconds: 30,
@@ -105,9 +91,6 @@ impl CoinbaseDataFetcher {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
         granularity: u32,
-        global_rate_limiter: Option<
-            &Arc<RateLimiter<NotKeyed, InMemoryState, DefaultClock, NoOpMiddleware>>,
-        >,
     ) -> Result<Vec<OhlcvData>> {
         let url = format!(
             "https://api.exchange.coinbase.com/products/{}/candles",
@@ -123,11 +106,6 @@ impl CoinbaseDataFetcher {
         );
 
         let operation_name = format!("fetch_single_chunk({})", symbol);
-
-        // Apply global rate limiting to EACH individual request
-        if let Some(rate_limiter) = global_rate_limiter {
-            rate_limiter.until_ready().await;
-        }
 
         let response = self
             .http_client
@@ -145,7 +123,7 @@ impl CoinbaseDataFetcher {
             })
             .await?;
 
-        // Extra safety: Check for rate limiting status codes
+        // Check for rate limiting status codes
         if response.status().as_u16() == 429 {
             return Err(anyhow::anyhow!(
                 "Rate limited by Coinbase API (429). Consider increasing delays."
@@ -176,13 +154,10 @@ impl CoinbaseDataFetcher {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
         granularity: u32,
-        delay: Option<u64>,
-        global_rate_limiter: Option<
-            &Arc<RateLimiter<NotKeyed, InMemoryState, DefaultClock, NoOpMiddleware>>,
-        >,
+        delay_ms: Option<u64>,
     ) -> Result<Vec<OhlcvData>> {
         println!("Fetching candles for {} from {} to {}", symbol, start, end);
-        let _delay = delay.unwrap_or(1);
+        let delay_ms = delay_ms.unwrap_or(250);
 
         let mut all_candles = Vec::new();
         let mut current_start = start;
@@ -195,13 +170,7 @@ impl CoinbaseDataFetcher {
             );
 
             let chunk_candles = self
-                .fetch_single_chunk(
-                    symbol,
-                    current_start,
-                    chunk_end,
-                    granularity,
-                    global_rate_limiter,
-                )
+                .fetch_single_chunk(symbol, current_start, chunk_end, granularity)
                 .await?;
 
             println!("Fetched {} candles for chunk", chunk_candles.len());
@@ -209,8 +178,8 @@ impl CoinbaseDataFetcher {
 
             current_start = chunk_end;
 
-            // Small delay between chunks for extra safety (rate limiting handled per-request)
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            // Simple delay between chunks
+            sleep(TokioDuration::from_millis(delay_ms)).await;
         }
 
         println!("Total {} candles fetched for {}", all_candles.len(), symbol);
@@ -224,17 +193,13 @@ impl Default for CoinbaseDataFetcher {
     }
 }
 
-pub async fn fetch_ohlcv_data_multithread(
-    tickers: &[String],
+pub async fn fetch_ohlcv_data_single(
+    ticker: &str,
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
     granularity: u32,
-    config: &CoinbaseMultiThreadConfig,
-    global_rate_limiter: &Arc<RateLimiter<NotKeyed, InMemoryState, DefaultClock, NoOpMiddleware>>,
-    per_thread_sleep_ms: u64,
-) -> Result<HashMap<String, Vec<OhlcvData>>> {
-    let semaphore = Arc::new(tokio::sync::Semaphore::new(config.max_concurrent));
-
+    config: &CoinbaseConfig,
+) -> Result<Vec<OhlcvData>> {
     // Create retry configuration based on ETL config
     let retry_config = RetryConfig {
         max_retries: config.max_retries,
@@ -243,59 +208,26 @@ pub async fn fetch_ohlcv_data_multithread(
         timeout_seconds: 30,
     };
 
-    let fetch_futures: Vec<_> = tickers
-        .iter()
-        .map(|ticker| {
-            let ticker = ticker.clone();
-            let global_rate_limiter = global_rate_limiter.clone();
-            let semaphore = semaphore.clone();
-            let retry_config = retry_config.clone();
+    // Create fetcher with custom retry configuration
+    let fetcher = CoinbaseDataFetcher::with_retry_config(retry_config);
+    let result = fetcher
+        .fetch_candles(
+            ticker,
+            start_date,
+            end_date,
+            granularity,
+            Some(config.delay_between_requests_ms),
+        )
+        .await;
 
-            async move {
-                let _permit = semaphore.acquire().await.unwrap();
-
-                // Per-thread sleep (rate limiting now handled per-request)
-                sleep(TokioDuration::from_millis(per_thread_sleep_ms)).await;
-
-                // Create fetcher with custom retry configuration
-                let fetcher = CoinbaseDataFetcher::with_retry_config(retry_config);
-                let result = fetcher
-                    .fetch_candles(
-                        &ticker,
-                        start_date,
-                        end_date,
-                        granularity,
-                        Some(1),
-                        Some(&global_rate_limiter),
-                    )
-                    .await;
-
-                (ticker, result)
-            }
-        })
-        .collect();
-
-    let results = join_all(fetch_futures).await;
-
-    let mut chunk_data = HashMap::new();
-    for (ticker, result) in results {
-        match result {
-            Ok(candles) => {
-                println!("✅ {}: {} candles", ticker, candles.len());
-                chunk_data.insert(ticker, candles);
-            }
-            Err(e) => {
-                println!("❌ {}: {}", ticker, e);
-                // For critical errors, we might want to stop entirely
-                if e.to_string().contains("Max retries exceeded") {
-                    return Err(anyhow::anyhow!(
-                        "Max retries exceeded for {}, stopping ETL process",
-                        ticker
-                    ));
-                }
-            }
+    match result {
+        Ok(candles) => {
+            println!("✅ {}: {} candles", ticker, candles.len());
+            Ok(candles)
+        }
+        Err(e) => {
+            println!("❌ {}: {}", ticker, e);
+            Err(e)
         }
     }
-
-    Ok(chunk_data)
 }

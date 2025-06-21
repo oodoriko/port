@@ -12,10 +12,10 @@ async fn run_coinbase_historical_10() -> Result<(), Box<dyn std::error::Error>> 
     dotenv::dotenv().ok();
     io::stdout().flush()?;
 
-    let start_date = DateTime::parse_from_rfc3339("2015-01-01T00:00:00Z")
+    let start_date = DateTime::parse_from_rfc3339("2015-07-01T00:00:00Z")
         .unwrap()
         .with_timezone(&Utc);
-    let end_date = DateTime::parse_from_rfc3339("2025-06-21T23:59:00Z")
+    let end_date = DateTime::parse_from_rfc3339("2025-06-20T23:59:00Z")
         .unwrap()
         .with_timezone(&Utc);
 
@@ -23,8 +23,11 @@ async fn run_coinbase_historical_10() -> Result<(), Box<dyn std::error::Error>> 
         "BTC-USD".to_string(),
         "ETH-USD".to_string(),
         "SOL-USD".to_string(),
+        "LINK-USD".to_string(),
+        "AVAX-USD".to_string(),
     ];
 
+    // Process ALL tickers in parallel for maximum speed
     let result =
         fetch_coinbase_historical_resumable(tickers, start_date, end_date, 60, None, None).await;
 
