@@ -1,0 +1,74 @@
+[package]
+name = "port-etl"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# PostgreSQL client
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1", "with-serde_json-1"] }
+tokio-postgres-rustls = "0.12"
+rustls = "0.23"
+webpki-roots = "0.26"
+
+# Connection pooling
+deadpool-postgres = "0.14"
+
+# URL parsing
+url = "2.4"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Date/time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID support
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Environment variable handling
+dotenv = "0.15"
+
+# Config management
+config = "0.14"
+
+# Optional: CSV handling for ETL operations
+csv = "1.3"
+
+# Optional: JSON handling
+serde_derive = "1.0"
+
+# InfluxDB client
+influxdb2 = "0.5"
+influxdb2-structmap = "0.2"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json"] }
+
+# Rate limiting
+governor = "0.6"
+
+# Async stream utilities
+futures = "0.3"
+
+# Timezone support
+chrono-tz = "0.8"
+
+
+
+[dev-dependencies]
+# Testing utilities
+tokio-test = "0.4" 

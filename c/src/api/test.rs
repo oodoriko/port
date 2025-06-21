@@ -1,4 +1,4 @@
-use crate::api::{backtest_handler, BacktestRequest, BacktestResponse, ErrorResponse};
+use crate::api::{backtest_handler, BacktestRequest, BacktestResponse};
 use crate::core::params::{
     Frequency, PortfolioConstraintParams, PortfolioParams, PositionConstraintParams, SignalParams,
 };

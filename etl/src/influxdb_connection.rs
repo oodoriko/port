@@ -1,131 +1,29 @@
 use anyhow::Result;
-use chrono::{DateTime, Duration, TimeZone, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use chrono_tz::America::New_York;
 use dotenv::dotenv;
 use futures::stream;
-use governor::{
-    clock::DefaultClock,
-    middleware::NoOpMiddleware,
-    state::{InMemoryState, NotKeyed},
-    Quota, RateLimiter,
-};
 use influxdb2::models::DataPoint;
 use influxdb2::models::Query;
 use influxdb2::Client;
 use influxdb2_structmap::value::Value;
 use reqwest;
-use std::cmp::min;
 use std::env;
-use std::num::NonZeroU32;
-use std::sync::Arc;
 
-const MAX_CANDLES_PER_REQUEST: u32 = 250;
-
-// a plagiarized work
-#[derive(Debug, Clone)]
-pub struct OhlcvData {
-    pub timestamp: i64,
-    pub open: f32,
-    pub high: f32,
-    pub low: f32,
-    pub close: f32,
-    pub volume: f32,
-}
-
-impl OhlcvData {
-    pub fn new(timestamp: i64, open: f32, high: f32, low: f32, close: f32, volume: f32) -> Self {
-        Self {
-            timestamp,
-            open,
-            high,
-            low,
-            close,
-            volume,
-        }
-    }
-
-    pub fn est_time(&self) -> DateTime<chrono_tz::Tz> {
-        let utc_time = Utc.timestamp_opt(self.timestamp, 0).unwrap();
-        utc_time.with_timezone(&New_York)
-    }
-}
-pub struct CoinbaseDataFetcher {
-    rate_limiter: Arc<RateLimiter<NotKeyed, InMemoryState, DefaultClock, NoOpMiddleware>>,
-}
-
-impl CoinbaseDataFetcher {
-    pub fn new() -> Self {
-        let rate = NonZeroU32::new(3).unwrap();
-        let quota = Quota::per_second(rate);
-        let rate_limiter = Arc::new(RateLimiter::direct(quota));
-        Self { rate_limiter }
-    }
-
-    pub async fn fetch_candles(
-        &self,
-        symbol: &str,
-        start: DateTime<Utc>,
-        end: DateTime<Utc>,
-        granularity: u32,
-    ) -> Result<Vec<OhlcvData>> {
-        let url = format!(
-            "https://api.exchange.coinbase.com/products/{}/candles",
-            symbol
-        );
-        println!("Requesting URL: {}", url);
-        println!(
-            "Query params: start={}, end={}, granularity={}",
-            start.to_rfc3339(),
-            end.to_rfc3339(),
-            granularity
-        );
-
-        self.rate_limiter.until_ready().await;
-
-        let response = reqwest::Client::new()
-            .get(&url)
-            .header("User-Agent", "bikini-bottom/0.1.0")
-            .query(&[
-                ("start", start.to_rfc3339()),
-                ("end", end.to_rfc3339()),
-                ("granularity", granularity.to_string()),
-            ])
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().await?;
-            return Err(anyhow::anyhow!("Coinbase API error: {}", error_text));
-        }
-
-        let candles: Vec<Vec<f32>> = response.json().await?;
-        println!("Received {} candles from API", candles.len());
-
-        let candles = candles
-            .into_iter()
-            .map(|candle| OhlcvData {
-                timestamp: candle[0] as i64,
-                open: candle[3],
-                high: candle[2],
-                low: candle[1],
-                close: candle[4],
-                volume: candle[5],
-            })
-            .collect();
-
-        Ok(candles)
-    }
-}
+use crate::coinbase_connection::OhlcvData;
 
 pub struct InfluxDBHandler {
     client: Client,
     bucket: String,
-    coinbase_client: CoinbaseDataFetcher,
 }
 
 impl InfluxDBHandler {
     pub fn new() -> Result<Self> {
-        dotenv().ok();
+        // Try to load .env from multiple possible locations
+        let _ = dotenv()
+            .or_else(|_| dotenv::from_filename("../etl/.env"))
+            .or_else(|_| dotenv::from_filename("etl/.env"))
+            .or_else(|_| dotenv::from_filename("./.env"));
 
         let host = env::var("INFLUXDB_URL").unwrap_or_else(|_| "http://localhost:8086".to_string());
         let token = env::var("INFLUXDB_TOKEN").expect("INFLUXDB_TOKEN must be set");
@@ -133,88 +31,55 @@ impl InfluxDBHandler {
         let bucket = env::var("INFLUXDB_BUCKET").expect("INFLUXDB_BUCKET must be set");
 
         let client = Client::new(host, org, token);
-        let coinbase_client = CoinbaseDataFetcher::new();
 
-        Ok(Self {
-            client,
-            bucket,
-            coinbase_client,
-        })
+        Ok(Self { client, bucket })
     }
 
-    pub async fn cache_data(
+    pub async fn cache_ohlcv_data(
         &self,
-        tickers: &[&str],
-        exchanges: &[&str],
-        start: DateTime<Utc>,
-        end: DateTime<Utc>,
-        granularity: u32,
+        exchange: &str,
+        ticker: &str,
+        candles: &[OhlcvData],
     ) -> Result<()> {
-        for exchange in exchanges {
-            if exchange.to_lowercase() != "coinbase" {
-                println!("Skipping {} exchange", exchange);
-                continue;
-            }
-            println!("\nCaching data from {}...\n", exchange);
+        let asset = ticker.split('-').next().unwrap().to_lowercase();
+        let measurement = format!("sample_{}_{}", exchange.to_lowercase(), asset);
 
-            for ticker in tickers {
-                let asset = ticker.split('-').next().unwrap().to_lowercase();
-                let measurement = format!("sample_{}_{}", exchange, asset);
+        println!(
+            "Caching {} candles for {} on {}",
+            candles.len(),
+            ticker,
+            exchange
+        );
 
-                println!("Fetching and caching data for {}", ticker);
-                let mut total_candles = 0;
-                let mut current_start = start;
+        let mut points = Vec::with_capacity(candles.len());
 
-                while current_start < end {
-                    let chunk_duration_seconds = (MAX_CANDLES_PER_REQUEST * granularity) as i64;
-                    let chunk_end = min(
-                        current_start + Duration::seconds(chunk_duration_seconds),
-                        end,
-                    );
+        for candle in candles {
+            let utc_time = Utc.timestamp_opt(candle.timestamp, 0).unwrap();
+            let est_time = utc_time.with_timezone(&New_York);
 
-                    let candles = self
-                        .coinbase_client
-                        .fetch_candles(ticker, current_start, chunk_end, granularity)
-                        .await?;
+            let point = DataPoint::builder(measurement.as_str())
+                .field("open", candle.open as f64)
+                .field("high", candle.high as f64)
+                .field("low", candle.low as f64)
+                .field("close", candle.close as f64)
+                .field("volume", candle.volume as f64)
+                .field("est_timestamp", est_time.timestamp())
+                .timestamp(candle.timestamp * 1_000_000_000)
+                .build()
+                .unwrap();
 
-                    println!("Fetched {} candles", candles.len());
-
-                    let mut points = Vec::with_capacity(candles.len());
-
-                    for candle in &candles {
-                        let utc_time = Utc.timestamp_opt(candle.timestamp, 0).unwrap();
-                        let est_time = utc_time.with_timezone(&New_York);
-
-                        let point = DataPoint::builder(measurement.as_str())
-                            .field("open", candle.open as f64)
-                            .field("high", candle.high as f64)
-                            .field("low", candle.low as f64)
-                            .field("close", candle.close as f64)
-                            .field("volume", candle.volume as f64)
-                            .field("est_timestamp", est_time.timestamp())
-                            .timestamp(candle.timestamp * 1_000_000_000)
-                            .build()
-                            .unwrap();
-
-                        points.push(point);
-                    }
-
-                    self.client
-                        .write(&self.bucket, stream::iter(points))
-                        .await?;
-
-                    total_candles += candles.len();
-
-                    current_start = chunk_end;
-                    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-                }
-                println!(
-                    "Completed caching {} candles for {}\n",
-                    total_candles, ticker
-                );
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-            }
+            points.push(point);
         }
+
+        self.client
+            .write(&self.bucket, stream::iter(points))
+            .await?;
+
+        println!(
+            "Successfully cached {} candles for {}",
+            candles.len(),
+            ticker
+        );
         Ok(())
     }
 
@@ -274,7 +139,7 @@ impl InfluxDBHandler {
         Ok(measurements)
     }
 
-    pub async fn load_data(
+    pub async fn load_ohlcv_data(
         &self,
         tickers: &[&str],
         start: DateTime<Utc>,
@@ -500,39 +365,3 @@ impl InfluxDBHandler {
         Ok(())
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-
-//     #[tokio::test]
-//     async fn test_cache_and_load_data() -> Result<()> {
-//         dotenv().ok();
-//         let handler = InfluxDBHandler::new()?;
-//         let end = Utc::now();
-//         let start = end - Duration::days(3);
-//         let tickers = &["BTC-USD", "ETH-USD", "SOL-USD"];
-//         let granularity = 60;
-
-//         // println!("Dropping existing data...");
-//         handler.drop_measurement("sample_coinbase_btc").await?;
-//         handler.drop_measurement("sample_coinbase_eth").await?;
-//         handler.drop_measurement("sample_coinbase_sol").await?;
-
-//         // println!("\nCaching data from Coinbase...");
-//         handler
-//             .cache_data(tickers, &["coinbase"], start, end, granularity)
-//             .await?;
-
-//         println!("\nLoading cached data...");
-//         let (all_data, timestamps) = handler.load_data(tickers, start, end, None).await?;
-
-//         for (t, asset_data) in all_data.iter().take(3).enumerate() {
-//             println!("\nSample data for time {}:", t);
-//             println!("Number of assets {}", asset_data.len());
-//             println!("{:?}", asset_data[0]);
-//         }
-//         println!("{:?}", timestamps);
-//         Ok(())
-//     }
-// }

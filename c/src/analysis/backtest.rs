@@ -1,10 +1,10 @@
 use crate::core::params::{
     PortfolioConstraintParams, PortfolioParams, PositionConstraintParams, SignalParams,
 };
-use crate::data::data::InfluxDBHandler;
 use crate::trading::portfolio::Portfolio;
 use crate::trading::strategy::Strategy;
 use chrono::{DateTime, Utc};
+use port_etl::InfluxDBHandler;
 
 #[inline(always)]
 pub async fn backtest(
@@ -24,7 +24,7 @@ pub async fn backtest(
 
     let ticker_refs: Vec<&str> = tickers.iter().map(|s| s.as_str()).collect();
     let (data, timestamps) = handler
-        .load_data(&ticker_refs, start, end, Some(cadence))
+        .load_ohlcv_data(&ticker_refs, start, end, Some(cadence))
         .await?;
 
     let warm_up_price_data: Vec<Vec<Vec<f32>>> = data[..warm_up_period].to_vec();

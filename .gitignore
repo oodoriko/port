@@ -7,9 +7,9 @@ outputs/
 temp/
 .DS_Store
 gitignore
-*.toml
+# *.toml
 .gitignore
 **/target/
-**/Cargo.lock
-**/.env
+# **/Cargo.lock
+# **/.env
 **/node_modules/
