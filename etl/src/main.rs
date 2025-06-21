@@ -12,10 +12,10 @@ async fn run_coinbase_historical_10() -> Result<(), Box<dyn std::error::Error>> 
     dotenv::dotenv().ok();
     io::stdout().flush()?;
 
-    let end_date = DateTime::parse_from_rfc3339("2015-01-01T00:00:00Z")
+    let start_date = DateTime::parse_from_rfc3339("2015-01-01T00:00:00Z")
         .unwrap()
         .with_timezone(&Utc);
-    let start_date = DateTime::parse_from_rfc3339("2025-06-21T23:59:00Z")
+    let end_date = DateTime::parse_from_rfc3339("2025-06-21T23:59:00Z")
         .unwrap()
         .with_timezone(&Utc);
 
