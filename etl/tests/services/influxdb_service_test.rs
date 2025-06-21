@@ -1,5 +1,4 @@
 use anyhow::Result;
-use chrono::{DateTime, Duration, Utc};
 use dotenv::dotenv;
 use port_etl::InfluxDBHandler;
 

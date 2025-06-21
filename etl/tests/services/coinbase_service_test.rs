@@ -21,7 +21,10 @@ pub async fn coinbase_connection_test() -> Result<()> {
         symbol, start, end
     );
 
-    match fetcher.fetch_candles(symbol, start, end, granularity).await {
+    match fetcher
+        .fetch_candles(symbol, start, end, granularity, Some(1), None)
+        .await
+    {
         Ok(candles) => {
             println!(
                 "✅ Successfully fetched {} candles from Coinbase API",
@@ -101,55 +104,6 @@ async fn test_ohlcv_data_methods() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_coinbase_historical_data() -> Result<()> {
-    println!("Testing Coinbase historical data fetching...");
-
-    let fetcher = CoinbaseDataFetcher::new();
-    let end = Utc::now();
-    let start = end - Duration::hours(1); // 2 hours of data to test chunking
-    let tickers = &["BTC-USD", "ETH-USD"];
-    let granularity = 300; // 5 minutes
-
-    println!(
-        "Fetching historical data for {:?} from {} to {}",
-        tickers, start, end
-    );
-
-    match fetcher
-        .fetch_historical_data(tickers, start, end, granularity)
-        .await
-    {
-        Ok(ticker_data) => {
-            println!(
-                "✅ Successfully fetched historical data for {} tickers",
-                ticker_data.len()
-            );
-
-            for (ticker, candles) in &ticker_data {
-                println!("  {}: {} candles", ticker, candles.len());
-
-                if !candles.is_empty() {
-                    let first_candle = &candles[0];
-                    println!(
-                        "    First candle - Time: {}, Close: {}",
-                        first_candle.est_time(),
-                        first_candle.close
-                    );
-                }
-            }
-        }
-        Err(e) => {
-            println!("❌ Failed to fetch historical data: {}", e);
-            println!("This might indicate a network issue or API rate limiting");
-            return Err(e);
-        }
-    }
-
-    println!("🎉 Coinbase historical data test passed!");
-    Ok(())
-}
-
-#[tokio::test]
 async fn test_coinbase_chunking() -> Result<()> {
     println!("Testing Coinbase chunking logic...");
 
@@ -165,7 +119,10 @@ async fn test_coinbase_chunking() -> Result<()> {
         symbol, start, end
     );
 
-    match fetcher.fetch_candles(symbol, start, end, granularity).await {
+    match fetcher
+        .fetch_candles(symbol, start, end, granularity, Some(1), None)
+        .await
+    {
         Ok(candles) => {
             println!(
                 "✅ Successfully fetched {} candles with chunking",

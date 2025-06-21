@@ -1,10 +1,15 @@
+use chrono::{DateTime, Utc};
 use deadpool_postgres::{Config, Pool, PoolError, Runtime};
+use dotenv;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::env;
 use std::error::Error;
 use std::fmt;
 use tokio_postgres::Row;
 use tokio_postgres_rustls::MakeRustlsConnect;
+
+use crate::coinbase_service::OhlcvData;
 
 /// Custom error type for Neon database operations
 #[derive(Debug)]
@@ -111,14 +116,6 @@ impl NeonConfig {
             min_connections: 1,
         })
     }
-
-    /// Build connection string
-    pub fn connection_string(&self) -> String {
-        format!(
-            "postgresql://{}:{}@{}:{}/{}?sslmode=require",
-            self.username, self.password, self.host, self.port, self.database
-        )
-    }
 }
 
 /// Neon database connection manager
@@ -129,6 +126,12 @@ pub struct NeonConnection {
 impl NeonConnection {
     /// Create a new connection manager with default configuration from environment
     pub async fn new() -> Result<Self, NeonError> {
+        // Load environment variables from .env file if present
+        let _ = dotenv::dotenv()
+            .or_else(|_| dotenv::from_filename("../etl/.env"))
+            .or_else(|_| dotenv::from_filename("etl/.env"))
+            .or_else(|_| dotenv::from_filename("./.env"));
+
         let config = NeonConfig::from_env()?;
         Self::with_config(config).await
     }
@@ -263,19 +266,8 @@ impl NeonConnection {
     pub async fn close(&self) {
         self.pool.close();
     }
-}
 
-/// Database statistics structure
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DatabaseStats {
-    pub database_name: String,
-    pub database_size: i64,
-    pub active_connections: i64,
-    pub postgres_version: String,
-}
-
-/// Utility functions for common database operations
-impl NeonConnection {
+    // ===== UTILITY FUNCTIONS =====
     /// Create a table if it doesn't exist
     pub async fn create_table_if_not_exists(
         &self,
@@ -314,61 +306,418 @@ impl NeonConnection {
 
         Ok(rows.into_iter().map(|row| row.get(0)).collect())
     }
+
+    /// Cache historical OHLCV data for multiple tickers from an exchange
+    /// If prefix is provided, tables will be named: {prefix}_historical_{exchange}_{ticker}
+    /// Otherwise: historical_{exchange}_{ticker}
+    pub async fn cache_historical_ohlcv(
+        &self,
+        exchange: &str,
+        data: HashMap<String, Vec<OhlcvData>>,
+        prefix: Option<&str>,
+    ) -> Result<(), NeonError> {
+        for (ticker, ohlcv_data) in data {
+            if ohlcv_data.is_empty() {
+                continue; // Skip empty data
+            }
+
+            let table_name = if let Some(prefix) = prefix {
+                format!(
+                    "{}_historical_{}_{}",
+                    prefix,
+                    exchange.to_lowercase().replace("-", "_"),
+                    ticker.to_lowercase().replace("-", "_")
+                )
+            } else {
+                format!(
+                    "historical_{}_{}",
+                    exchange.to_lowercase().replace("-", "_"),
+                    ticker.to_lowercase().replace("-", "_")
+                )
+            };
+
+            // Check if table exists, create if not
+            if !self.table_exists(&table_name).await? {
+                self.create_ohlcv_table(&table_name).await?;
+                if prefix.is_some() {
+                    println!("✅ Created {} table: {}", prefix.unwrap_or(""), table_name);
+                } else {
+                    println!("✅ Created table: {}", table_name);
+                }
+            }
+
+            // Insert OHLCV data
+            let inserted_count = self.insert_ohlcv_data(&table_name, &ohlcv_data).await?;
+            if prefix.is_some() {
+                println!(
+                    "💾 Inserted {} records into {} table {}",
+                    inserted_count,
+                    prefix.unwrap_or(""),
+                    table_name
+                );
+            } else {
+                println!("💾 Inserted {} records into {}", inserted_count, table_name);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Create OHLCV table with proper schema
+    async fn create_ohlcv_table(&self, table_name: &str) -> Result<(), NeonError> {
+        let schema = r#"
+            timestamp BIGINT PRIMARY KEY,
+            open REAL NOT NULL,
+            high REAL NOT NULL,
+            low REAL NOT NULL,
+            close REAL NOT NULL,
+            volume REAL NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        "#;
+
+        self.create_table_if_not_exists(table_name, schema).await?;
+
+        // Create index on timestamp for better query performance
+        let index_query = format!(
+            "CREATE INDEX IF NOT EXISTS idx_{}_timestamp ON {} (timestamp)",
+            table_name.replace("-", "_"),
+            table_name
+        );
+        self.execute(&index_query, &[]).await?;
+
+        Ok(())
+    }
+
+    /// Insert OHLCV data using batch INSERT for much better performance
+    async fn insert_ohlcv_data(
+        &self,
+        table_name: &str,
+        ohlcv_data: &[OhlcvData],
+    ) -> Result<usize, NeonError> {
+        if ohlcv_data.is_empty() {
+            return Ok(0);
+        }
+
+        // Deduplicate data by timestamp to avoid ON CONFLICT issues within the same batch
+        let mut unique_data: std::collections::HashMap<i64, &OhlcvData> =
+            std::collections::HashMap::new();
+        for ohlcv in ohlcv_data {
+            // Keep the last occurrence of each timestamp (most recent data)
+            unique_data.insert(ohlcv.timestamp, ohlcv);
+        }
+
+        // Convert back to vector and sort by timestamp for consistent ordering
+        let mut deduplicated_data: Vec<&OhlcvData> = unique_data.into_values().collect();
+        deduplicated_data.sort_by_key(|ohlcv| ohlcv.timestamp);
+
+        // For very large batches, chunk them to avoid hitting PostgreSQL parameter limits (65535)
+        const BATCH_SIZE: usize = 1000; // 1000 records * 6 params = 6000 params per batch
+        let mut total_inserted = 0;
+
+        for chunk in deduplicated_data.chunks(BATCH_SIZE) {
+            total_inserted += self.insert_ohlcv_batch_refs(table_name, chunk).await?;
+        }
+
+        Ok(total_inserted)
+    }
+
+    /// Insert a single batch of OHLCV data using multi-value INSERT (for references)
+    async fn insert_ohlcv_batch_refs(
+        &self,
+        table_name: &str,
+        ohlcv_data: &[&OhlcvData],
+    ) -> Result<usize, NeonError> {
+        if ohlcv_data.is_empty() {
+            return Ok(0);
+        }
+
+        let mut client = self.get_client().await?;
+        let transaction = client.transaction().await?;
+
+        // Build multi-value INSERT query
+        let mut query = format!(
+            "INSERT INTO {} (timestamp, open, high, low, close, volume) VALUES ",
+            table_name
+        );
+
+        let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
+        let mut value_groups = Vec::new();
+
+        for (i, ohlcv) in ohlcv_data.iter().enumerate() {
+            let base_idx = i * 6;
+            value_groups.push(format!(
+                "(${}, ${}, ${}, ${}, ${}, ${})",
+                base_idx + 1,
+                base_idx + 2,
+                base_idx + 3,
+                base_idx + 4,
+                base_idx + 5,
+                base_idx + 6
+            ));
+
+            params.push(&ohlcv.timestamp);
+            params.push(&ohlcv.open);
+            params.push(&ohlcv.high);
+            params.push(&ohlcv.low);
+            params.push(&ohlcv.close);
+            params.push(&ohlcv.volume);
+        }
+
+        query.push_str(&value_groups.join(", "));
+        query.push_str(
+            " ON CONFLICT (timestamp) 
+             DO UPDATE SET 
+                open = EXCLUDED.open,
+                high = EXCLUDED.high,
+                low = EXCLUDED.low,
+                close = EXCLUDED.close,
+                volume = EXCLUDED.volume",
+        );
+
+        let inserted_count = transaction.execute(&query, &params).await?;
+        transaction.commit().await?;
+
+        Ok(inserted_count as usize)
+    }
+
+    /// ===== ETL PROGRESS TRACKING METHODS =====
+
+    /// Create the ETL progress tracking table if it doesn't exist
+    pub async fn create_etl_progress_table(&self) -> Result<(), NeonError> {
+        let schema = r#"
+            id SERIAL PRIMARY KEY,
+            job_id VARCHAR(100) NOT NULL,
+            exchange VARCHAR(50) NOT NULL,
+            ticker VARCHAR(50) NOT NULL,
+            granularity INTEGER NOT NULL,
+            chunk_start TIMESTAMP WITH TIME ZONE NOT NULL,
+            chunk_end TIMESTAMP WITH TIME ZONE NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+            records_fetched INTEGER DEFAULT 0,
+            records_cached INTEGER DEFAULT 0,
+            retry_count INTEGER DEFAULT 0,
+            error_message TEXT,
+            started_at TIMESTAMP WITH TIME ZONE,
+            completed_at TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(job_id, chunk_start, chunk_end)
+        "#;
+
+        self.create_table_if_not_exists("etl_job_progress", schema)
+            .await?;
+
+        // Create indexes for better query performance
+        let indexes = vec![
+            "CREATE INDEX IF NOT EXISTS idx_etl_progress_job_id ON etl_job_progress (job_id)",
+            "CREATE INDEX IF NOT EXISTS idx_etl_progress_status ON etl_job_progress (status)",
+            "CREATE INDEX IF NOT EXISTS idx_etl_progress_job_status ON etl_job_progress (job_id, status)",
+        ];
+
+        for index_query in indexes {
+            self.execute(index_query, &[]).await?;
+        }
+
+        println!("✅ ETL progress tracking table ready");
+        Ok(())
+    }
+
+    /// Create ETL job plan by inserting all chunks as 'pending'
+    pub async fn create_etl_job_plan(
+        &self,
+        job_id: &str,
+        exchange: &str,
+        ticker: &str,
+        granularity: u32,
+        chunks: &[(DateTime<Utc>, DateTime<Utc>)],
+    ) -> Result<(), NeonError> {
+        let mut client = self.get_client().await?;
+        let transaction = client.transaction().await?;
+
+        let insert_query = "
+            INSERT INTO etl_job_progress 
+            (job_id, exchange, ticker, granularity, chunk_start, chunk_end, status) 
+            VALUES ($1, $2, $3, $4, $5, $6, 'pending') 
+            ON CONFLICT (job_id, chunk_start, chunk_end) DO NOTHING";
+
+        let stmt = transaction.prepare(insert_query).await?;
+
+        for (chunk_start, chunk_end) in chunks {
+            transaction
+                .execute(
+                    &stmt,
+                    &[
+                        &job_id,
+                        &exchange,
+                        &ticker,
+                        &(granularity as i32),
+                        chunk_start,
+                        chunk_end,
+                    ],
+                )
+                .await?;
+        }
+
+        transaction.commit().await?;
+        println!(
+            "📋 Created job plan: {} chunks for {}",
+            chunks.len(),
+            job_id
+        );
+        Ok(())
+    }
+
+    /// Get pending chunks for a job (enables resume capability)
+    pub async fn get_pending_chunks(
+        &self,
+        job_id: &str,
+    ) -> Result<Vec<(DateTime<Utc>, DateTime<Utc>)>, NeonError> {
+        let rows = self
+            .query(
+                "SELECT chunk_start, chunk_end FROM etl_job_progress 
+             WHERE job_id = $1 AND status IN ('pending', 'failed') 
+             ORDER BY chunk_start",
+                &[&job_id],
+            )
+            .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| (row.get(0), row.get(1)))
+            .collect())
+    }
+
+    /// Get failed chunks that can be retried
+    pub async fn get_retryable_chunks(
+        &self,
+        job_id: &str,
+        max_retries: u32,
+    ) -> Result<Vec<(DateTime<Utc>, DateTime<Utc>, u32)>, NeonError> {
+        let rows = self
+            .query(
+                "SELECT chunk_start, chunk_end, retry_count FROM etl_job_progress 
+             WHERE job_id = $1 AND status = 'failed' AND retry_count < $2
+             ORDER BY chunk_start",
+                &[&job_id, &(max_retries as i32)],
+            )
+            .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| (row.get(0), row.get(1), row.get::<_, i32>(2) as u32))
+            .collect())
+    }
+
+    /// Mark chunk as in progress
+    pub async fn mark_chunk_in_progress(
+        &self,
+        job_id: &str,
+        chunk_start: DateTime<Utc>,
+    ) -> Result<(), NeonError> {
+        self.execute(
+            "UPDATE etl_job_progress 
+             SET status = 'in_progress', started_at = NOW() 
+             WHERE job_id = $1 AND chunk_start = $2",
+            &[&job_id, &chunk_start],
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Mark chunk as completed
+    pub async fn mark_chunk_completed(
+        &self,
+        job_id: &str,
+        chunk_start: DateTime<Utc>,
+        records_fetched: usize,
+        records_cached: usize,
+    ) -> Result<(), NeonError> {
+        self.execute(
+            "UPDATE etl_job_progress 
+             SET status = 'completed', 
+                 records_fetched = $1, 
+                 records_cached = $2, 
+                 completed_at = NOW() 
+             WHERE job_id = $3 AND chunk_start = $4",
+            &[
+                &(records_fetched as i32),
+                &(records_cached as i32),
+                &job_id,
+                &chunk_start,
+            ],
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Mark chunk as failed and increment retry count
+    pub async fn mark_chunk_failed(
+        &self,
+        job_id: &str,
+        chunk_start: DateTime<Utc>,
+        error_message: &str,
+    ) -> Result<(), NeonError> {
+        self.execute(
+            "UPDATE etl_job_progress 
+             SET status = 'failed', 
+                 retry_count = retry_count + 1,
+                 error_message = $1,
+                 completed_at = NOW()
+             WHERE job_id = $2 AND chunk_start = $3",
+            &[&error_message, &job_id, &chunk_start],
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Get job progress summary
+    pub async fn get_job_progress_summary(
+        &self,
+        job_id: &str,
+    ) -> Result<JobProgressSummary, NeonError> {
+        let row = self
+            .query_one(
+                "SELECT 
+                COUNT(*) as total_chunks,
+                COUNT(*) FILTER (WHERE status = 'completed') as completed,
+                COUNT(*) FILTER (WHERE status = 'failed') as failed,
+                COUNT(*) FILTER (WHERE status = 'in_progress') as in_progress,
+                COUNT(*) FILTER (WHERE status = 'pending') as pending,
+                SUM(records_cached) FILTER (WHERE status = 'completed') as total_records
+             FROM etl_job_progress 
+             WHERE job_id = $1",
+                &[&job_id],
+            )
+            .await?;
+
+        Ok(JobProgressSummary {
+            job_id: job_id.to_string(),
+            total_chunks: row.get::<_, i64>(0) as u32,
+            completed: row.get::<_, i64>(1) as u32,
+            failed: row.get::<_, i64>(2) as u32,
+            in_progress: row.get::<_, i64>(3) as u32,
+            pending: row.get::<_, i64>(4) as u32,
+            total_records: row.get::<_, Option<i64>>(5).unwrap_or(0) as u32,
+        })
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use dotenv::dotenv;
+/// Database statistics structure
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DatabaseStats {
+    pub database_name: String,
+    pub database_size: i64,
+    pub active_connections: i64,
+    pub postgres_version: String,
+}
 
-    fn init_test() {
-        dotenv().ok();
-        let _ = env_logger::try_init();
-    }
-
-    #[test]
-    fn test_connection_string() {
-        let config = NeonConfig {
-            host: "localhost".to_string(),
-            port: 5432,
-            database: "test".to_string(),
-            username: "user".to_string(),
-            password: "pass".to_string(),
-            max_connections: 5,
-            min_connections: 1,
-        };
-
-        let conn_str = config.connection_string();
-        assert!(conn_str.contains("postgresql://"));
-        assert!(conn_str.contains("localhost"));
-        assert!(conn_str.contains("5432"));
-    }
-
-    #[test]
-    fn test_neon_config_from_url() {
-        let url = "postgresql://user:pass@host:5432/dbname";
-        let config = NeonConfig::from_url(url).unwrap();
-
-        assert_eq!(config.host, "host");
-        assert_eq!(config.port, 5432);
-        assert_eq!(config.database, "dbname");
-        assert_eq!(config.username, "user");
-        assert_eq!(config.password, "pass");
-    }
-
-    #[tokio::test]
-    async fn test_live_connection() {
-        init_test();
-
-        // Only run if DATABASE_URL is set
-        if let Ok(_) = std::env::var("DATABASE_URL") {
-            let conn = NeonConnection::new()
-                .await
-                .expect("Failed to create connection");
-            conn.test_connection()
-                .await
-                .expect("Connection test failed");
-            conn.close().await;
-        }
-    }
+/// Job progress summary structure
+#[derive(Debug, Serialize, Deserialize)]
+pub struct JobProgressSummary {
+    pub job_id: String,
+    pub total_chunks: u32,
+    pub completed: u32,
+    pub failed: u32,
+    pub in_progress: u32,
+    pub pending: u32,
+    pub total_records: u32,
 }

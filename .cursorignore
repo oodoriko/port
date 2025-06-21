@@ -1,0 +1,15 @@
+__pycache__/
+.venv/
+.vscode/
+data_cache/
+backtesting/portfolio_cache/
+outputs/
+temp/
+.DS_Store
+gitignore
+# *.toml
+.gitignore
+**/target/
+# **/Cargo.lock
+**/.env
+**/node_modules/
