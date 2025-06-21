@@ -10,7 +10,7 @@ use influxdb2_structmap::value::Value;
 use reqwest;
 use std::env;
 
-use crate::coinbase_connection::OhlcvData;
+use crate::coinbase_service::OhlcvData;
 
 pub struct InfluxDBHandler {
     client: Client,

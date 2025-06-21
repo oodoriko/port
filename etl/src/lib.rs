@@ -1,7 +1,7 @@
-pub mod coinbase_connection;
-pub mod influxdb_connection;
-pub mod neon_connection;
+pub mod coinbase_service;
+pub mod influxdb_service;
+pub mod postgres_service;
 
-pub use coinbase_connection::{CoinbaseDataFetcher, OhlcvData};
-pub use influxdb_connection::InfluxDBHandler;
-pub use neon_connection::{DatabaseStats, NeonConfig, NeonConnection, NeonError};
+pub use coinbase_service::{CoinbaseDataFetcher, OhlcvData};
+pub use influxdb_service::InfluxDBHandler;
+pub use postgres_service::{DatabaseStats, NeonConfig, NeonConnection, NeonError};

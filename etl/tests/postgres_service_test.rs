@@ -1,7 +1,7 @@
 use anyhow::Result;
 use dotenv::dotenv;
 use log::info;
-use port_etl::neon_connection::NeonConnection;
+use port_etl::postgres_service::NeonConnection;
 use tokio;
 
 // Regular function that can be called from anywhere
