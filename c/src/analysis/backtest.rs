@@ -1,8 +1,10 @@
 use crate::core::params::{
     PortfolioConstraintParams, PortfolioParams, PositionConstraintParams, SignalParams,
 };
+use crate::data::database_service;
 use crate::trading::portfolio::Portfolio;
 use crate::trading::strategy::Strategy;
+use crate::trading::trade::TradeType;
 use chrono::{DateTime, Utc};
 use port_etl::InfluxDBHandler;
 
@@ -19,13 +21,64 @@ pub async fn backtest(
     position_constraints_params: Vec<PositionConstraintParams>,
     warm_up_period: usize,
     cadence: u64, // in minutes
-) -> Result<Portfolio, Box<dyn std::error::Error>> {
-    let handler = InfluxDBHandler::new()?;
+    debug: bool,
+) -> Result<
+    (
+        Portfolio,
+        std::collections::HashMap<i64, Vec<crate::trading::trade::Trade>>,
+        bool,
+    ),
+    Box<dyn std::error::Error>,
+> {
+    let mut early_exit = false;
 
-    let ticker_refs: Vec<&str> = tickers.iter().map(|s| s.as_str()).collect();
-    let (data, timestamps) = handler
-        .load_ohlcv_data(&ticker_refs, start, end, Some(cadence))
-        .await?;
+    let (data, timestamps) = if debug {
+        // Use InfluxDB for debug mode
+        let handler = InfluxDBHandler::new()?;
+        let ticker_refs: Vec<&str> = tickers.iter().map(|s| s.as_str()).collect();
+        handler
+            .load_ohlcv_data(&ticker_refs, start, end, Some(cadence))
+            .await?
+    } else {
+        // Use database service for production mode
+        let historical_data = database_service::get_historical_data(start, end, tickers.clone())
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+
+        // Convert database service data to the format expected by the backtest
+        let mut converted_data = Vec::new();
+        let mut converted_timestamps = Vec::new();
+
+        // Since frontend ensures all assets have data for the selected date range,
+        // we can use any ticker's length as the reference
+        if let Some(first_ticker_data) = historical_data.values().next() {
+            let data_len = first_ticker_data.len();
+
+            for i in 0..data_len {
+                let mut time_point_data = Vec::new();
+                let mut timestamp = 0i64;
+
+                for ticker in &tickers {
+                    if let Some(ticker_data) = historical_data.get(ticker) {
+                        let ohlcv = &ticker_data[i];
+                        time_point_data.push(vec![
+                            ohlcv.open,
+                            ohlcv.high,
+                            ohlcv.low,
+                            ohlcv.close,
+                            ohlcv.volume,
+                        ]);
+                        timestamp = ohlcv.timestamp;
+                    }
+                }
+
+                converted_data.push(time_point_data);
+                converted_timestamps.push(timestamp);
+            }
+        }
+
+        (converted_data, converted_timestamps)
+    };
 
     let warm_up_price_data: Vec<Vec<Vec<f32>>> = data[..warm_up_period].to_vec();
 
@@ -44,101 +97,124 @@ pub async fn backtest(
     strategy.warm_up_signals(&warm_up_price_data);
 
     let n_assets = tickers.len();
-    let mut close_prices = Vec::with_capacity(n_assets);
-    let mut open_prices = Vec::with_capacity(n_assets);
-    let mut signals_adjusted = Vec::with_capacity(n_assets);
+    let mut prev_close_prices = Vec::with_capacity(n_assets);
+    let mut prev_open_prices = Vec::with_capacity(n_assets);
+    let mut curr_open_prices = Vec::with_capacity(n_assets);
+
+    // Track executed trades by date - key: timestamp, value: executed trades
+    let mut executed_trades_by_date = std::collections::HashMap::new();
 
     let data_len = data.len();
-    let mut exit = false;
 
     println!("Start backtesting...");
     println!("start: {:?}", start);
     println!("end: {:?}", end);
+
     for idx in warm_up_period..data_len {
         let time = timestamps[idx];
-        let mut available_cash = *portfolio.cash_curve.last().unwrap();
+        let mut cash_after_trades = portfolio.get_current_cash();
         let mut total_cost = 0.0;
         let mut total_realized_pnl = 0.0;
 
-        // Fast price extraction using unsafe for bounds check elimination?? what is this?
-        close_prices.clear();
-        open_prices.clear();
+        // Fast price extraction using unsafe for bounds check elimination
+        prev_close_prices.clear();
+        prev_open_prices.clear();
+        curr_open_prices.clear();
 
         unsafe {
             let prev_data = data.get_unchecked(idx - 1);
             for asset_ohlcv in prev_data {
-                close_prices.push(*asset_ohlcv.get_unchecked(3)); // close
-                open_prices.push(*asset_ohlcv.get_unchecked(0)); // open
+                prev_close_prices.push(*asset_ohlcv.get_unchecked(3)); // close
+                prev_open_prices.push(*asset_ohlcv.get_unchecked(0)); // open
+            }
+            let curr_data = data.get_unchecked(idx);
+            for asset_ohlcv in curr_data {
+                curr_open_prices.push(*asset_ohlcv.get_unchecked(0)); // open
             }
         }
 
-        if exit {
-            let mut liquidation_trades = portfolio.trading_history.last().unwrap().clone();
-            portfolio.liquidation(&close_prices, &mut liquidation_trades, time as u64);
-            println!("江南皮革厂倒闭啦！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！");
-            break;
-        }
+        // update position with t-1 close
+        portfolio.pre_order_update(&prev_close_prices);
+        let mut executed_trades = Vec::new();
+        let mut total_executed_trades = Vec::new();
 
-        portfolio.pre_order_update(&data[idx]);
-        let (is_exit, risk_trades) = constraint.pre_order_check(
-            &close_prices,
+        // pre order check: mark portfolio at t-1 close, check take profit, stop loss, max drawdown
+        let (is_exit, mut risk_management_trades, take_profit_trades) = constraint.pre_order_check(
+            &prev_close_prices,
             &portfolio.positions,
-            *portfolio.equity_curve.last().unwrap(),
+            portfolio.peak_equity,
+            portfolio.get_current_cash(),
             time as u64,
         );
 
         if is_exit {
-            exit = true;
-            portfolio.post_order_update(
-                &close_prices,
-                &Vec::new(),
-                &risk_trades,
-                available_cash,
-                total_cost,
-                total_realized_pnl,
-            );
-            continue;
+            portfolio.liquidation(&curr_open_prices, &mut risk_management_trades, time as u64);
+            executed_trades_by_date.insert(time, risk_management_trades);
+            println!("江南皮革厂倒闭啦！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！");
+            early_exit = true;
+            break;
         }
 
-        // generate signal use t-1 close
+        // update signals with t-1 close
         strategy.update_signals(data[idx - 1].clone());
         let signals = strategy.generate_signals();
-        signals_adjusted.clear();
-        signals_adjusted.extend_from_slice(&signals);
-        for trade in &risk_trades {
-            // hold off trading ticker in risk trades
-            if trade.ticker_id < signals_adjusted.len() {
-                signals_adjusted[trade.ticker_id] = 0;
-            }
+
+        // pick out the ticker id of stop loss triggered positions
+        let stop_loss_triggered_pos = risk_management_trades
+            .iter()
+            .filter(|t| t.trade_type == TradeType::StopLoss)
+            .map(|t| t.ticker_id)
+            .collect::<Vec<_>>();
+
+        // first execute pre signal trades, then generate signal based trades using new position size
+        executed_trades.extend(risk_management_trades);
+        executed_trades.extend(take_profit_trades);
+        if executed_trades.len() > 0 {
+            (
+                cash_after_trades,
+                total_cost,
+                total_realized_pnl,
+                total_executed_trades,
+            ) = portfolio.execute_trades(&mut executed_trades, &curr_open_prices, time as u64, &[]);
         }
 
-        // execute t-2 trades using t-1 open at t0 because t-1 is the latest price we can get
-        let trading_history_len = portfolio.trading_history.len();
-        let mut prev_trades = Vec::new();
-        if trading_history_len >= 2 {
-            prev_trades = portfolio.trading_history[trading_history_len - 2].clone();
-            if !prev_trades.is_empty() {
-                (available_cash, total_cost, total_realized_pnl) =
-                    portfolio.execute_trades(&mut prev_trades, &open_prices, time as u64);
-            }
+        // execute previous trades using current t0 open prices (bypassing the backtest logic where t0 is na until t+1)
+        let mut pending_trades = portfolio.pending_trades.clone(); // previous period trades
+
+        if !pending_trades.is_empty() {
+            let (new_cash_after_trades, new_total_cost, new_total_realized_pnl, executed_trades) =
+                portfolio.execute_trades(
+                    &mut pending_trades,
+                    &prev_close_prices,
+                    time as u64,
+                    &stop_loss_triggered_pos,
+                );
+            cash_after_trades = new_cash_after_trades;
+            total_cost += new_total_cost;
+            total_realized_pnl += new_total_realized_pnl;
+            total_executed_trades.extend(executed_trades);
+        }
+        if total_executed_trades.len() > 0 {
+            executed_trades_by_date.insert(time, total_executed_trades);
         }
 
-        portfolio.update_capital(time);
+        // handle cash distribution event, being conservative here, t0 cash is not available for trading
+        let available_cash = cash_after_trades + portfolio.get_new_cash(time);
 
-        let mut trades = constraint.generate_trades(
-            &signals_adjusted,
-            &close_prices,
-            *portfolio.equity_curve.last().unwrap(),
+        // generate signal based trades
+        let signal_based_trades = constraint.generate_trades(
+            &signals,
+            &prev_close_prices,
+            portfolio.get_current_equity(),
             available_cash,
             time as u64,
             &portfolio.positions,
         );
-        trades.extend(risk_trades);
+
+        portfolio.pending_trades = signal_based_trades;
 
         portfolio.post_order_update(
-            &close_prices,
-            &prev_trades,
-            &trades,
+            &prev_close_prices,
             available_cash,
             total_cost,
             total_realized_pnl,
@@ -146,23 +222,38 @@ pub async fn backtest(
     }
 
     println!("Backtesting completed");
-    if exit {
+    if early_exit {
         println!("Early exit due to max drawdown");
     }
 
-    // Slice timestamps from warm_up_period to data_len
-    portfolio.timestamps = timestamps[warm_up_period..data_len].to_vec();
+    // Set the executed trade timestamps
+    portfolio.timestamps = executed_trades_by_date.keys().cloned().collect();
+    portfolio.timestamps.sort(); // Ensure timestamps are in chronological order
 
-    Ok(portfolio)
+    println!("Total trade executions: {}", executed_trades_by_date.len());
+    println!("Total time periods: {}", data_len - warm_up_period);
+    println!(
+        "Trade execution rate: {:.2}%",
+        (executed_trades_by_date.len() as f64 / (data_len - warm_up_period) as f64) * 100.0
+    );
+
+    Ok((portfolio, executed_trades_by_date, early_exit))
 }
 
 #[inline(always)]
-pub fn backtest_result(portfolio: &Portfolio) {
+pub fn backtest_result(
+    portfolio: &Portfolio,
+    executed_trades_by_date: &std::collections::HashMap<i64, Vec<crate::trading::trade::Trade>>,
+    exited_early: bool,
+) {
     println!("=== BACKTEST RESULTS ===\n");
-
+    if exited_early {
+        println!("Early exit due to max drawdown");
+    }
     println!("📊 Portfolio: {}", portfolio.name);
     let equity_len = portfolio.equity_curve.len();
     println!("📈 Total Records: {}", equity_len);
+    println!("📅 Trade Events: {}", portfolio.timestamps.len());
 
     if equity_len == 0 {
         println!("❌ No data to display");
@@ -187,7 +278,108 @@ pub fn backtest_result(portfolio: &Portfolio) {
     println!("  Total Return:  {:.2}%", total_return);
     println!("  Max Value:     ${:.2}", max_equity);
     println!("  Min Value:     ${:.2}", min_equity);
-    println!("  Peak Notional: ${:.2}", portfolio.peak_notional);
+    println!("  Peak Equity: ${:.2}", portfolio.peak_equity);
+
+    // Show trade timing information
+    if !portfolio.timestamps.is_empty() {
+        let first_trade_time = portfolio.timestamps[0];
+        let last_trade_time = portfolio.timestamps[portfolio.timestamps.len() - 1];
+
+        println!("\n📊 TRADING ACTIVITY:");
+        println!(
+            "  First Trade: {}",
+            chrono::DateTime::from_timestamp(first_trade_time, 0)
+                .unwrap_or_default()
+                .format("%Y-%m-%d %H:%M:%S")
+        );
+        println!(
+            "  Last Trade:  {}",
+            chrono::DateTime::from_timestamp(last_trade_time, 0)
+                .unwrap_or_default()
+                .format("%Y-%m-%d %H:%M:%S")
+        );
+        println!("  Total Trade Events: {}", portfolio.timestamps.len());
+
+        // Calculate average time between trades
+        if portfolio.timestamps.len() > 1 {
+            let total_duration = last_trade_time - first_trade_time;
+            let avg_time_between_trades =
+                total_duration as f64 / (portfolio.timestamps.len() - 1) as f64;
+            println!(
+                "  Avg Time Between Trades: {:.1} seconds",
+                avg_time_between_trades
+            );
+        }
+    }
+
+    // Show detailed trade information
+    if !executed_trades_by_date.is_empty() {
+        println!("\n📋 DETAILED TRADE HISTORY:");
+
+        let mut sorted_dates: Vec<_> = executed_trades_by_date.keys().collect();
+        sorted_dates.sort();
+
+        for &timestamp in sorted_dates {
+            let trades = &executed_trades_by_date[&timestamp];
+            let date_str = chrono::DateTime::from_timestamp(timestamp, 0)
+                .unwrap_or_default()
+                .format("%Y-%m-%d %H:%M:%S");
+
+            println!("\n  📅 {}", date_str);
+            println!("     {} trades executed:", trades.len());
+
+            for (i, trade) in trades.iter().enumerate() {
+                let action = format!("{:?}", trade.trade_type);
+                println!(
+                    "       {}. {} | Ticker ID: {} | Quantity: {:.2} | Price: ${:.4} | Cost: ${:.2} | Realized PNL: ${:.2}",
+                    i + 1,
+                    action,
+                    trade.ticker_id,
+                    trade.quantity,
+                    trade.price,
+                    trade.cost,
+                    trade.realized_pnl,
+                );
+                if let Some(comment) = &trade.trade_comment {
+                    println!("          Comment: {}", comment);
+                }
+            }
+
+            // Calculate total value traded on this day
+            let total_value: f32 = trades.iter().map(|t| t.quantity * t.price).sum();
+            let total_cost: f32 = trades.iter().map(|t| t.cost).sum();
+
+            println!(
+                "       📊 Day Total: ${:.2} traded, ${:.2} in costs",
+                total_value, total_cost
+            );
+        }
+
+        // Overall trade statistics
+        let total_trades: usize = executed_trades_by_date
+            .values()
+            .map(|trades| trades.len())
+            .sum();
+        let total_volume: f32 = executed_trades_by_date
+            .values()
+            .flatten()
+            .map(|t| t.quantity * t.price)
+            .sum();
+        let total_costs: f32 = executed_trades_by_date
+            .values()
+            .flatten()
+            .map(|t| t.cost)
+            .sum();
+
+        println!("\n📈 TRADE STATISTICS:");
+        println!("  Total Trades: {}", total_trades);
+        println!("  Total Volume: ${:.2}", total_volume);
+        println!("  Total Costs: ${:.2}", total_costs);
+        println!(
+            "  Avg Trades per Day: {:.1}",
+            total_trades as f64 / executed_trades_by_date.len() as f64
+        );
+    }
 
     println!("\n=== END BACKTEST RESULTS ===");
 }

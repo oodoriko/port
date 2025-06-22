@@ -25,6 +25,7 @@ pub struct Position {
     pub realized_pnl: f32,
     pub last_exit_price: f32,
     pub last_exit_timestamp: u64,
+    pub last_exit_pnl: f32,
 
     pub constraint: Option<PositionConstraintParams>,
 }
@@ -66,6 +67,7 @@ impl Position {
             realized_pnl: 0.0,
             last_exit_price: 0.0,
             last_exit_timestamp: 0,
+            last_exit_pnl: 0.0,
             constraint,
         }
     }
@@ -94,7 +96,7 @@ impl Position {
     #[inline(always)]
     pub fn post_order_update(&mut self, price: f32) -> (f32, f32) {
         self.notional = self.quantity * price;
-        self.unrealized_pnl = (price - self.avg_entry_price) * self.quantity;
+        self.unrealized_pnl += (price - self.avg_entry_price) * self.quantity;
         (self.notional, self.unrealized_pnl)
     }
 
@@ -104,6 +106,7 @@ impl Position {
         let new_quantity = old_quantity + quantity;
 
         self.quantity = new_quantity;
+
         self.avg_entry_price =
             (self.avg_entry_price * old_quantity + price * quantity) / new_quantity;
         self.last_entry_timestamp = timestamp;
@@ -121,28 +124,20 @@ impl Position {
         quantity: f32,
         timestamp: u64,
         cost: f32,
-    ) -> (f32, f32) {
-        let actual_quantity = if quantity > self.quantity {
-            self.quantity
-        } else if quantity < 0.0 {
-            0.0
-        } else {
-            quantity
-        };
-
-        let pnl = (price - self.avg_entry_price) * actual_quantity;
-        let sell_proceeds = price * actual_quantity;
+    ) -> f32 {
+        let pnl = (price - self.avg_entry_price) * quantity;
+        let sell_proceeds = price * quantity;
 
         self.cum_sell_proceeds += sell_proceeds;
         self.cum_sell_cost += cost;
-        self.realized_pnl = pnl;
+        self.realized_pnl += (price - self.avg_entry_price) * quantity;
         self.last_exit_price = price;
         self.last_exit_timestamp = timestamp;
-        self.quantity -= actual_quantity;
-
+        self.quantity = (self.quantity - quantity).max(0.0);
+        self.last_exit_pnl = pnl;
         self.notional = self.quantity * price;
 
-        (pnl, actual_quantity)
+        pnl
     }
 
     #[inline(always)]

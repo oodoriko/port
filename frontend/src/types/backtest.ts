@@ -167,6 +167,7 @@ export interface PositionConstraintParams {
   take_profit_pct: number;
   risk_per_trade_pct: number;
   sell_fraction: number;
+  cool_down_period: number;
 }
 
 export interface BacktestParams {
@@ -223,8 +224,8 @@ export const defaultBacktestParams: BacktestParams = {
   },
   portfolio_constraints_params: {
     rebalance_threshold_pct: 5, // 5% default
-    min_cash_pct: 0.1, // 10% as decimal (0.1)
-    max_drawdown_pct: 0.2, // 20% as decimal (0.2)
+    min_cash_pct: 10, // 10% default (was 0.1)
+    max_drawdown_pct: 20, // 20% default (was 0.2)
   },
   position_constraints_params: [], // Keep empty - comes from asset configuration
   warm_up_period: 50, // Reasonable default for indicator warm-up

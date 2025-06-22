@@ -1,14 +1,25 @@
 use axum::{
-    extract::Json, http::StatusCode, response::Json as ResponseJson, routing::post, Router,
+    extract::Json,
+    http::StatusCode,
+    response::Json as ResponseJson,
+    routing::{get, post, Router},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tower_http::cors::CorsLayer;
 
 use crate::analysis::backtest::{backtest, backtest_result};
 use crate::core::params::{
     PortfolioConstraintParams, PortfolioParams, PositionConstraintParams, SignalParams,
 };
+use crate::data::database_service;
+
+// App state to hold database connection
+#[derive(Clone)]
+pub struct AppState {
+    // Database connection is handled directly in the service functions
+}
 
 // Request structure that matches the frontend expectations
 #[derive(Debug, Serialize, Deserialize)]
@@ -37,7 +48,7 @@ pub struct BacktestResponse {
     pub total_return: f32,
     pub max_value: f32,
     pub min_value: f32,
-    pub peak_notional: f32,
+    pub peak_equity: f32,
     pub equity_curve: Vec<f32>,
     pub cash_curve: Vec<f32>,
     pub notional_curve: Vec<f32>,
@@ -53,6 +64,52 @@ pub struct BacktestResponse {
 pub struct ErrorResponse {
     pub error: String,
     pub message: String,
+}
+
+// Data API response structures
+#[derive(Debug, Serialize)]
+pub struct TradingPairsResponse {
+    pub pairs: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DateRangesResponse {
+    pub date_ranges: HashMap<String, (i64, i64)>,
+}
+
+// Data API handlers
+pub async fn get_trading_pairs_handler(
+) -> Result<ResponseJson<TradingPairsResponse>, (StatusCode, ResponseJson<ErrorResponse>)> {
+    let pairs = database_service::list_available_historical()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ResponseJson(ErrorResponse {
+                    error: "Failed to get trading pairs".to_string(),
+                    message: e.to_string(),
+                }),
+            )
+        })?;
+
+    Ok(ResponseJson(TradingPairsResponse { pairs }))
+}
+
+pub async fn get_date_ranges_handler(
+) -> Result<ResponseJson<DateRangesResponse>, (StatusCode, ResponseJson<ErrorResponse>)> {
+    let date_ranges = database_service::get_historicals_date_range()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ResponseJson(ErrorResponse {
+                    error: "Failed to get date ranges".to_string(),
+                    message: e.to_string(),
+                }),
+            )
+        })?;
+
+    Ok(ResponseJson(DateRangesResponse { date_ranges }))
 }
 
 // Handler for the backtest endpoint
@@ -85,7 +142,7 @@ pub async fn backtest_handler(
         .with_timezone(&Utc);
 
     // Run the backtest
-    let portfolio = backtest(
+    let (portfolio, executed_trades_by_date, exited_early) = backtest(
         request.strategy_name,
         request.portfolio_name,
         start_date,
@@ -97,6 +154,7 @@ pub async fn backtest_handler(
         request.position_constraints_params,
         request.warm_up_period,
         request.cadence,
+        false,
     )
     .await
     .map_err(|e| {
@@ -108,7 +166,7 @@ pub async fn backtest_handler(
             }),
         )
     })?;
-    backtest_result(&portfolio);
+    backtest_result(&portfolio, &executed_trades_by_date, exited_early);
 
     // Convert Portfolio to BacktestResponse
     let initial_value = portfolio.equity_curve.first().copied().unwrap_or(0.0);
@@ -138,7 +196,7 @@ pub async fn backtest_handler(
         total_return,
         max_value,
         min_value,
-        peak_notional: portfolio.peak_notional,
+        peak_equity: portfolio.peak_equity,
         equity_curve: portfolio.equity_curve,
         cash_curve: portfolio.cash_curve,
         notional_curve: portfolio.notional_curve,
@@ -156,6 +214,8 @@ pub async fn backtest_handler(
 pub fn create_router() -> Router {
     Router::new()
         .route("/api/backtest", post(backtest_handler))
+        .route("/api/trading-pairs", get(get_trading_pairs_handler))
+        .route("/api/date-ranges", get(get_date_ranges_handler))
         .layer(CorsLayer::permissive())
 }
 

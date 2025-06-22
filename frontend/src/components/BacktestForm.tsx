@@ -19,7 +19,8 @@ import { useForm } from "@mantine/form";
 import { useDisclosure } from "@mantine/hooks";
 import { IconInfoCircle, IconPlus, IconTrash } from "@tabler/icons-react";
 import { DateTime } from "luxon";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { fetchDateRanges, fetchTradingPairs } from "../api/data";
 import { MANTINE_THEME_A_COLORS } from "../theme/theme_a";
 import type { BacktestParams, SignalParams } from "../types/backtest";
 import { defaultBacktestParams } from "../types/backtest";
@@ -34,6 +35,7 @@ interface AssetConfig {
   take_profit_pct?: number;
   risk_per_trade_pct?: number;
   sell_fraction?: number;
+  cool_down_period?: number;
   strategies?: SignalParams[];
 }
 
@@ -56,6 +58,18 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
   const [assets, setAssets] = useState<AssetConfig[]>([]);
   const [editingAsset, setEditingAsset] = useState<AssetConfig | null>(null);
   const [viewingAsset, setViewingAsset] = useState<AssetConfig | null>(null);
+
+  // New state for API data
+  const [tradingPairs, setTradingPairs] = useState<string[]>([]);
+  const [dateRanges, setDateRanges] = useState<
+    Record<string, [number, number]>
+  >({});
+  const [earliestDate, setEarliestDate] = useState<Date | null>(null);
+  const [latestDate, setLatestDate] = useState<Date | null>(null);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+
+  // Ref to track the last calculated date range to prevent infinite loops
+  const lastDateRangeRef = useRef<{ start: string; end: string } | null>(null);
 
   const form = useForm<BacktestParams>({
     initialValues: defaultBacktestParams,
@@ -82,16 +96,123 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
         rebalance_threshold_pct: (value) =>
           value < 0 ? "Rebalance threshold cannot be negative" : null,
         min_cash_pct: (value) =>
-          value < 0 || value > 1
-            ? "Min cash percentage must be between 0 and 1"
+          value < 0 || value > 100
+            ? "Min cash percentage must be between 0 and 100"
             : null,
         max_drawdown_pct: (value) =>
-          value < 0 || value > 1
-            ? "Max drawdown percentage must be between 0 and 1"
+          value < 0 || value > 100
+            ? "Max drawdown percentage must be between 0 and 100"
             : null,
       },
     },
   });
+
+  // Fetch data on component mount
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setIsLoadingData(true);
+        const [pairs, ranges] = await Promise.all([
+          fetchTradingPairs(),
+          fetchDateRanges(),
+        ]);
+
+        setTradingPairs(pairs);
+        setDateRanges(ranges);
+
+        // Calculate earliest and latest dates from all ranges
+        const allStartDates: number[] = [];
+        const allEndDates: number[] = [];
+
+        Object.values(ranges).forEach(([start, end]) => {
+          allStartDates.push(start);
+          allEndDates.push(end);
+        });
+
+        if (allStartDates.length > 0 && allEndDates.length > 0) {
+          const earliestTimestamp = Math.min(...allStartDates);
+          const latestTimestamp = Math.max(...allEndDates);
+
+          const earliest = new Date(earliestTimestamp * 1000);
+          const latest = new Date(latestTimestamp * 1000);
+
+          setEarliestDate(earliest);
+          setLatestDate(latest);
+
+          // Set default dates in the form
+          form.setFieldValue("start", earliest.toISOString().split("T")[0]);
+          form.setFieldValue("end", latest.toISOString().split("T")[0]);
+        }
+      } catch (error) {
+        console.error("Failed to fetch trading data:", error);
+      } finally {
+        setIsLoadingData(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  // Update form values when valid date range changes due to asset selection
+  useEffect(() => {
+    // Only update if data is loaded and not currently loading
+    if (isLoadingData || Object.keys(dateRanges).length === 0) {
+      return;
+    }
+
+    const { validMinDate, validMaxDate } = calculateValidDateRange();
+
+    if (validMinDate && validMaxDate) {
+      const newStartDate = validMinDate.toISOString().split("T")[0];
+      const newEndDate = validMaxDate.toISOString().split("T")[0];
+
+      // Check if this is actually a different date range than what we last set
+      const lastRange = lastDateRangeRef.current;
+      if (
+        !lastRange ||
+        lastRange.start !== newStartDate ||
+        lastRange.end !== newEndDate
+      ) {
+        form.setFieldValue("start", newStartDate);
+        form.setFieldValue("end", newEndDate);
+
+        // Update the ref to track what we just set
+        lastDateRangeRef.current = { start: newStartDate, end: newEndDate };
+      }
+    }
+  }, [
+    assets.length,
+    JSON.stringify(assets.map((a) => a.ticker)),
+    isLoadingData,
+  ]);
+
+  const calculateValidDateRange = () => {
+    if (assets.length === 0) {
+      return { validMinDate: earliestDate, validMaxDate: latestDate };
+    }
+
+    let latestStartDate = 0; // Latest start date among selected assets
+    let earliestEndDate = Number.MAX_SAFE_INTEGER; // Earliest end date among selected assets
+
+    for (const asset of assets) {
+      const range = dateRanges[asset.ticker];
+      if (range) {
+        const [startTs, endTs] = range;
+        latestStartDate = Math.max(latestStartDate, startTs);
+        earliestEndDate = Math.min(earliestEndDate, endTs);
+      }
+    }
+
+    // Use the latest start date directly (backend already adds buffer)
+    const validMinDate =
+      latestStartDate > 0 ? new Date(latestStartDate * 1000) : earliestDate;
+    const validMaxDate =
+      earliestEndDate < Number.MAX_SAFE_INTEGER
+        ? new Date(earliestEndDate * 1000)
+        : latestDate;
+
+    return { validMinDate, validMaxDate };
+  };
 
   const assetForm = useForm<AssetConfig>({
     initialValues: {
@@ -99,6 +220,7 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
       max_position_size_pct: 25,
       min_trade_size_pct: 1,
       min_holding_candle: 5,
+      cool_down_period: 5,
       trailing_stop_loss_pct: 5,
       trailing_stop_update_threshold_pct: 1,
       take_profit_pct: 10,
@@ -133,15 +255,23 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
       tickers: assets.map((asset) => asset.ticker),
       // Use only asset-specific strategies, not the default form strategies
       strategies: assets.map((asset) => asset.strategies || []),
+      portfolio_params: {
+        ...values.portfolio_params,
+        capital_growth_pct: values.portfolio_params.capital_growth_pct / 100,
+      },
       portfolio_constraints_params: {
         ...values.portfolio_constraints_params,
         rebalance_threshold_pct:
           values.portfolio_constraints_params.rebalance_threshold_pct / 100,
+        min_cash_pct: values.portfolio_constraints_params.min_cash_pct / 100,
+        max_drawdown_pct:
+          values.portfolio_constraints_params.max_drawdown_pct / 100,
       },
       position_constraints_params: assets.map((asset) => ({
         max_position_size_pct: (asset.max_position_size_pct || 0) / 100,
         min_trade_size_pct: (asset.min_trade_size_pct || 0) / 100,
         min_holding_candle: asset.min_holding_candle || 0,
+        cool_down_period: asset.cool_down_period || 0,
         trailing_stop_loss_pct: (asset.trailing_stop_loss_pct || 0) / 100,
         trailing_stop_update_threshold_pct:
           (asset.trailing_stop_update_threshold_pct || 0) / 100,
@@ -170,6 +300,13 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
       backtest_id: crypto.randomUUID(), // Generate new UUID
     };
     form.setValues(newDefaults);
+
+    // Set dates to earliest and latest if available
+    if (earliestDate && latestDate) {
+      form.setFieldValue("start", earliestDate.toISOString().split("T")[0]);
+      form.setFieldValue("end", latestDate.toISOString().split("T")[0]);
+    }
+
     // Also reset the assets state
     setAssets([]);
   };
@@ -212,11 +349,11 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
     openDetails();
   };
 
-  const allAssets = [
-    { value: "BTC-USD", label: "Bitcoin (BTC-USD)" },
-    { value: "ETH-USD", label: "Ethereum (ETH-USD)" },
-    { value: "SOL-USD", label: "Solana (SOL-USD)" },
-  ];
+  // Create asset options from trading pairs
+  const allAssets = tradingPairs.map((pair) => ({
+    value: pair,
+    label: pair,
+  }));
 
   // Filter out already selected assets, but include the currently editing asset
   const availableAssets = allAssets.filter((asset) => {
@@ -848,6 +985,8 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
     assetForm.setFieldValue("strategies", updatedStrategies);
   };
 
+  const { validMinDate, validMaxDate } = calculateValidDateRange();
+
   return (
     <>
       <form onSubmit={form.onSubmit(handleSubmit)}>
@@ -920,20 +1059,24 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
                     <Table.Tr>
                       <Table.Th>Asset</Table.Th>
                       <Table.Th>Strategies</Table.Th>
-                      <Table.Th>Actions</Table.Th>
+                      <Table.Th style={{ textAlign: "right" }}>
+                        Actions
+                      </Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
                     {assets.map((asset) => (
                       <Table.Tr key={asset.ticker}>
                         <Table.Td>
-                          <Text>{asset.ticker}</Text>
+                          <Text size="sm">{asset.ticker}</Text>
                         </Table.Td>
                         <Table.Td>
-                          <Text>{(asset.strategies || []).length}</Text>
+                          <Text size="sm">
+                            {(asset.strategies || []).length}
+                          </Text>
                         </Table.Td>
                         <Table.Td>
-                          <Group gap="xs">
+                          <Group gap="xs" justify="flex-end">
                             <Button
                               size="xs"
                               variant="light"
@@ -981,6 +1124,42 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
               Backtest will run from 7:00 AM of the start date to 11:59 PM of
               the end date
             </Text>
+
+            {/* Show trading pair date ranges */}
+            {assets.length > 0 && (
+              <Stack gap="xs" mb="md">
+                <Text size="xs" fw={700} c="dimmed">
+                  Data Availability:
+                </Text>
+                {assets.map((asset) => {
+                  const range = dateRanges[asset.ticker];
+                  if (range) {
+                    const startDate = new Date(range[0] * 1000)
+                      .toISOString()
+                      .slice(0, 10)
+                      .replace(/-/g, "-");
+                    const endDate = new Date(range[1] * 1000)
+                      .toISOString()
+                      .slice(0, 10)
+                      .replace(/-/g, "-");
+                    return (
+                      <Text key={asset.ticker} size="xs" c="dimmed">
+                        {asset.ticker}: {startDate} | {endDate}
+                      </Text>
+                    );
+                  }
+                  return null;
+                })}
+
+                {/* Show valid date range */}
+                {validMinDate && validMaxDate && (
+                  <Text size="xs" fw={700} c="blue">
+                    Valid Range: {validMinDate.toISOString().slice(0, 10)} |{" "}
+                    {validMaxDate.toISOString().slice(0, 10)}
+                  </Text>
+                )}
+              </Stack>
+            )}
             <Grid>
               <Grid.Col span={6}>
                 <DatePickerInput
@@ -989,6 +1168,8 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
                   required
                   clearable
                   valueFormat="YYYY-MM-DD"
+                  minDate={validMinDate || undefined}
+                  maxDate={validMaxDate || undefined}
                   {...form.getInputProps("start")}
                 />
               </Grid.Col>
@@ -999,6 +1180,8 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
                   required
                   clearable
                   valueFormat="YYYY-MM-DD"
+                  minDate={validMinDate || undefined}
+                  maxDate={validMaxDate || undefined}
                   {...form.getInputProps("end")}
                 />
               </Grid.Col>
@@ -1173,7 +1356,13 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
             >
               Restore to Default
             </Button>
-            <Button type="submit" loading={loading} size="md" color="yellow">
+            <Button
+              type="submit"
+              loading={loading}
+              size="md"
+              color="yellow"
+              disabled={assets.length === 0}
+            >
               Run Backtest
             </Button>
           </Group>
@@ -1247,6 +1436,27 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
                     error={assetForm.errors.min_trade_size_pct}
                   />
                 </Grid.Col>
+                <Grid.Col span={12}>
+                  <NumberInput
+                    label="Risk Per Trade (%)"
+                    description="Max risk per trade (% of portfolio equity)"
+                    placeholder="Risk per trade"
+                    min={0}
+                    max={100}
+                    step={0.01}
+                    suffix="%"
+                    value={assetForm.values.risk_per_trade_pct}
+                    onChange={(value) =>
+                      assetForm.setFieldValue(
+                        "risk_per_trade_pct",
+                        typeof value === "string"
+                          ? parseFloat(value) || 0
+                          : value || 0
+                      )
+                    }
+                    error={assetForm.errors.risk_per_trade_pct}
+                  />
+                </Grid.Col>
                 <Grid.Col span={6}>
                   <NumberInput
                     label="Min Holding Period"
@@ -1267,23 +1477,20 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
                 </Grid.Col>
                 <Grid.Col span={6}>
                   <NumberInput
-                    label="Risk Per Trade (%)"
-                    description="Max risk per trade (% of portfolio equity)"
-                    placeholder="Risk per trade"
+                    label="Cool Down Period"
+                    description="min period after a negative exit"
+                    placeholder="Cool down period"
                     min={0}
-                    max={100}
-                    step={0.01}
-                    suffix="%"
-                    value={assetForm.values.risk_per_trade_pct}
+                    value={assetForm.values.cool_down_period}
                     onChange={(value) =>
                       assetForm.setFieldValue(
-                        "risk_per_trade_pct",
+                        "cool_down_period",
                         typeof value === "string"
                           ? parseFloat(value) || 0
                           : value || 0
                       )
                     }
-                    error={assetForm.errors.risk_per_trade_pct}
+                    error={assetForm.errors.cool_down_period}
                   />
                 </Grid.Col>
               </Grid>
@@ -1342,7 +1549,7 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
                 <Grid.Col span={4}>
                   <NumberInput
                     label="Take Profit (%)"
-                    description="not implemented"
+                    description="% above avg. entry price"
                     placeholder="Take profit percentage"
                     min={0}
                     step={0.01}
@@ -1419,7 +1626,9 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
                     <Table.Thead>
                       <Table.Tr>
                         <Table.Th>Strategy Name</Table.Th>
-                        <Table.Th>Actions</Table.Th>
+                        <Table.Th style={{ textAlign: "right" }}>
+                          Actions
+                        </Table.Th>
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
@@ -1429,17 +1638,19 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
                           return (
                             <Table.Tr key={index}>
                               <Table.Td>
-                                <Text>{strategyType}</Text>
+                                <Text size="sm">{strategyType}</Text>
                               </Table.Td>
                               <Table.Td>
-                                <ActionIcon
-                                  size="sm"
-                                  color="red"
-                                  variant="light"
-                                  onClick={() => handleRemoveStrategy(index)}
-                                >
-                                  <IconTrash size={14} />
-                                </ActionIcon>
+                                <Group justify="flex-end">
+                                  <ActionIcon
+                                    size="sm"
+                                    color="red"
+                                    variant="light"
+                                    onClick={() => handleRemoveStrategy(index)}
+                                  >
+                                    <IconTrash size={14} />
+                                  </ActionIcon>
+                                </Group>
                               </Table.Td>
                             </Table.Tr>
                           );
@@ -1625,6 +1836,14 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
                   </Table.Td>
                   <Table.Td>
                     <Text>{viewingAsset.min_holding_candle || 0}</Text>
+                  </Table.Td>
+                </Table.Tr>
+                <Table.Tr>
+                  <Table.Td>
+                    <Text fw={500}>Cool Down Period</Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text>{viewingAsset.cool_down_period || 0}</Text>
                   </Table.Td>
                 </Table.Tr>
                 <Table.Tr>

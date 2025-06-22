@@ -132,6 +132,7 @@ pub struct PositionConstraintParams {
     pub take_profit_pct: f32,
     pub risk_per_trade_pct: f32,
     pub sell_fraction: f32,
+    pub cool_down_period: u64,
 }
 
 impl Default for PositionConstraintParams {
@@ -145,6 +146,7 @@ impl Default for PositionConstraintParams {
             take_profit_pct: 0.2,
             risk_per_trade_pct: 0.05,
             sell_fraction: 0.5,
+            cool_down_period: 0,
         }
     }
 }

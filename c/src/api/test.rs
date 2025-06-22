@@ -240,6 +240,7 @@ fn create_sample_backtest_request() -> BacktestRequest {
                 take_profit_pct: 0.10,        // 10% as decimal
                 risk_per_trade_pct: 0.02,     // 2% as decimal
                 sell_fraction: 0.5,
+                cool_down_period: 0,
             },
             // ETH constraints
             PositionConstraintParams {
@@ -251,6 +252,7 @@ fn create_sample_backtest_request() -> BacktestRequest {
                 take_profit_pct: 0.10,
                 risk_per_trade_pct: 0.02,
                 sell_fraction: 0.5,
+                cool_down_period: 0,
             },
         ],
         warm_up_period: 10, // Matches frontend default
@@ -267,7 +269,7 @@ fn verify_backtest_response(response: &BacktestResponse) {
     println!("  Total Return: {:.2}%", response.total_return);
     println!("  Max Value: ${:.2}", response.max_value);
     println!("  Min Value: ${:.2}", response.min_value);
-    println!("  Peak Notional: ${:.2}", response.peak_notional);
+    println!("  Peak Equity: ${:.2}", response.peak_equity);
     println!("  Total Records: {}", response.total_records);
 
     // Verify response structure
@@ -349,7 +351,8 @@ fn test_frontend_json_compatibility() {
                 "trailing_stop_update_threshold_pct": 0.01,
                 "take_profit_pct": 0.10,
                 "risk_per_trade_pct": 0.02,
-                "sell_fraction": 0.5
+                "sell_fraction": 0.5,
+                "cool_down_period": 5
             },
             {
                 "max_position_size_pct": 0.25,
@@ -359,7 +362,8 @@ fn test_frontend_json_compatibility() {
                 "trailing_stop_update_threshold_pct": 0.01,
                 "take_profit_pct": 0.10,
                 "risk_per_trade_pct": 0.02,
-                "sell_fraction": 0.5
+                "sell_fraction": 0.5,
+                "cool_down_period": 5
             }
         ],
         "warm_up_period": 10,

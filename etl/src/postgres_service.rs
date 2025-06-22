@@ -85,6 +85,15 @@ impl NeonConfig {
         Self::from_url(&database_url)
     }
 
+    /// Load read-only configuration from environment variables
+    pub fn from_env_read_only() -> Result<Self, NeonError> {
+        let database_url = env::var("NEON_READ_ONLY").map_err(|_| {
+            NeonError::ConfigError("NEON_READ_ONLY environment variable not found".to_string())
+        })?;
+
+        Self::from_url(&database_url)
+    }
+
     /// Parse configuration from connection URL
     pub fn from_url(url: &str) -> Result<Self, NeonError> {
         let parsed = url::Url::parse(url)
@@ -133,6 +142,18 @@ impl NeonConnection {
             .or_else(|_| dotenv::from_filename("./.env"));
 
         let config = NeonConfig::from_env()?;
+        Self::with_config(config).await
+    }
+
+    /// Create a new read-only connection manager with configuration from NEON_READ_ONLY env var
+    pub async fn new_read_only() -> Result<Self, NeonError> {
+        // Load environment variables from .env file if present
+        let _ = dotenv::dotenv()
+            .or_else(|_| dotenv::from_filename("../etl/.env"))
+            .or_else(|_| dotenv::from_filename("etl/.env"))
+            .or_else(|_| dotenv::from_filename("./.env"));
+
+        let config = NeonConfig::from_env_read_only()?;
         Self::with_config(config).await
     }
 

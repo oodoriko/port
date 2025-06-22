@@ -1,7 +1,10 @@
-use crate::core::params::{PortfolioConstraintParams, PortfolioParams, PositionConstraintParams};
+use crate::core::params::{
+    Frequency, PortfolioConstraintParams, PortfolioParams, PositionConstraintParams,
+};
 use crate::trading::position::Position;
 use crate::trading::trade::{Trade, TradeStatus};
-use crate::utils::utils::is_end_of_period;
+use crate::utils::utils::{is_end_of_period, timestamp_to_datetime};
+use chrono::Datelike;
 
 #[derive(Debug)]
 pub struct Portfolio {
@@ -18,10 +21,11 @@ pub struct Portfolio {
     pub portfolio_params: PortfolioParams,
     pub portfolio_constraints: PortfolioConstraintParams,
     pub position_constraints: Vec<PositionConstraintParams>,
-    pub trading_history: Vec<Vec<Trade>>,
-    pub peak_notional: f32,
+    pub pending_trades: Vec<Trade>,
+    pub peak_equity: f32,
     pub num_assets: usize,
     commission_rate: f32,
+    last_cash_distribution_period: Option<i64>, // Track the period when last cash distribution occurred
 }
 
 impl Portfolio {
@@ -34,8 +38,7 @@ impl Portfolio {
     ) -> Self {
         let initial_cash = portfolio_params.initial_cash;
 
-        let mut trading_history = Vec::with_capacity(1000);
-        trading_history.extend(vec![Vec::new(); 3]);
+        let pending_trades = Vec::new();
 
         Self {
             name,
@@ -51,21 +54,20 @@ impl Portfolio {
             realized_pnl_curve: vec![0.0],
             unrealized_pnl_curve: vec![0.0],
             timestamps: Vec::new(),
-            trading_history,
-            peak_notional: initial_cash,
+            pending_trades,
+            peak_equity: initial_cash,
             num_assets,
             commission_rate: 0.001,
+            last_cash_distribution_period: None,
         }
     }
 
     #[inline(always)]
-    pub fn pre_order_update(&mut self, prices: &[Vec<f32>]) {
-        for idx in 0..self.num_assets.min(prices.len()) {
+    pub fn pre_order_update(&mut self, close_prices: &[f32]) {
+        for idx in 0..self.num_assets.min(close_prices.len()) {
             if let Some(pos) = &mut self.positions[idx] {
-                let close_price = unsafe {
-                    prices.get_unchecked(idx).get_unchecked(3) // Close price is index 3
-                };
-                pos.pre_order_update(*close_price);
+                let close_price = unsafe { *close_prices.get_unchecked(idx) };
+                pos.pre_order_update(close_price);
             }
         }
     }
@@ -74,24 +76,10 @@ impl Portfolio {
     pub fn post_order_update(
         &mut self,
         prices: &[f32],
-        executed_trades: &[Trade],
-        next_trades: &[Trade],
         available_cash: f32,
         total_cost: f32,
         total_realized_pnl: f32,
     ) {
-        let len = self.trading_history.len();
-
-        if len >= 2 {
-            let second_to_last = &mut self.trading_history[len - 2];
-            second_to_last.clear();
-            second_to_last.extend_from_slice(executed_trades);
-        }
-
-        let mut next_trades_vec = Vec::with_capacity(next_trades.len());
-        next_trades_vec.extend_from_slice(next_trades);
-        self.trading_history.push(next_trades_vec);
-
         self.cash_curve.push(available_cash);
         self.cost_curve.push(total_cost);
         self.realized_pnl_curve.push(total_realized_pnl);
@@ -118,11 +106,10 @@ impl Portfolio {
 
         let last_cash = available_cash;
         let total_equity = total_notional + last_cash;
-
         self.equity_curve.push(total_equity);
         self.notional_curve.push(total_notional);
         self.unrealized_pnl_curve.push(total_unrealized_pnl);
-        self.peak_notional = self.peak_notional.max(total_notional);
+        self.peak_equity = self.peak_equity.max(total_equity);
     }
 
     #[inline(always)]
@@ -131,16 +118,19 @@ impl Portfolio {
         trades: &mut [Trade],
         prices: &[f32],
         timestamp: u64,
-    ) -> (f32, f32, f32) {
+        no_trades_asset_ids: &[usize],
+    ) -> (f32, f32, f32, Vec<Trade>) {
         let mut available_cash = *self.cash_curve.last().unwrap_or(&0.0);
         let min_cash_pct = self.portfolio_constraints.min_cash_pct;
         available_cash = available_cash * (1.0 - min_cash_pct);
         let mut total_cost = 0.0;
         let mut total_realized_pnl = 0.0;
-
+        let mut executed_trades = Vec::new();
         for trade in trades.iter_mut() {
             let ticker_id = trade.ticker_id;
-
+            if no_trades_asset_ids.contains(&ticker_id) {
+                continue;
+            }
             if ticker_id >= self.num_assets || ticker_id >= prices.len() {
                 trade.update_trade_status(TradeStatus::Failed);
                 trade.set_comment("Invalid ticker ID".to_string());
@@ -153,8 +143,12 @@ impl Portfolio {
             match &mut self.positions[ticker_id] {
                 Some(position) => {
                     if trade.is_buy() {
-                        let max_quantity = (available_cash - initial_cost).max(0.0) / price;
-                        trade.quantity = max_quantity;
+                        let requested_quantity = trade.quantity;
+                        let max_affordable_quantity =
+                            (available_cash - initial_cost).max(0.0) / price;
+
+                        trade.quantity =
+                            (requested_quantity.min(max_affordable_quantity) * 1e6).round() / 1e6;
                         let actual_cost = trade.quantity * price * self.commission_rate;
 
                         if trade.quantity > 0.0 {
@@ -167,17 +161,19 @@ impl Portfolio {
                             let total_trade_cost = trade.quantity * price + actual_cost;
                             available_cash -= total_trade_cost;
                             total_cost += actual_cost;
-                            trade.update_buy_trade(price, timestamp, actual_cost);
+                            trade.update_buy_trade(price, timestamp, actual_cost, trade.quantity);
+                            executed_trades.push(trade.clone());
+                        } else {
+                            trade.update_trade_status(TradeStatus::Failed);
+                            trade.set_comment("Insufficient cash".to_string());
                         }
                     } else {
-                        let (realized_pnl, actual_quantity_sold) = position.update_sell_position(
+                        let realized_pnl = position.update_sell_position(
                             price,
                             trade.quantity,
                             timestamp,
                             initial_cost,
                         );
-
-                        trade.quantity = actual_quantity_sold;
                         trade.update_sell_trade(
                             price,
                             timestamp,
@@ -187,18 +183,20 @@ impl Portfolio {
                         );
 
                         total_realized_pnl += realized_pnl;
-                        available_cash += actual_quantity_sold * price - initial_cost;
+                        available_cash += trade.quantity * price - initial_cost;
                         total_cost += initial_cost;
 
-                        if position.quantity <= 0.0 {
-                            self.positions[ticker_id] = None;
-                        }
+                        executed_trades.push(trade.clone());
                     }
                 }
                 None => {
                     if trade.is_buy() {
-                        let max_quantity = (available_cash - initial_cost).max(0.0) / price;
-                        trade.quantity = max_quantity;
+                        let requested_quantity = trade.quantity;
+                        let max_affordable_quantity =
+                            (available_cash - initial_cost).max(0.0) / price;
+
+                        trade.quantity =
+                            (requested_quantity.min(max_affordable_quantity) * 1e6).round() / 1e6;
                         let actual_cost = trade.quantity * price * self.commission_rate;
 
                         if trade.quantity > 0.0 {
@@ -209,12 +207,16 @@ impl Portfolio {
                                 Some(timestamp),
                                 self.position_constraints.get(ticker_id).cloned(),
                             );
-                            trade.update_buy_trade(price, timestamp, actual_cost);
+                            trade.update_buy_trade(price, timestamp, actual_cost, trade.quantity);
 
                             let total_trade_cost = trade.quantity * price + actual_cost;
                             available_cash -= total_trade_cost;
                             total_cost += actual_cost;
                             self.positions[ticker_id] = Some(position);
+                            executed_trades.push(trade.clone());
+                        } else {
+                            trade.update_trade_status(TradeStatus::Failed);
+                            trade.set_comment("Insufficient cash".to_string());
                         }
                     } else {
                         trade.update_trade_status(TradeStatus::Failed);
@@ -223,49 +225,79 @@ impl Portfolio {
                 }
             }
         }
-
-        (available_cash, total_cost, total_realized_pnl)
+        (
+            available_cash,
+            total_cost,
+            total_realized_pnl,
+            executed_trades,
+        )
     }
 
     #[inline(always)]
     pub fn liquidation(&mut self, prices: &[f32], trades: &mut [Trade], timestamp: u64) {
-        let (available_cash, total_cost, total_realized_pnl) =
-            self.execute_trades(trades, prices, timestamp);
+        let (available_cash, total_cost, total_realized_pnl, _) =
+            self.execute_trades(trades, prices, timestamp, &[]);
 
         self.post_order_update(
-            prices,
-            trades,
-            trades, // Same slice for both executed and next
+            prices, // Same slice for both executed and next
             available_cash,
             total_cost,
             total_realized_pnl,
         );
+        self.pending_trades = Vec::new();
+    }
 
-        let mut trades_copy = Vec::with_capacity(trades.len());
-        trades_copy.extend_from_slice(trades);
-        self.trading_history.push(trades_copy);
+    /// Get the period identifier for a timestamp based on frequency
+    #[inline(always)]
+    fn get_period_identifier(&self, timestamp: i64) -> i64 {
+        match &self.portfolio_params.capital_growth_frequency {
+            Frequency::Daily => timestamp / 86400, // Days since epoch
+            Frequency::Weekly => {
+                let days_since_epoch = timestamp / 86400;
+                (days_since_epoch + 4) / 7 // Weeks since epoch (adjusted for Thursday start)
+            }
+            Frequency::Monthly => {
+                let datetime = timestamp_to_datetime(timestamp);
+                (datetime.year() as i64) * 12 + (datetime.month() as i64) - 1
+            }
+            Frequency::Quarterly => {
+                let datetime = timestamp_to_datetime(timestamp);
+                (datetime.year() as i64) * 4 + ((datetime.month() - 1) / 3) as i64
+            }
+            Frequency::Yearly => {
+                let datetime = timestamp_to_datetime(timestamp);
+                datetime.year() as i64
+            }
+        }
     }
 
     #[inline(always)]
-    pub fn update_capital(&mut self, current_timestamp: i64) {
+    pub fn get_new_cash(&mut self, current_timestamp: i64) -> f32 {
         if !is_end_of_period(
             current_timestamp,
             &self.portfolio_params.capital_growth_frequency,
         ) {
-            return;
+            return 0.0;
         }
 
-        let current_equity = *self.equity_curve.last().unwrap_or(&0.0);
-        let current_cash = *self.cash_curve.last().unwrap_or(&0.0);
-        let capital_increase = if self.portfolio_params.capital_growth_amount > 0.0 {
+        let current_period = self.get_period_identifier(current_timestamp);
+
+        // Check if we've already distributed cash for this period
+        if let Some(last_period) = self.last_cash_distribution_period {
+            if current_period == last_period {
+                return 0.0; // Already distributed cash for this period
+            }
+        }
+
+        // Update the last distribution period
+        self.last_cash_distribution_period = Some(current_period);
+
+        let current_equity = self.get_current_equity();
+        return if self.portfolio_params.capital_growth_amount > 0.0 {
             self.portfolio_params.capital_growth_amount
         } else {
             current_equity * self.portfolio_params.capital_growth_pct
         };
-
-        let new_cash = current_cash + capital_increase;
-        let len = self.cash_curve.len();
-        self.cash_curve.insert(len - 1, new_cash);
     }
 
     #[inline(always)]

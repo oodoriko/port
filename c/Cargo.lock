@@ -2402,6 +2402,7 @@ dependencies = [
  "smallvec",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-postgres",
  "tower 0.4.13",
  "tower-http 0.5.2",
  "tracing",

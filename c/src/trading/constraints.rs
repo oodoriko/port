@@ -14,6 +14,7 @@ pub struct Constraint {
     pub risk_per_trade_pct: Vec<f32>,
     pub sell_fraction: Vec<f32>,
     pub candle_time: u64,
+    pub cool_down_period: Vec<u64>,
     // Cache for hot path calculations
     n_assets: usize,
 }
@@ -33,6 +34,7 @@ impl Constraint {
         let mut take_profit_pct = Vec::with_capacity(n_assets);
         let mut risk_per_trade_pct = Vec::with_capacity(n_assets);
         let mut sell_fraction = Vec::with_capacity(n_assets);
+        let mut cool_down_period = Vec::with_capacity(n_assets);
 
         for pc in position_constraints {
             max_position_size_pct.push(pc.max_position_size_pct);
@@ -43,6 +45,7 @@ impl Constraint {
             take_profit_pct.push(pc.take_profit_pct);
             risk_per_trade_pct.push(pc.risk_per_trade_pct);
             sell_fraction.push(pc.sell_fraction);
+            cool_down_period.push(pc.cool_down_period);
         }
 
         Self {
@@ -58,6 +61,7 @@ impl Constraint {
             rebalance_threshold_pct: portfolio_constraints.rebalance_threshold_pct,
             candle_time: 0,
             n_assets,
+            cool_down_period,
         }
     }
 
@@ -100,13 +104,13 @@ impl Constraint {
         price: &[f32],
         positions: &[Option<Position>],
         peak_portfolio_value: f32,
+        current_cash: f32,
         timestamp: u64,
-    ) -> (bool, Vec<Trade>) {
+    ) -> (bool, Vec<Trade>, Vec<Trade>) {
         let mut max_drawdown_trades = Vec::with_capacity(self.n_assets);
         let mut stop_loss_trades = Vec::with_capacity(self.n_assets);
+        let mut take_profit_trades = Vec::with_capacity(self.n_assets);
         let mut new_market_value = 0.0;
-
-        let drawdown_threshold = self.max_drawdown_pct * peak_portfolio_value;
 
         for (idx, position) in positions.iter().enumerate().take(self.n_assets) {
             if let Some(position) = position {
@@ -120,16 +124,23 @@ impl Constraint {
                     stop_loss_trades.push(Trade::stop_loss(position.quantity, idx, timestamp));
                 }
 
+                if current_price > position.avg_entry_price * (1.0 + self.take_profit_pct[idx]) {
+                    take_profit_trades.push(Trade::take_profit(position.quantity, idx, timestamp));
+                }
+
                 let position_value = position.quantity * current_price;
                 new_market_value += position_value;
                 max_drawdown_trades.push(Trade::liquidation(position.quantity, idx, timestamp));
             }
         }
 
-        if new_market_value != 0.0 && new_market_value < drawdown_threshold {
-            (true, max_drawdown_trades)
+        if new_market_value != 0.0
+            && (peak_portfolio_value - new_market_value - current_cash) / peak_portfolio_value
+                > self.max_drawdown_pct
+        {
+            (true, max_drawdown_trades, take_profit_trades)
         } else {
-            (false, stop_loss_trades)
+            (false, stop_loss_trades, take_profit_trades)
         }
     }
 
@@ -163,6 +174,14 @@ impl Constraint {
                         if holding_period < min_holding {
                             continue;
                         }
+                        let cool_down_period = unsafe { *self.cool_down_period.get_unchecked(idx) };
+                        if cool_down_period > 0 {
+                            let holding_period =
+                                (timestamp - pos.last_exit_timestamp) / self.candle_time;
+                            if holding_period < cool_down_period && pos.last_exit_pnl < 0.0 {
+                                continue;
+                            }
+                        }
                     }
                     let current_price = unsafe { *price.get_unchecked(idx) };
                     let risk_per_trade_pct = unsafe { *self.risk_per_trade_pct.get_unchecked(idx) };
@@ -171,12 +190,14 @@ impl Constraint {
                     let max_pos_pct = unsafe { *self.max_position_size_pct.get_unchecked(idx) };
                     let min_trade_pct = unsafe { *self.min_trade_size_pct.get_unchecked(idx) };
 
-                    let max_pos_size = (risk_per_trade_pct * min_available)
-                        / (trailing_stop_pct * current_price).min(max_pos_pct * portfolio_value);
+                    let risk_denominator = trailing_stop_pct * current_price;
+
+                    let risk_based_size = (risk_per_trade_pct * min_available) / risk_denominator;
+                    let max_allowed_size = (max_pos_pct * portfolio_value) / current_price;
+                    let max_pos_size = (risk_based_size.min(max_allowed_size) * 1e6).round() / 1e6; // prevent overflow
 
                     let min_trade_threshold = min_trade_pct * portfolio_value;
                     let trade_value = max_pos_size * current_price;
-
                     if trade_value > min_trade_threshold {
                         total_size += trade_value;
                         valid_trades.push(Trade::signal_buy(max_pos_size, idx, timestamp));
@@ -184,10 +205,13 @@ impl Constraint {
                 }
                 -1 => {
                     if let Some(pos) = position {
+                        if pos.quantity <= 0.0 {
+                            continue;
+                        }
                         let sell_fraction = unsafe { *self.sell_fraction.get_unchecked(idx) };
                         let current_price = unsafe { *price.get_unchecked(idx) };
 
-                        let quantity = pos.quantity * sell_fraction;
+                        let quantity = (pos.quantity * sell_fraction * 1e6).round() / 1e6; // prevent overflow
                         let trade_value = quantity * current_price;
 
                         total_size -= trade_value;

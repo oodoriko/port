@@ -4,6 +4,7 @@ pub enum TradeType {
     SignalSell,
     StopLoss,
     Liquidation,
+    TakeProfit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -40,6 +41,24 @@ impl Trade {
             ticker_id,
             quantity,
             trade_type: TradeType::SignalBuy,
+            trade_status: TradeStatus::Pending,
+            generated_at,
+            execution_timestamp: 0,
+            price: 0.0,
+            cost: 0.0,
+            avg_entry_price: 0.0,
+            holding_period: 0,
+            realized_pnl: 0.0,
+            trade_comment: None,
+        }
+    }
+
+    #[inline(always)]
+    pub fn take_profit(quantity: f32, ticker_id: usize, generated_at: u64) -> Self {
+        Self {
+            ticker_id,
+            quantity,
+            trade_type: TradeType::TakeProfit,
             trade_status: TradeStatus::Pending,
             generated_at,
             execution_timestamp: 0,
@@ -107,7 +126,8 @@ impl Trade {
     }
 
     #[inline(always)]
-    pub fn update_buy_trade(&mut self, price: f32, timestamp: u64, cost: f32) {
+    pub fn update_buy_trade(&mut self, price: f32, timestamp: u64, cost: f32, quantity: f32) {
+        self.quantity = quantity;
         self.price = price;
         self.execution_timestamp = timestamp;
         self.cost = cost;
@@ -175,5 +195,10 @@ impl Trade {
     #[inline(always)]
     pub fn is_pending(&self) -> bool {
         matches!(self.trade_status, TradeStatus::Pending)
+    }
+
+    #[inline(always)]
+    pub fn is_take_profit(&self) -> bool {
+        matches!(self.trade_type, TradeType::TakeProfit)
     }
 }
