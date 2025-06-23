@@ -28,7 +28,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
     total_return,
     max_value,
     min_value,
-    peak_notional,
+    peak_equity,
   } = results;
 
   const isPositiveReturn = total_return >= 0;
@@ -140,7 +140,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
             </Group>
             <Text size="lg" fw={600}>
               <NumberFormatter
-                value={peak_notional}
+                value={peak_equity}
                 prefix="$"
                 thousandSeparator
                 decimalScale={2}

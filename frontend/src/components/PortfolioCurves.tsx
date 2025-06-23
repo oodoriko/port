@@ -1,4 +1,5 @@
-import { Card, Tabs, Text, Title } from "@mantine/core";
+import { Alert, Card, Tabs, Text, Title } from "@mantine/core";
+import { IconInfoCircle } from "@tabler/icons-react";
 import {
   CartesianGrid,
   Legend,
@@ -24,10 +25,24 @@ export function PortfolioCurves({ results }: PortfolioCurvesProps) {
     realized_pnl_curve,
     unrealized_pnl_curve,
     timestamps,
+    trade_timestamps,
   } = results;
 
-  // Create data points with timestamps as x-axis
-  const createChartData = (curve: number[], label: string) => {
+  // Helper function to calculate cumulative sum
+  const calculateCumulative = (values: number[]): number[] => {
+    let cumSum = 0;
+    return values.map((value) => {
+      cumSum += value;
+      return cumSum;
+    });
+  };
+
+  // Create data points with full timestamps
+  const createChartData = (
+    curve: number[],
+    label: string,
+    isCumulative = false
+  ) => {
     if (
       !curve ||
       curve.length === 0 ||
@@ -36,24 +51,51 @@ export function PortfolioCurves({ results }: PortfolioCurvesProps) {
     ) {
       return [];
     }
-    // Use all data instead of limiting to 200 records
-    return curve.map((value, index) => ({
-      timestamp: timestamps[index] * 1000, // Convert to milliseconds for JS Date
-      [label]: value || 0,
+
+    const actualLength = Math.min(curve.length, timestamps.length);
+    const processedCurve = isCumulative
+      ? calculateCumulative(curve.slice(0, actualLength))
+      : curve.slice(0, actualLength);
+
+    return Array.from({ length: actualLength }, (_, index) => ({
+      timestamp: timestamps[index] * 1000,
+      [label]: processedCurve[index] || 0,
+      isTradeDay: trade_timestamps.includes(timestamps[index]),
     }));
   };
 
-  // Custom tooltip formatter for currency values
-  const formatCurrency = (value: number) => {
-    if (Math.abs(value) >= 1000000) {
-      return new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency: "USD",
-        notation: "scientific",
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(value);
+  // Create filtered data that only shows points on trade days
+  const createTradeFilteredData = (
+    curve: number[],
+    label: string,
+    isCumulative = false
+  ) => {
+    if (
+      !curve ||
+      curve.length === 0 ||
+      !timestamps ||
+      timestamps.length === 0 ||
+      !trade_timestamps ||
+      trade_timestamps.length === 0
+    ) {
+      return [];
     }
+
+    const tradeTimestampSet = new Set(trade_timestamps);
+    const actualLength = Math.min(curve.length, timestamps.length);
+    const processedCurve = isCumulative
+      ? calculateCumulative(curve.slice(0, actualLength))
+      : curve.slice(0, actualLength);
+
+    return Array.from({ length: actualLength }, (_, index) => ({
+      timestamp: timestamps[index] * 1000,
+      [label]: processedCurve[index] || 0,
+      isTradeDay: tradeTimestampSet.has(timestamps[index]),
+    })).filter((point) => point.isTradeDay);
+  };
+
+  // Custom tooltip formatter
+  const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
@@ -62,95 +104,49 @@ export function PortfolioCurves({ results }: PortfolioCurvesProps) {
     }).format(value);
   };
 
-  // Y-axis formatter for scientific notation
+  // Y-axis formatter
   const formatYAxis = (value: number) => {
-    if (Math.abs(value) >= 100000) {
-      return value.toExponential(1);
+    if (Math.abs(value) >= 1000000) {
+      return (value / 1000000).toFixed(1) + "M";
+    } else if (Math.abs(value) >= 1000) {
+      return (value / 1000).toFixed(1) + "K";
     }
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      notation: "compact",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 1,
-    }).format(value);
+    return value.toFixed(0);
   };
 
-  // Format timestamp for display - always include date and time for start/end display
-  const formatTimestampFull = (timestamp: number) => {
-    const date = new Date(timestamp);
-    return date.toLocaleString([], {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-  };
-
-  // Format timestamp for display - handle different time scales
+  // Format timestamp for display
   const formatTimestamp = (timestamp: number) => {
     const date = new Date(timestamp);
-
-    // Check if we have timestamps within the same day (small time scale)
-    if (timestamps && timestamps.length > 1) {
-      const firstTimestamp = timestamps[0] * 1000;
-      const lastTimestamp = timestamps[timestamps.length - 1] * 1000;
-      const timeDiff = lastTimestamp - firstTimestamp;
-
-      // Less than 1 day - show time
-      if (timeDiff < 24 * 60 * 60 * 1000) {
-        return date.toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false,
-        });
-      }
-      // Less than 7 days - show date and time
-      else if (timeDiff < 7 * 24 * 60 * 60 * 1000) {
-        return (
-          date.toLocaleDateString([], {
-            month: "short",
-            day: "numeric",
-          }) +
-          " " +
-          date.toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false,
-          })
-        );
-      }
-    }
-
-    // Default to date only for longer time periods
     return date.toLocaleDateString([], {
       month: "short",
       day: "numeric",
-      year: "numeric",
+      year: "2-digit",
     });
   };
 
   // Custom tooltip component
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
+      const date = new Date(label);
       return (
         <div
           style={{
             backgroundColor: "white",
-            padding: "10px",
+            padding: "12px",
             border: "1px solid #ccc",
-            borderRadius: "4px",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+            borderRadius: "6px",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
           }}
         >
-          <p
-            style={{ margin: 0, fontWeight: "bold" }}
-          >{`Date: ${formatTimestamp(label)}`}</p>
+          <p style={{ margin: 0, fontWeight: "bold", marginBottom: "8px" }}>
+            {date.toLocaleDateString()} {date.toLocaleTimeString()}
+          </p>
           {payload.map((entry: any, index: number) => (
             <p key={index} style={{ margin: "4px 0", color: entry.color }}>
-              {`${entry.dataKey}: ${formatCurrency(entry.value)}`}
+              <span style={{ fontWeight: "500" }}>
+                {entry.name || entry.dataKey}:
+              </span>{" "}
+              {formatCurrency(entry.value)}
             </p>
           ))}
         </div>
@@ -159,69 +155,88 @@ export function PortfolioCurves({ results }: PortfolioCurvesProps) {
     return null;
   };
 
+  // Combined P&L data with both realized and unrealized
+  const createPnLData = (showTradeOnly = false) => {
+    if (
+      !realized_pnl_curve ||
+      !unrealized_pnl_curve ||
+      !timestamps ||
+      timestamps.length === 0
+    ) {
+      return [];
+    }
+
+    if (realized_pnl_curve.length === 0 && unrealized_pnl_curve.length === 0) {
+      return [];
+    }
+
+    const actualLength = Math.min(
+      Math.min(realized_pnl_curve.length, unrealized_pnl_curve.length),
+      timestamps.length
+    );
+
+    const cumulativeRealized = calculateCumulative(
+      realized_pnl_curve.slice(0, actualLength)
+    );
+    const tradeTimestampSet = new Set(trade_timestamps || []);
+
+    const allData = Array.from({ length: actualLength }, (_, index) => ({
+      timestamp: timestamps[index] * 1000,
+      realized: cumulativeRealized[index] || 0,
+      unrealized: unrealized_pnl_curve[index] || 0,
+      total:
+        (cumulativeRealized[index] || 0) + (unrealized_pnl_curve[index] || 0),
+      isTradeDay: tradeTimestampSet.has(timestamps[index]),
+    }));
+
+    const filteredData = showTradeOnly
+      ? allData.filter((point) => point.isTradeDay)
+      : allData;
+
+    return filteredData;
+  };
+
   const tabsData = [
     {
       value: "equity",
       label: "Equity",
-      data: createChartData(equity_curve, "equity"),
+      fullData: createChartData(equity_curve, "equity"),
+      tradeData: createTradeFilteredData(equity_curve, "equity"),
       color: "#2563eb",
+      description: "Portfolio total value over time",
     },
     {
       value: "cash",
       label: "Cash",
-      data: createChartData(cash_curve, "cash"),
+      fullData: createChartData(cash_curve, "cash"),
+      tradeData: createTradeFilteredData(cash_curve, "cash"),
       color: "#16a34a",
+      description: "Available cash balance over time",
     },
     {
       value: "notional",
       label: "Notional",
-      data: createChartData(notional_curve, "notional"),
+      fullData: createChartData(notional_curve, "notional"),
+      tradeData: createTradeFilteredData(notional_curve, "notional"),
       color: "#dc2626",
-    },
-    {
-      value: "pnl",
-      label: "P&L",
-      data: (() => {
-        if (
-          !realized_pnl_curve ||
-          !unrealized_pnl_curve ||
-          !timestamps ||
-          timestamps.length === 0
-        ) {
-          return [];
-        }
-
-        if (
-          realized_pnl_curve.length === 0 &&
-          unrealized_pnl_curve.length === 0
-        ) {
-          return [];
-        }
-
-        const maxLength = Math.max(
-          realized_pnl_curve.length,
-          unrealized_pnl_curve.length
-        );
-
-        // Ensure we don't exceed timestamps length
-        const actualLength = Math.min(maxLength, timestamps.length);
-
-        const pnlData = Array.from({ length: actualLength }, (_, index) => ({
-          timestamp: timestamps[index] * 1000, // Convert to milliseconds for JS Date
-          realized: realized_pnl_curve[index] || 0,
-          unrealized: unrealized_pnl_curve[index] || 0,
-        }));
-
-        return pnlData;
-      })(),
-      color: "#7c3aed",
-      isMultiLine: true,
+      description: "Total position values over time",
     },
     {
       value: "costs",
-      label: "Cost",
-      data: createChartData(cost_curve, "costs"),
+      label: "Cumulative Cost",
+      fullData: createChartData(cost_curve, "costs", true),
+      tradeData: createTradeFilteredData(cost_curve, "costs", true),
       color: "#ea580c",
+      description: "Cumulative trading costs over time",
+    },
+    {
+      value: "pnl",
+      label: "P&L Analysis",
+      fullData: createPnLData(false),
+      tradeData: createPnLData(true),
+      color: "#7c3aed",
+      isMultiLine: true,
+      description: "Realized and unrealized profit & loss over time",
     },
   ];
 
@@ -230,6 +245,11 @@ export function PortfolioCurves({ results }: PortfolioCurvesProps) {
       <Title order={4} mb="md">
         Portfolio Performance Curves
       </Title>
+
+      <Alert icon={<IconInfoCircle size={16} />} mb="md" variant="light">
+        Charts show both complete time series and trade-day filtered views. P&L
+        shows cumulative realized gains/losses and current unrealized positions.
+      </Alert>
 
       <Tabs defaultValue="equity" variant="outline">
         <Tabs.List grow>
@@ -242,114 +262,210 @@ export function PortfolioCurves({ results }: PortfolioCurvesProps) {
 
         {tabsData.map((tab) => (
           <Tabs.Panel key={tab.value} value={tab.value} pt="md">
-            {timestamps && timestamps.length > 0 && (
+            <div>
               <Text size="sm" c="dimmed" mb="md">
-                {`Start: ${formatTimestampFull(
-                  timestamps[0] * 1000
-                )} | End: ${formatTimestampFull(
-                  timestamps[timestamps.length - 1] * 1000
-                )}`}
+                {tab.description}
               </Text>
-            )}
 
-            {tab.data.length === 0 ? (
-              <div
-                style={{
-                  width: "100%",
-                  height: "600px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: "#f8f9fa",
-                  borderRadius: "8px",
-                  border: "1px solid #e9ecef",
-                }}
-              >
-                <Text c="dimmed" size="sm">
-                  No data available for this chart
+              {/* Trade Summary */}
+              {trade_timestamps && trade_timestamps.length > 0 && (
+                <Text size="xs" c="blue" mb="md">
+                  {`${trade_timestamps.length} trading days out of ${
+                    timestamps?.length || 0
+                  } total periods`}
                 </Text>
-              </div>
-            ) : (
-              <div style={{ width: "100%", height: "600px" }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={tab.data}
-                    margin={{ top: 20, right: 30, left: 10, bottom: 50 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                    <XAxis
-                      dataKey="timestamp"
-                      type="number"
-                      scale="linear"
-                      domain={["dataMin", "dataMax"]}
-                      tickCount={6}
-                      tickFormatter={formatTimestamp}
-                      angle={-45}
-                      textAnchor="end"
-                      height={60}
-                      {...(tab.isMultiLine && {
-                        label: {
-                          value: "Date",
-                          position: "insideBottom",
-                          offset: -10,
-                        },
-                      })}
-                    />
-                    <YAxis
-                      type="number"
-                      domain={
-                        tab.value === "pnl"
-                          ? ["dataMin - 100", "dataMax + 100"]
-                          : ["auto", "auto"]
-                      }
-                      tickFormatter={formatYAxis}
-                      allowDataOverflow={false}
-                    />
-                    <Tooltip content={<CustomTooltip />} />
-                    {tab.isMultiLine && <Legend />}
+              )}
 
-                    {tab.value === "pnl" ? (
-                      <>
-                        <Line
-                          type="monotone"
-                          dataKey="unrealized"
-                          stroke="#dc2626"
-                          strokeWidth={3}
-                          dot={false}
-                          name="Unrealized P&L"
-                          isAnimationActive={false}
-                          connectNulls={true}
+              {/* Full Time Series Chart */}
+              <div style={{ marginBottom: "32px" }}>
+                <Text size="sm" fw={500} mb="xs">
+                  Complete Time Series
+                </Text>
+                {tab.fullData.length === 0 ? (
+                  <div
+                    style={{
+                      width: "100%",
+                      height: "400px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      backgroundColor: "#f8f9fa",
+                      borderRadius: "8px",
+                      border: "1px solid #e9ecef",
+                    }}
+                  >
+                    <Text c="dimmed" size="sm">
+                      No data available for this chart
+                    </Text>
+                  </div>
+                ) : (
+                  <div style={{ width: "100%", height: "400px" }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart
+                        data={tab.fullData}
+                        margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                        <XAxis
+                          dataKey="timestamp"
+                          type="number"
+                          scale="time"
+                          domain={["dataMin", "dataMax"]}
+                          tickCount={6}
+                          tickFormatter={formatTimestamp}
                         />
-                        <Line
-                          type="monotone"
-                          dataKey="realized"
-                          stroke="#16a34a"
-                          strokeWidth={3}
-                          dot={false}
-                          name="Realized P&L"
-                          isAnimationActive={false}
-                          connectNulls={true}
-                        />
-                      </>
-                    ) : (
-                      <Line
-                        type="monotone"
-                        dataKey={
-                          Object.keys(tab.data[0] || {}).find(
-                            (key) => key !== "timestamp"
-                          ) || ""
-                        }
-                        stroke={tab.color}
-                        strokeWidth={3}
-                        dot={false}
-                        name={tab.label}
-                        isAnimationActive={false}
-                      />
-                    )}
-                  </LineChart>
-                </ResponsiveContainer>
+                        <YAxis tickFormatter={formatYAxis} />
+                        <Tooltip content={<CustomTooltip />} />
+                        {tab.isMultiLine && <Legend />}
+
+                        {tab.value === "pnl" ? (
+                          <>
+                            <Line
+                              type="monotone"
+                              dataKey="realized"
+                              stroke="#16a34a"
+                              strokeWidth={2}
+                              dot={false}
+                              name="Cumulative Realized P&L"
+                              isAnimationActive={false}
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="unrealized"
+                              stroke="#dc2626"
+                              strokeWidth={2}
+                              dot={false}
+                              name="Unrealized P&L"
+                              isAnimationActive={false}
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="total"
+                              stroke="#7c3aed"
+                              strokeWidth={3}
+                              dot={false}
+                              name="Total P&L"
+                              isAnimationActive={false}
+                              strokeDasharray="5 5"
+                            />
+                          </>
+                        ) : (
+                          <Line
+                            type="monotone"
+                            dataKey={
+                              Object.keys(tab.fullData[0] || {}).find(
+                                (key) =>
+                                  key !== "timestamp" && key !== "isTradeDay"
+                              ) || ""
+                            }
+                            stroke={tab.color}
+                            strokeWidth={2}
+                            dot={false}
+                            name={tab.label}
+                            isAnimationActive={false}
+                          />
+                        )}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
               </div>
-            )}
+
+              {/* Trade-Filtered Chart */}
+              <div>
+                <Text size="sm" fw={500} mb="xs">
+                  Trade Days Only ({tab.tradeData.length} points)
+                </Text>
+                {tab.tradeData.length === 0 ? (
+                  <div
+                    style={{
+                      width: "100%",
+                      height: "300px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      backgroundColor: "#f8f9fa",
+                      borderRadius: "8px",
+                      border: "1px solid #e9ecef",
+                    }}
+                  >
+                    <Text c="dimmed" size="sm">
+                      No trade data available
+                    </Text>
+                  </div>
+                ) : (
+                  <div style={{ width: "100%", height: "300px" }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart
+                        data={tab.tradeData}
+                        margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                        <XAxis
+                          dataKey="timestamp"
+                          type="number"
+                          scale="time"
+                          domain={["dataMin", "dataMax"]}
+                          tickCount={4}
+                          tickFormatter={formatTimestamp}
+                        />
+                        <YAxis tickFormatter={formatYAxis} />
+                        <Tooltip content={<CustomTooltip />} />
+                        {tab.isMultiLine && <Legend />}
+
+                        {tab.value === "pnl" ? (
+                          <>
+                            <Line
+                              type="monotone"
+                              dataKey="realized"
+                              stroke="#16a34a"
+                              strokeWidth={3}
+                              dot={{ r: 4 }}
+                              name="Cumulative Realized P&L"
+                              isAnimationActive={false}
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="unrealized"
+                              stroke="#dc2626"
+                              strokeWidth={3}
+                              dot={{ r: 4 }}
+                              name="Unrealized P&L"
+                              isAnimationActive={false}
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="total"
+                              stroke="#7c3aed"
+                              strokeWidth={4}
+                              dot={{ r: 5 }}
+                              name="Total P&L"
+                              isAnimationActive={false}
+                              strokeDasharray="5 5"
+                            />
+                          </>
+                        ) : (
+                          <Line
+                            type="monotone"
+                            dataKey={
+                              Object.keys(tab.tradeData[0] || {}).find(
+                                (key) =>
+                                  key !== "timestamp" && key !== "isTradeDay"
+                              ) || ""
+                            }
+                            stroke={tab.color}
+                            strokeWidth={3}
+                            dot={{ r: 4 }}
+                            name={tab.label}
+                            isAnimationActive={false}
+                          />
+                        )}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
+            </div>
           </Tabs.Panel>
         ))}
       </Tabs>

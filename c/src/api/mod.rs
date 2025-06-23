@@ -56,6 +56,7 @@ pub struct BacktestResponse {
     pub realized_pnl_curve: Vec<f32>,
     pub unrealized_pnl_curve: Vec<f32>,
     pub timestamps: Vec<i64>,
+    pub trade_timestamps: Vec<i64>,
     pub total_records: usize,
 }
 
@@ -204,6 +205,7 @@ pub async fn backtest_handler(
         realized_pnl_curve: portfolio.realized_pnl_curve,
         unrealized_pnl_curve: portfolio.unrealized_pnl_curve,
         timestamps: portfolio.timestamps,
+        trade_timestamps: executed_trades_by_date.keys().cloned().collect(),
         total_records,
     };
 

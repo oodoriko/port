@@ -193,7 +193,7 @@ export interface BacktestResult {
   total_return: number;
   max_value: number;
   min_value: number;
-  peak_notional: number;
+  peak_equity: number;
   equity_curve: number[];
   cash_curve: number[];
   notional_curve: number[];
@@ -201,6 +201,7 @@ export interface BacktestResult {
   realized_pnl_curve: number[];
   unrealized_pnl_curve: number[];
   timestamps: number[];
+  trade_timestamps: number[];
   total_records: number;
 }
 

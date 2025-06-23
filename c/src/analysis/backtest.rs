@@ -49,31 +49,40 @@ pub async fn backtest(
         let mut converted_data = Vec::new();
         let mut converted_timestamps = Vec::new();
 
-        // Since frontend ensures all assets have data for the selected date range,
-        // we can use any ticker's length as the reference
-        if let Some(first_ticker_data) = historical_data.values().next() {
-            let data_len = first_ticker_data.len();
+        // Find the minimum length among all tickers to prevent index out of bounds
+        let min_data_len = historical_data
+            .values()
+            .map(|data| data.len())
+            .min()
+            .unwrap_or(0);
 
-            for i in 0..data_len {
+        if min_data_len > 0 {
+            for i in 0..min_data_len {
                 let mut time_point_data = Vec::new();
                 let mut timestamp = 0i64;
 
                 for ticker in &tickers {
                     if let Some(ticker_data) = historical_data.get(ticker) {
-                        let ohlcv = &ticker_data[i];
-                        time_point_data.push(vec![
-                            ohlcv.open,
-                            ohlcv.high,
-                            ohlcv.low,
-                            ohlcv.close,
-                            ohlcv.volume,
-                        ]);
-                        timestamp = ohlcv.timestamp;
+                        // Additional safety check to prevent panic
+                        if i < ticker_data.len() {
+                            let ohlcv = &ticker_data[i];
+                            time_point_data.push(vec![
+                                ohlcv.open,
+                                ohlcv.high,
+                                ohlcv.low,
+                                ohlcv.close,
+                                ohlcv.volume,
+                            ]);
+                            timestamp = ohlcv.timestamp;
+                        }
                     }
                 }
 
-                converted_data.push(time_point_data);
-                converted_timestamps.push(timestamp);
+                // Only add data if we have data for all tickers at this time point
+                if time_point_data.len() == tickers.len() {
+                    converted_data.push(time_point_data);
+                    converted_timestamps.push(timestamp);
+                }
             }
         }
 
@@ -111,6 +120,11 @@ pub async fn backtest(
     println!("end: {:?}", end);
 
     for idx in warm_up_period..data_len {
+        // Ensure we don't exceed timestamps array bounds
+        if idx >= timestamps.len() {
+            println!("Warning: Reached end of timestamp data at index {}", idx);
+            break;
+        }
         let time = timestamps[idx];
         let mut cash_after_trades = portfolio.get_current_cash();
         let mut total_cost = 0.0;
@@ -135,7 +149,6 @@ pub async fn backtest(
 
         // update position with t-1 close
         portfolio.pre_order_update(&prev_close_prices);
-        let mut executed_trades = Vec::new();
         let mut total_executed_trades = Vec::new();
 
         // pre order check: mark portfolio at t-1 close, check take profit, stop loss, max drawdown
@@ -167,32 +180,44 @@ pub async fn backtest(
             .collect::<Vec<_>>();
 
         // first execute pre signal trades, then generate signal based trades using new position size
-        executed_trades.extend(risk_management_trades);
-        executed_trades.extend(take_profit_trades);
-        if executed_trades.len() > 0 {
-            (
-                cash_after_trades,
-                total_cost,
-                total_realized_pnl,
-                total_executed_trades,
-            ) = portfolio.execute_trades(&mut executed_trades, &curr_open_prices, time as u64, &[]);
+        risk_management_trades.extend(take_profit_trades);
+        if risk_management_trades.len() > 0 {
+            let (
+                new_cash_after_trades,
+                new_total_cost,
+                new_total_realized_pnl,
+                new_executed_trades,
+            ) = portfolio.execute_trades(
+                &mut risk_management_trades,
+                &curr_open_prices,
+                time as u64,
+                &[],
+            );
+            cash_after_trades += new_cash_after_trades;
+            total_cost += new_total_cost;
+            total_realized_pnl += new_total_realized_pnl;
+            total_executed_trades.extend(new_executed_trades);
         }
 
         // execute previous trades using current t0 open prices (bypassing the backtest logic where t0 is na until t+1)
         let mut pending_trades = portfolio.pending_trades.clone(); // previous period trades
 
         if !pending_trades.is_empty() {
-            let (new_cash_after_trades, new_total_cost, new_total_realized_pnl, executed_trades) =
-                portfolio.execute_trades(
-                    &mut pending_trades,
-                    &prev_close_prices,
-                    time as u64,
-                    &stop_loss_triggered_pos,
-                );
-            cash_after_trades = new_cash_after_trades;
+            let (
+                new_cash_after_trades,
+                new_total_cost,
+                new_total_realized_pnl,
+                new_executed_trades,
+            ) = portfolio.execute_trades(
+                &mut pending_trades,
+                &prev_close_prices,
+                time as u64,
+                &stop_loss_triggered_pos,
+            );
+            cash_after_trades += new_cash_after_trades;
             total_cost += new_total_cost;
             total_realized_pnl += new_total_realized_pnl;
-            total_executed_trades.extend(executed_trades);
+            total_executed_trades.extend(new_executed_trades);
         }
         if total_executed_trades.len() > 0 {
             executed_trades_by_date.insert(time, total_executed_trades);
@@ -219,6 +244,9 @@ pub async fn backtest(
             total_cost,
             total_realized_pnl,
         );
+
+        // Record the timestamp for this data point
+        portfolio.timestamps.push(time);
     }
 
     println!("Backtesting completed");
@@ -226,9 +254,8 @@ pub async fn backtest(
         println!("Early exit due to max drawdown");
     }
 
-    // Set the executed trade timestamps
-    portfolio.timestamps = executed_trades_by_date.keys().cloned().collect();
-    portfolio.timestamps.sort(); // Ensure timestamps are in chronological order
+    // Timestamps are now recorded during post_order_update to match curve data points
+    // portfolio.timestamps already contains the correct timestamps
 
     println!("Total trade executions: {}", executed_trades_by_date.len());
     println!("Total time periods: {}", data_len - warm_up_period);

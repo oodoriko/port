@@ -11,11 +11,9 @@ DONE:
 7. cash logic DONE,
 8. job to backfill historical
 9. take profit logic done
+10. set up db service for both be and fe (and read role)
 
-   to-do:
-
-10. job to cache daily coinbase data
-11. set up db service for both be and fe (and read role)
+to-do: 10. job to cache daily coinbase data
 
 result:
 
@@ -24,7 +22,7 @@ result:
 3. show all run result (grid?)
 4. cache backtest data(meta: bk id, set up) (key perf) (full results)
 
-5. cost logic, take profit logic
+5. cost logic,
 
 6. grid search? need to think it through
 

@@ -120,12 +120,12 @@ impl Portfolio {
         timestamp: u64,
         no_trades_asset_ids: &[usize],
     ) -> (f32, f32, f32, Vec<Trade>) {
-        let mut available_cash = *self.cash_curve.last().unwrap_or(&0.0);
-        let min_cash_pct = self.portfolio_constraints.min_cash_pct;
-        available_cash = available_cash * (1.0 - min_cash_pct);
+        let available_cash =
+            self.get_current_cash() * (1.0 - self.portfolio_constraints.min_cash_pct);
         let mut total_cost = 0.0;
         let mut total_realized_pnl = 0.0;
         let mut executed_trades = Vec::new();
+        let mut net_cash = 0.0;
         for trade in trades.iter_mut() {
             let ticker_id = trade.ticker_id;
             if no_trades_asset_ids.contains(&ticker_id) {
@@ -158,8 +158,7 @@ impl Portfolio {
                                 timestamp,
                                 actual_cost,
                             );
-                            let total_trade_cost = trade.quantity * price + actual_cost;
-                            available_cash -= total_trade_cost;
+                            net_cash -= trade.quantity * price + actual_cost;
                             total_cost += actual_cost;
                             trade.update_buy_trade(price, timestamp, actual_cost, trade.quantity);
                             executed_trades.push(trade.clone());
@@ -183,7 +182,7 @@ impl Portfolio {
                         );
 
                         total_realized_pnl += realized_pnl;
-                        available_cash += trade.quantity * price - initial_cost;
+                        net_cash += trade.quantity * price - initial_cost;
                         total_cost += initial_cost;
 
                         executed_trades.push(trade.clone());
@@ -210,7 +209,7 @@ impl Portfolio {
                             trade.update_buy_trade(price, timestamp, actual_cost, trade.quantity);
 
                             let total_trade_cost = trade.quantity * price + actual_cost;
-                            available_cash -= total_trade_cost;
+                            net_cash -= total_trade_cost;
                             total_cost += actual_cost;
                             self.positions[ticker_id] = Some(position);
                             executed_trades.push(trade.clone());
@@ -225,12 +224,7 @@ impl Portfolio {
                 }
             }
         }
-        (
-            available_cash,
-            total_cost,
-            total_realized_pnl,
-            executed_trades,
-        )
+        (net_cash, total_cost, total_realized_pnl, executed_trades)
     }
 
     #[inline(always)]

@@ -107,7 +107,6 @@ impl Constraint {
         current_cash: f32,
         timestamp: u64,
     ) -> (bool, Vec<Trade>, Vec<Trade>) {
-        let mut max_drawdown_trades = Vec::with_capacity(self.n_assets);
         let mut stop_loss_trades = Vec::with_capacity(self.n_assets);
         let mut take_profit_trades = Vec::with_capacity(self.n_assets);
         let mut new_market_value = 0.0;
@@ -119,7 +118,6 @@ impl Constraint {
                 }
 
                 let current_price = unsafe { *price.get_unchecked(idx) };
-
                 if current_price < position.trailing_stop_price {
                     stop_loss_trades.push(Trade::stop_loss(position.quantity, idx, timestamp));
                 }
@@ -130,7 +128,6 @@ impl Constraint {
 
                 let position_value = position.quantity * current_price;
                 new_market_value += position_value;
-                max_drawdown_trades.push(Trade::liquidation(position.quantity, idx, timestamp));
             }
         }
 
@@ -138,6 +135,15 @@ impl Constraint {
             && (peak_portfolio_value - new_market_value - current_cash) / peak_portfolio_value
                 > self.max_drawdown_pct
         {
+            let mut max_drawdown_trades = Vec::with_capacity(self.n_assets);
+            for (idx, position) in positions.iter().enumerate().take(self.n_assets) {
+                if let Some(position) = position {
+                    if position.quantity <= 0.0 {
+                        continue;
+                    }
+                    max_drawdown_trades.push(Trade::liquidation(position.quantity, idx, timestamp));
+                }
+            }
             (true, max_drawdown_trades, take_profit_trades)
         } else {
             (false, stop_loss_trades, take_profit_trades)
