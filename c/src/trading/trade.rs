@@ -30,6 +30,7 @@ pub struct Trade {
     pub avg_entry_price: f32, // 0.0 if not applicable
     pub holding_period: u64,  // 0 if not applicable
     pub realized_pnl: f32,    // 0.0 if not applicable
+    pub realized_return: f32, // 0.0 if not applicable
 
     pub trade_comment: Option<String>,
 }
@@ -49,6 +50,7 @@ impl Trade {
             avg_entry_price: 0.0,
             holding_period: 0,
             realized_pnl: 0.0,
+            realized_return: 0.0,
             trade_comment: None,
         }
     }
@@ -67,6 +69,7 @@ impl Trade {
             avg_entry_price: 0.0,
             holding_period: 0,
             realized_pnl: 0.0,
+            realized_return: 0.0,
             trade_comment: None,
         }
     }
@@ -85,6 +88,7 @@ impl Trade {
             avg_entry_price: 0.0,
             holding_period: 0,
             realized_pnl: 0.0,
+            realized_return: 0.0,
             trade_comment: None,
         }
     }
@@ -103,6 +107,7 @@ impl Trade {
             avg_entry_price: 0.0,
             holding_period: 0,
             realized_pnl: 0.0,
+            realized_return: 0.0,
             trade_comment: None,
         }
     }
@@ -121,6 +126,7 @@ impl Trade {
             avg_entry_price: 0.0,
             holding_period: 0,
             realized_pnl: 0.0,
+            realized_return: 0.0,
             trade_comment: None,
         }
     }
@@ -148,8 +154,9 @@ impl Trade {
         self.cost = cost;
         self.holding_period = timestamp - entry_timestamp;
         self.avg_entry_price = avg_entry_price;
-        self.realized_pnl = (price - avg_entry_price) * self.quantity;
+        self.realized_pnl = (price - avg_entry_price - cost) * self.quantity;
         self.trade_status = TradeStatus::Executed;
+        self.realized_return = (price - cost) / avg_entry_price - 1.0;
     }
 
     #[inline(always)]

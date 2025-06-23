@@ -1,4 +1,4 @@
-use crate::core::params::PositionConstraintParams;
+use crate::{core::params::PositionConstraintParams, trading::trade::TradeType};
 use std::fmt;
 
 // one coin per position
@@ -26,6 +26,14 @@ pub struct Position {
     pub last_exit_price: f32,
     pub last_exit_timestamp: u64,
     pub last_exit_pnl: f32,
+
+    // more for backtesting
+    pub take_profit_gain: f32,
+    pub take_profit_loss: f32,
+    pub stop_loss_gain: f32,
+    pub stop_loss_loss: f32,
+    pub signal_sell_gain: f32,
+    pub signal_sell_loss: f32,
 
     pub constraint: Option<PositionConstraintParams>,
 }
@@ -68,6 +76,12 @@ impl Position {
             last_exit_price: 0.0,
             last_exit_timestamp: 0,
             last_exit_pnl: 0.0,
+            take_profit_gain: 0.0,
+            take_profit_loss: 0.0,
+            stop_loss_gain: 0.0,
+            stop_loss_loss: 0.0,
+            signal_sell_gain: 0.0,
+            signal_sell_loss: 0.0,
             constraint,
         }
     }
@@ -124,6 +138,7 @@ impl Position {
         quantity: f32,
         timestamp: u64,
         cost: f32,
+        trade_type: TradeType,
     ) -> f32 {
         let pnl = (price - self.avg_entry_price) * quantity;
         let sell_proceeds = price * quantity;
@@ -136,6 +151,24 @@ impl Position {
         self.quantity = (self.quantity - quantity).max(0.0);
         self.last_exit_pnl = pnl;
         self.notional = self.quantity * price;
+
+        if pnl > 0.0 {
+            if trade_type == TradeType::TakeProfit {
+                self.take_profit_gain += pnl;
+            } else if trade_type == TradeType::StopLoss {
+                self.stop_loss_gain += pnl;
+            } else if trade_type == TradeType::SignalSell {
+                self.signal_sell_gain += pnl;
+            }
+        } else {
+            if trade_type == TradeType::TakeProfit {
+                self.take_profit_loss += pnl;
+            } else if trade_type == TradeType::StopLoss {
+                self.stop_loss_loss += pnl;
+            } else if trade_type == TradeType::SignalSell {
+                self.signal_sell_loss += pnl;
+            }
+        }
 
         pnl
     }

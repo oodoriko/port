@@ -32,63 +32,7 @@ pub async fn backtest(
 > {
     let mut early_exit = false;
 
-    let (data, timestamps) = if debug {
-        // Use InfluxDB for debug mode
-        let handler = InfluxDBHandler::new()?;
-        let ticker_refs: Vec<&str> = tickers.iter().map(|s| s.as_str()).collect();
-        handler
-            .load_ohlcv_data(&ticker_refs, start, end, Some(cadence))
-            .await?
-    } else {
-        // Use database service for production mode
-        let historical_data = database_service::get_historical_data(start, end, tickers.clone())
-            .await
-            .map_err(|e| -> Box<dyn std::error::Error> { e })?;
-
-        // Convert database service data to the format expected by the backtest
-        let mut converted_data = Vec::new();
-        let mut converted_timestamps = Vec::new();
-
-        // Find the minimum length among all tickers to prevent index out of bounds
-        let min_data_len = historical_data
-            .values()
-            .map(|data| data.len())
-            .min()
-            .unwrap_or(0);
-
-        if min_data_len > 0 {
-            for i in 0..min_data_len {
-                let mut time_point_data = Vec::new();
-                let mut timestamp = 0i64;
-
-                for ticker in &tickers {
-                    if let Some(ticker_data) = historical_data.get(ticker) {
-                        // Additional safety check to prevent panic
-                        if i < ticker_data.len() {
-                            let ohlcv = &ticker_data[i];
-                            time_point_data.push(vec![
-                                ohlcv.open,
-                                ohlcv.high,
-                                ohlcv.low,
-                                ohlcv.close,
-                                ohlcv.volume,
-                            ]);
-                            timestamp = ohlcv.timestamp;
-                        }
-                    }
-                }
-
-                // Only add data if we have data for all tickers at this time point
-                if time_point_data.len() == tickers.len() {
-                    converted_data.push(time_point_data);
-                    converted_timestamps.push(timestamp);
-                }
-            }
-        }
-
-        (converted_data, converted_timestamps)
-    };
-
+    let (data, timestamps) = get_data(tickers.clone(), start, end, debug, cadence).await?;
     let warm_up_price_data: Vec<Vec<Vec<f32>>> = data[..warm_up_period].to_vec();
 
     let mut strategy = Strategy::new(
@@ -149,7 +93,6 @@ pub async fn backtest(
 
         // update position with t-1 close
         portfolio.pre_order_update(&prev_close_prices);
-        let mut total_executed_trades = Vec::new();
 
         // pre order check: mark portfolio at t-1 close, check take profit, stop loss, max drawdown
         let (is_exit, mut risk_management_trades, take_profit_trades) = constraint.pre_order_check(
@@ -179,7 +122,8 @@ pub async fn backtest(
             .map(|t| t.ticker_id)
             .collect::<Vec<_>>();
 
-        // first execute pre signal trades, then generate signal based trades using new position size
+        // first execute pre signal trades using current t0 open prices (bypassing the backtest logic where t0 is na until t+1
+        let mut total_executed_trades = Vec::new();
         risk_management_trades.extend(take_profit_trades);
         if risk_management_trades.len() > 0 {
             let (
@@ -199,9 +143,8 @@ pub async fn backtest(
             total_executed_trades.extend(new_executed_trades);
         }
 
-        // execute previous trades using current t0 open prices (bypassing the backtest logic where t0 is na until t+1)
+        // then execute previous trades using t-1 close prices
         let mut pending_trades = portfolio.pending_trades.clone(); // previous period trades
-
         if !pending_trades.is_empty() {
             let (
                 new_cash_after_trades,
@@ -226,8 +169,8 @@ pub async fn backtest(
         // handle cash distribution event, being conservative here, t0 cash is not available for trading
         let available_cash = cash_after_trades + portfolio.get_new_cash(time);
 
-        // generate signal based trades
-        let signal_based_trades = constraint.generate_trades(
+        // generate signal based trades after trades and capital distribution
+        let new_signal_based_trades = constraint.generate_trades(
             &signals,
             &prev_close_prices,
             portfolio.get_current_equity(),
@@ -236,17 +179,15 @@ pub async fn backtest(
             &portfolio.positions,
         );
 
-        portfolio.pending_trades = signal_based_trades;
+        portfolio.pending_trades = new_signal_based_trades;
 
+        // mark portfolio at t-1 close (NEED TO THINK ABOUT THIS AGAIN)
         portfolio.post_order_update(
             &prev_close_prices,
             available_cash,
             total_cost,
             total_realized_pnl,
         );
-
-        // Record the timestamp for this data point
-        portfolio.timestamps.push(time);
     }
 
     println!("Backtesting completed");
@@ -267,6 +208,72 @@ pub async fn backtest(
     Ok((portfolio, executed_trades_by_date, early_exit))
 }
 
+async fn get_data(
+    tickers: Vec<String>,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    debug: bool,
+    cadence: u64,
+) -> Result<(Vec<Vec<Vec<f32>>>, Vec<i64>), Box<dyn std::error::Error>> {
+    let (data, timestamps) = if debug {
+        // Use InfluxDB for debug mode
+        let handler = InfluxDBHandler::new()?;
+        let ticker_refs: Vec<&str> = tickers.iter().map(|s| s.as_str()).collect();
+        handler
+            .load_ohlcv_data(&ticker_refs, start, end, Some(cadence))
+            .await?
+    } else {
+        // Use database service for production mode
+        let historical_data = database_service::get_historical_data(start, end, tickers.clone())
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+
+        // Convert database service data to the format expected by the backtest
+        let mut converted_data = Vec::new();
+        let mut converted_timestamps = Vec::new();
+
+        // Find the minimum length among all tickers to prevent index out of bounds
+        let min_data_len = historical_data
+            .values()
+            .map(|data| data.len())
+            .min()
+            .unwrap_or(0);
+
+        if min_data_len > 0 {
+            for i in 0..min_data_len {
+                let mut time_point_data = Vec::new();
+                let mut timestamp = 0i64;
+
+                for ticker in &tickers {
+                    if let Some(ticker_data) = historical_data.get(ticker) {
+                        // Additional safety check to prevent panic
+                        if i < ticker_data.len() {
+                            let ohlcv = &ticker_data[i];
+                            time_point_data.push(vec![
+                                ohlcv.open,
+                                ohlcv.high,
+                                ohlcv.low,
+                                ohlcv.close,
+                                ohlcv.volume,
+                            ]);
+                            timestamp = ohlcv.timestamp;
+                        }
+                    }
+                }
+
+                // Only add data if we have data for all tickers at this time point
+                if time_point_data.len() == tickers.len() {
+                    converted_data.push(time_point_data);
+                    converted_timestamps.push(timestamp);
+                }
+            }
+        }
+
+        (converted_data, converted_timestamps)
+    };
+    Ok((data, timestamps))
+}
+
 #[inline(always)]
 pub fn backtest_result(
     portfolio: &Portfolio,
@@ -280,7 +287,7 @@ pub fn backtest_result(
     println!("📊 Portfolio: {}", portfolio.name);
     let equity_len = portfolio.equity_curve.len();
     println!("📈 Total Records: {}", equity_len);
-    println!("📅 Trade Events: {}", portfolio.timestamps.len());
+    println!("📅 Trade Events: {}", executed_trades_by_date.len());
 
     if equity_len == 0 {
         println!("❌ No data to display");
@@ -308,30 +315,30 @@ pub fn backtest_result(
     println!("  Peak Equity: ${:.2}", portfolio.peak_equity);
 
     // Show trade timing information
-    if !portfolio.timestamps.is_empty() {
-        let first_trade_time = portfolio.timestamps[0];
-        let last_trade_time = portfolio.timestamps[portfolio.timestamps.len() - 1];
+    if !executed_trades_by_date.is_empty() {
+        let first_trade_time = executed_trades_by_date.keys().min().unwrap();
+        let last_trade_time = executed_trades_by_date.keys().max().unwrap();
 
         println!("\n📊 TRADING ACTIVITY:");
         println!(
             "  First Trade: {}",
-            chrono::DateTime::from_timestamp(first_trade_time, 0)
+            chrono::DateTime::from_timestamp(*first_trade_time, 0)
                 .unwrap_or_default()
                 .format("%Y-%m-%d %H:%M:%S")
         );
         println!(
             "  Last Trade:  {}",
-            chrono::DateTime::from_timestamp(last_trade_time, 0)
+            chrono::DateTime::from_timestamp(*last_trade_time, 0)
                 .unwrap_or_default()
                 .format("%Y-%m-%d %H:%M:%S")
         );
-        println!("  Total Trade Events: {}", portfolio.timestamps.len());
+        println!("  Total Trade Events: {}", executed_trades_by_date.len());
 
         // Calculate average time between trades
-        if portfolio.timestamps.len() > 1 {
+        if executed_trades_by_date.len() > 1 {
             let total_duration = last_trade_time - first_trade_time;
             let avg_time_between_trades =
-                total_duration as f64 / (portfolio.timestamps.len() - 1) as f64;
+                total_duration as f64 / (executed_trades_by_date.len() - 1) as f64;
             println!(
                 "  Avg Time Between Trades: {:.1} seconds",
                 avg_time_between_trades

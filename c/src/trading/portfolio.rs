@@ -17,7 +17,6 @@ pub struct Portfolio {
     pub cost_curve: Vec<f32>,
     pub realized_pnl_curve: Vec<f32>,
     pub unrealized_pnl_curve: Vec<f32>,
-    pub timestamps: Vec<i64>,
     pub portfolio_params: PortfolioParams,
     pub portfolio_constraints: PortfolioConstraintParams,
     pub position_constraints: Vec<PositionConstraintParams>,
@@ -53,7 +52,6 @@ impl Portfolio {
             cost_curve: vec![0.0],
             realized_pnl_curve: vec![0.0],
             unrealized_pnl_curve: vec![0.0],
-            timestamps: Vec::new(),
             pending_trades,
             peak_equity: initial_cash,
             num_assets,
@@ -172,6 +170,7 @@ impl Portfolio {
                             trade.quantity,
                             timestamp,
                             initial_cost,
+                            trade.trade_type,
                         );
                         trade.update_sell_trade(
                             price,
