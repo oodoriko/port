@@ -15,7 +15,7 @@ import { notifications } from "@mantine/notifications";
 import { useState } from "react";
 import { runBacktest } from "./api/backtest";
 import { BacktestForm } from "./components/BacktestForm";
-import { BacktestResults } from "./components/BacktestResults";
+import { BacktestKeyMetrics } from "./components/BacktestKeyMetrics";
 import type { BacktestParams, BacktestResult } from "./types/backtest";
 
 function App() {
@@ -102,8 +102,9 @@ function App() {
                     )}
                   </Group>
                   {results ? (
-                    <BacktestResults results={results} />
+                    <BacktestKeyMetrics results={results} />
                   ) : (
+                    // <BacktestResults results={results} />
                     <Text c="dimmed" ta="center" py="xl">
                       Run a backtest to see results here
                     </Text>

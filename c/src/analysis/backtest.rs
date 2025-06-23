@@ -372,7 +372,7 @@ pub fn backtest_result(
                     trade.quantity,
                     trade.price,
                     trade.cost,
-                    trade.realized_pnl,
+                    trade.realized_pnl_gross,
                 );
                 if let Some(comment) = &trade.trade_comment {
                     println!("          Comment: {}", comment);

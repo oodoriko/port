@@ -203,6 +203,78 @@ export interface BacktestResult {
   timestamps: number[];
   trade_timestamps: number[];
   total_records: number;
+  tickers: string[];
+  position_performances?: PositionPerformance[];
+  trade_metrics?: TradeMetrics;
+}
+
+export interface PositionPerformance {
+  ticker_id: number;
+  ticker_name: string;
+  quantity: number;
+  sell_cost_ratio: number;
+  buy_cost_ratio: number;
+  total_cum_cost: number;
+  realized_pnl: number;
+  take_profit_gain: number;
+  take_profit_loss: number;
+  stop_loss_gain: number;
+  stop_loss_loss: number;
+  signal_sell_gain: number;
+  signal_sell_loss: number;
+  position_status: "Open" | "Closed";
+  take_profit_gain_pct: number;
+  take_profit_loss_pct: number;
+  stop_loss_gain_pct: number;
+  stop_loss_loss_pct: number;
+  signal_sell_gain_pct: number;
+  signal_sell_loss_pct: number;
+  realized_ratio: number;
+  gross_realized_return: number;
+  net_realized_return: number;
+  gross_unrealized_return: number;
+  net_unrealized_return: number;
+}
+
+export interface TickerTradeMetrics {
+  ticker_id: number;
+  ticker_name: string;
+  total_trades: number;
+  buy_trades: number;
+  sell_trades: number;
+  avg_trades_per_day: number;
+  avg_buy_trades_per_day: number;
+  avg_sell_trades_per_day: number;
+  buy_trade_pct: number;
+  sell_trade_pct: number;
+  executed_trades: number;
+  failed_trades: number;
+  rejected_trades: number;
+  pending_trades: number;
+  executed_pct: number;
+  failed_pct: number;
+  rejected_pct: number;
+  pending_pct: number;
+  sell_trades_with_holding_period: number;
+  avg_holding_period_minutes: number;
+  max_holding_period_minutes: number;
+  min_holding_period_minutes: number;
+  sell_trades_with_returns: number;
+  avg_gross_return: number;
+  avg_net_return: number;
+  win_rate: number;
+  trading_days: number;
+  avg_win_rate_per_day: number;
+}
+
+export interface TradeMetrics {
+  ticker_metrics: Record<number, TickerTradeMetrics>;
+  total_trades: number;
+  total_buy_trades: number;
+  total_sell_trades: number;
+  overall_win_rate: number;
+  overall_avg_gross_return: number;
+  overall_avg_net_return: number;
 }
 
 import { DateTime } from "luxon";

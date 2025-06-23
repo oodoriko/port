@@ -172,12 +172,15 @@ impl Portfolio {
                             initial_cost,
                             trade.trade_type,
                         );
+                        let pro_rata_buy_cost =
+                            position.cum_buy_cost * trade.quantity / position.total_shares_bought;
                         trade.update_sell_trade(
                             price,
                             timestamp,
                             initial_cost,
+                            pro_rata_buy_cost,
                             position.avg_entry_price,
-                            position.entry_timestamp,
+                            position.last_entry_timestamp,
                         );
 
                         total_realized_pnl += realized_pnl;

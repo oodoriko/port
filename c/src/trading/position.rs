@@ -1,6 +1,12 @@
 use crate::{core::params::PositionConstraintParams, trading::trade::TradeType};
 use std::fmt;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PositionStatus {
+    Open,
+    Closed,
+}
+
 // one coin per position
 #[derive(Clone)]
 pub struct Position {
@@ -22,12 +28,16 @@ pub struct Position {
 
     pub cum_sell_proceeds: f32,
     pub cum_sell_cost: f32,
-    pub realized_pnl: f32,
+    pub realized_pnl_gross: f32,
     pub last_exit_price: f32,
     pub last_exit_timestamp: u64,
     pub last_exit_pnl: f32,
 
     // more for backtesting
+    pub total_shares_bought: f32,
+    pub total_shares_sold: f32,
+    pub net_position: Vec<f32>,
+
     pub take_profit_gain: f32,
     pub take_profit_loss: f32,
     pub stop_loss_gain: f32,
@@ -36,6 +46,7 @@ pub struct Position {
     pub signal_sell_loss: f32,
 
     pub constraint: Option<PositionConstraintParams>,
+    pub position_status: PositionStatus,
 }
 
 impl Position {
@@ -72,7 +83,7 @@ impl Position {
             last_entry_timestamp: timestamp,
             cum_sell_proceeds: 0.0,
             cum_sell_cost: 0.0,
-            realized_pnl: 0.0,
+            realized_pnl_gross: 0.0,
             last_exit_price: 0.0,
             last_exit_timestamp: 0,
             last_exit_pnl: 0.0,
@@ -83,6 +94,10 @@ impl Position {
             signal_sell_gain: 0.0,
             signal_sell_loss: 0.0,
             constraint,
+            position_status: PositionStatus::Open,
+            total_shares_bought: 0.0,
+            total_shares_sold: 0.0,
+            net_position: vec![0.0],
         }
     }
 
@@ -127,6 +142,8 @@ impl Position {
         self.last_entry_price = price;
         self.cum_buy_proceeds += price * quantity;
         self.cum_buy_cost += cost;
+        self.total_shares_bought += quantity;
+        self.net_position.push(self.quantity);
 
         self.notional = new_quantity * price;
     }
@@ -140,17 +157,22 @@ impl Position {
         cost: f32,
         trade_type: TradeType,
     ) -> f32 {
-        let pnl = (price - self.avg_entry_price) * quantity;
+        let pnl = (price - self.avg_entry_price) * quantity - cost;
         let sell_proceeds = price * quantity;
 
         self.cum_sell_proceeds += sell_proceeds;
         self.cum_sell_cost += cost;
-        self.realized_pnl += (price - self.avg_entry_price) * quantity;
+        self.realized_pnl_gross += pnl + cost;
         self.last_exit_price = price;
         self.last_exit_timestamp = timestamp;
         self.quantity = (self.quantity - quantity).max(0.0);
         self.last_exit_pnl = pnl;
         self.notional = self.quantity * price;
+        self.total_shares_sold += quantity;
+        self.net_position.push(self.quantity);
+        if self.quantity < 0.000001 {
+            self.position_status = PositionStatus::Closed;
+        }
 
         if pnl > 0.0 {
             if trade_type == TradeType::TakeProfit {

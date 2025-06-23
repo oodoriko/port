@@ -26,11 +26,12 @@ pub struct Trade {
     pub execution_timestamp: u64, // 0 if not executed
     pub price: f32,               // 0.0 if not executed
     pub cost: f32,                // 0.0 if not calculated
+    pub pro_rata_buy_cost: f32,   // 0.0 if not applicable
 
-    pub avg_entry_price: f32, // 0.0 if not applicable
-    pub holding_period: u64,  // 0 if not applicable
-    pub realized_pnl: f32,    // 0.0 if not applicable
-    pub realized_return: f32, // 0.0 if not applicable
+    pub avg_entry_price: f32,    // 0.0 if not applicable
+    pub holding_period: u64,     // 0 if not applicable
+    pub realized_pnl_gross: f32, // 0.0 if not applicable
+    pub realized_return: f32,    // 0.0 if not applicable
 
     pub trade_comment: Option<String>,
 }
@@ -47,9 +48,10 @@ impl Trade {
             execution_timestamp: 0,
             price: 0.0,
             cost: 0.0,
+            pro_rata_buy_cost: 0.0,
             avg_entry_price: 0.0,
             holding_period: 0,
-            realized_pnl: 0.0,
+            realized_pnl_gross: 0.0,
             realized_return: 0.0,
             trade_comment: None,
         }
@@ -66,9 +68,10 @@ impl Trade {
             execution_timestamp: 0,
             price: 0.0,
             cost: 0.0,
+            pro_rata_buy_cost: 0.0,
             avg_entry_price: 0.0,
             holding_period: 0,
-            realized_pnl: 0.0,
+            realized_pnl_gross: 0.0,
             realized_return: 0.0,
             trade_comment: None,
         }
@@ -85,9 +88,10 @@ impl Trade {
             execution_timestamp: 0,
             price: 0.0,
             cost: 0.0,
+            pro_rata_buy_cost: 0.0,
             avg_entry_price: 0.0,
             holding_period: 0,
-            realized_pnl: 0.0,
+            realized_pnl_gross: 0.0,
             realized_return: 0.0,
             trade_comment: None,
         }
@@ -104,9 +108,10 @@ impl Trade {
             execution_timestamp: 0,
             price: 0.0,
             cost: 0.0,
+            pro_rata_buy_cost: 0.0,
             avg_entry_price: 0.0,
             holding_period: 0,
-            realized_pnl: 0.0,
+            realized_pnl_gross: 0.0,
             realized_return: 0.0,
             trade_comment: None,
         }
@@ -123,9 +128,10 @@ impl Trade {
             execution_timestamp: 0,
             price: 0.0,
             cost: 0.0,
+            pro_rata_buy_cost: 0.0,
             avg_entry_price: 0.0,
             holding_period: 0,
-            realized_pnl: 0.0,
+            realized_pnl_gross: 0.0,
             realized_return: 0.0,
             trade_comment: None,
         }
@@ -146,15 +152,17 @@ impl Trade {
         price: f32,
         timestamp: u64,
         cost: f32,
+        pro_rata_buy_cost: f32,
         avg_entry_price: f32,
         entry_timestamp: u64,
     ) {
         self.price = price;
         self.execution_timestamp = timestamp;
         self.cost = cost;
+        self.pro_rata_buy_cost = pro_rata_buy_cost;
         self.holding_period = timestamp - entry_timestamp;
         self.avg_entry_price = avg_entry_price;
-        self.realized_pnl = (price - avg_entry_price - cost) * self.quantity;
+        self.realized_pnl_gross = (price - avg_entry_price) * self.quantity;
         self.trade_status = TradeStatus::Executed;
         self.realized_return = (price - cost) / avg_entry_price - 1.0;
     }
