@@ -77,6 +77,32 @@ pub fn timestamp_to_datetime(timestamp: i64) -> DateTime<Utc> {
     DateTime::from_timestamp(timestamp, 0).unwrap_or_else(|| Utc::now())
 }
 
+/// Converts Unix timestamp (i64) to EST date string
+pub fn timestamp_to_est_date(timestamp: i64) -> String {
+    let utc_datetime = timestamp_to_datetime(timestamp);
+
+    // Convert UTC to EST (UTC-5) or EDT (UTC-4) depending on daylight saving time
+    // For simplicity, we'll use a fixed offset of -5 hours (EST)
+    // In a production environment, you might want to use a proper timezone library
+    // like chrono-tz for accurate DST handling
+
+    let est_datetime = utc_datetime - chrono::Duration::hours(5);
+
+    // Format as YYYY-MM-DD
+    est_datetime.format("%Y-%m-%d").to_string()
+}
+
+/// Converts Unix timestamp (i64) to EST datetime string with time
+pub fn timestamp_to_est_datetime(timestamp: i64) -> String {
+    let utc_datetime = timestamp_to_datetime(timestamp);
+
+    // Convert UTC to EST (UTC-5)
+    let est_datetime = utc_datetime - chrono::Duration::hours(5);
+
+    // Format as YYYY-MM-DD HH:MM:SS
+    est_datetime.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
 pub fn is_end_of_period(timestamp: i64, frequency: &Frequency) -> bool {
     match frequency {
         Frequency::Daily => {

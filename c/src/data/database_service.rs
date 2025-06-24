@@ -80,11 +80,11 @@ pub async fn get_historicals_date_range(
         let table: String = row.get("tablename");
 
         if let Some(pair) = parse_historical_table_name(&table) {
-            // Get first and last timestamp from the table
+            // Get first and last timestamp from the table (second earliest/latest)
             let range_query = format!(
                 "SELECT 
-                    (SELECT timestamp FROM historical.{} ORDER BY timestamp ASC LIMIT 1) as start_ts,
-                    (SELECT timestamp FROM historical.{} ORDER BY timestamp DESC LIMIT 1) as end_ts",
+                    (SELECT timestamp FROM historical.{} ORDER BY timestamp ASC LIMIT 1 OFFSET 1) as start_ts,
+                    (SELECT timestamp FROM historical.{} ORDER BY timestamp DESC LIMIT 1 OFFSET 1) as end_ts",
                 table, table
             );
 
@@ -92,9 +92,7 @@ pub async fn get_historicals_date_range(
                 if let Some(range_row) = range_rows.first() {
                     let start_ts: i64 = range_row.get("start_ts");
                     let end_ts: i64 = range_row.get("end_ts");
-                    // Add one day (86400 seconds) to the start timestamp for buffer
-                    let adjusted_start_ts = start_ts + 86400;
-                    date_ranges.insert(pair, (adjusted_start_ts, end_ts));
+                    date_ranges.insert(pair, (start_ts, end_ts));
                 }
             }
         }
@@ -123,6 +121,19 @@ pub async fn get_historical_data(
             let coin1 = parts[0].to_lowercase();
             let coin2 = parts[1].to_lowercase();
             let table_name = format!("historical_coinbase_{}_{}", coin1, coin2);
+
+            // First, let's check what data exists in the table
+            let count_query = format!(
+                "SELECT COUNT(*) as total_count FROM historical.{} WHERE timestamp >= $1 AND timestamp <= $2",
+                table_name
+            );
+
+            let count_rows = connection
+                .query(&count_query, &[&start_timestamp, &end_timestamp])
+                .await?;
+            if let Some(count_row) = count_rows.first() {
+                let _total_count: i64 = count_row.get("total_count");
+            }
 
             // Query the historical data for this trading pair
             let query = format!(

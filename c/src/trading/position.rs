@@ -146,6 +146,7 @@ impl Position {
         self.net_position.push(self.quantity);
 
         self.notional = new_quantity * price;
+        self.position_status = PositionStatus::Open;
     }
 
     #[inline(always)]
@@ -156,13 +157,14 @@ impl Position {
         timestamp: u64,
         cost: f32,
         trade_type: TradeType,
+        pro_rata_buy_cost: f32,
     ) -> f32 {
-        let pnl = (price - self.avg_entry_price) * quantity - cost;
+        let pnl = (price - self.avg_entry_price) * quantity - cost - pro_rata_buy_cost;
         let sell_proceeds = price * quantity;
 
         self.cum_sell_proceeds += sell_proceeds;
         self.cum_sell_cost += cost;
-        self.realized_pnl_gross += pnl + cost;
+        self.realized_pnl_gross += pnl + cost + pro_rata_buy_cost;
         self.last_exit_price = price;
         self.last_exit_timestamp = timestamp;
         self.quantity = (self.quantity - quantity).max(0.0);

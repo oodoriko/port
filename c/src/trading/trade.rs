@@ -35,7 +35,6 @@ pub struct Trade {
 
     pub trade_comment: Option<String>,
 }
-
 impl Trade {
     #[inline(always)]
     pub fn signal_buy(quantity: f32, ticker_id: usize, generated_at: u64) -> Self {
@@ -164,7 +163,9 @@ impl Trade {
         self.avg_entry_price = avg_entry_price;
         self.realized_pnl_gross = (price - avg_entry_price) * self.quantity;
         self.trade_status = TradeStatus::Executed;
-        self.realized_return = (price - cost) / avg_entry_price - 1.0;
+        self.realized_return =
+            ((price - cost) * self.quantity - pro_rata_buy_cost) / avg_entry_price * self.quantity
+                - 1.0;
     }
 
     #[inline(always)]

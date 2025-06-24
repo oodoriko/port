@@ -1,4 +1,4 @@
-![](./ababa/hahahaha.png)
+![](./ababa/hahahahaha.png)
 
 DONE:
 
@@ -12,19 +12,18 @@ DONE:
 8. job to backfill historical
 9. take profit logic done
 10. set up db service for both be and fe (and read role)
-
-to-do: 10. job to cache daily coinbase data
+11. show results properly
+12. to-do: 10. job to cache daily coinbase data
 
 result:
 
 1. when to save a backtest
-2. show result properly (show all + metrics)
-3. show all run result (grid?)
-4. cache backtest data(meta: bk id, set up) (key perf) (full results)
+2. show all run result (grid?)
+3. cache backtest data(meta: bk id, set up) (key perf) (full results)
 
-5. cost logic,
+4. cost logic,
 
-6. grid search? need to think it through
+5. grid search? need to think it through
 
 - dont think indicator's param should be touched
 - strategy combo -> easy, a list

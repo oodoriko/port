@@ -4,9 +4,19 @@ use crate::core::params::{
 use crate::data::database_service;
 use crate::trading::portfolio::Portfolio;
 use crate::trading::strategy::Strategy;
-use crate::trading::trade::TradeType;
+use crate::trading::trade::{Trade, TradeType};
 use chrono::{DateTime, Utc};
 use port_etl::InfluxDBHandler;
+use std::time::Instant;
+
+pub struct BacktestResult {
+    pub portfolio: Portfolio,
+    pub executed_trades_by_date: std::collections::HashMap<i64, Vec<Trade>>,
+    pub exited_early: bool,
+    pub start_timestamp: u64,
+    pub end_timestamp: u64,
+    pub exit_price: Vec<f32>, // use to calculate unrealized pnl is positions are still open
+}
 
 #[inline(always)]
 pub async fn backtest(
@@ -22,17 +32,29 @@ pub async fn backtest(
     warm_up_period: usize,
     cadence: u64, // in minutes
     debug: bool,
-) -> Result<
-    (
-        Portfolio,
-        std::collections::HashMap<i64, Vec<crate::trading::trade::Trade>>,
-        bool,
-    ),
-    Box<dyn std::error::Error>,
-> {
+) -> Result<BacktestResult, Box<dyn std::error::Error>> {
+    let total_timer = Instant::now();
+    let data_timer = Instant::now();
+
     let mut early_exit = false;
 
     let (data, timestamps) = get_data(tickers.clone(), start, end, debug, cadence).await?;
+
+    println!(
+        "[Timer] Time to get data: {:.3} seconds",
+        data_timer.elapsed().as_secs_f64()
+    );
+
+    // Safety check: ensure we have enough data for warm-up period
+    if data.len() <= warm_up_period {
+        return Err(format!(
+            "Insufficient data: got {} data points, need at least {} for warm-up period",
+            data.len(),
+            warm_up_period + 1
+        )
+        .into());
+    }
+
     let warm_up_price_data: Vec<Vec<Vec<f32>>> = data[..warm_up_period].to_vec();
 
     let mut strategy = Strategy::new(
@@ -60,10 +82,9 @@ pub async fn backtest(
     let data_len = data.len();
 
     println!("Start backtesting...");
-    println!("start: {:?}", start);
-    println!("end: {:?}", end);
-
-    for idx in warm_up_period..data_len {
+    let mut exit_idx = data_len - 2;
+    let backtest_timer = Instant::now();
+    for idx in warm_up_period..data_len - 1 {
         // Ensure we don't exceed timestamps array bounds
         if idx >= timestamps.len() {
             println!("Warning: Reached end of timestamp data at index {}", idx);
@@ -108,6 +129,7 @@ pub async fn backtest(
             executed_trades_by_date.insert(time, risk_management_trades);
             println!("江南皮革厂倒闭啦！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！");
             early_exit = true;
+            exit_idx = idx;
             break;
         }
 
@@ -195,17 +217,31 @@ pub async fn backtest(
         println!("Early exit due to max drawdown");
     }
 
-    // Timestamps are now recorded during post_order_update to match curve data points
-    // portfolio.timestamps already contains the correct timestamps
-
     println!("Total trade executions: {}", executed_trades_by_date.len());
-    println!("Total time periods: {}", data_len - warm_up_period);
+    println!("Total time periods: {}", data_len - 1 - warm_up_period);
     println!(
         "Trade execution rate: {:.2}%",
         (executed_trades_by_date.len() as f64 / (data_len - warm_up_period) as f64) * 100.0
     );
 
-    Ok((portfolio, executed_trades_by_date, early_exit))
+    println!(
+        "[Timer] Time to run backtest: {:.3} seconds",
+        backtest_timer.elapsed().as_secs_f64()
+    );
+
+    println!(
+        "[Timer] Total time for backtest function: {:.3} seconds",
+        total_timer.elapsed().as_secs_f64()
+    );
+
+    Ok(BacktestResult {
+        portfolio,
+        executed_trades_by_date,
+        exited_early: early_exit,
+        start_timestamp: timestamps[warm_up_period + 1] as u64,
+        end_timestamp: timestamps[exit_idx] as u64,
+        exit_price: data[data_len - 1].iter().map(|x| x[3]).collect::<Vec<_>>(),
+    })
 }
 
 async fn get_data(

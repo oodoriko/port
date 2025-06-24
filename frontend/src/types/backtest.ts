@@ -204,77 +204,77 @@ export interface BacktestResult {
   trade_timestamps: number[];
   total_records: number;
   tickers: string[];
-  position_performances?: PositionPerformance[];
-  trade_metrics?: TradeMetrics;
+  key_metrics: KeyMetrics;
+  risk_free_rate: number;
 }
 
-export interface PositionPerformance {
-  ticker_id: number;
-  ticker_name: string;
-  quantity: number;
-  sell_cost_ratio: number;
-  buy_cost_ratio: number;
-  total_cum_cost: number;
-  realized_pnl: number;
-  take_profit_gain: number;
-  take_profit_loss: number;
-  stop_loss_gain: number;
-  stop_loss_loss: number;
-  signal_sell_gain: number;
-  signal_sell_loss: number;
-  position_status: "Open" | "Closed";
+export interface KeyMetrics {
+  // Portfolio level metrics
+  status: string;
+  portfolio_name: string;
+  num_trades: number;
+  duration: number; // Duration in years
+
+  // Overview
+  market_value: number;
+  peak_equity: number;
+  cash_injection: number;
+  net_realized_pnl: number;
+  composition: number[];
+
+  // Return metrics
+  gross_return: number;
+  net_return: number;
+  annualized_return: number;
+  win_rate: number;
+  profit_factor: number;
+
+  // Risk metrics
+  max_drawdown: number;
+  max_drawdown_duration: number;
+  sharpe_ratio: number;
+  sortino_ratio: number;
+  calmar_ratio: number;
+
+  // Position metrics
+  position_metrics: PositionMetrics[];
+  risk_free_rate: number;
+}
+
+export interface PositionMetrics {
+  status: string;
+  asset_name: number;
+  num_trades: number;
+
+  // Overview
+  realized_pnl_net: number;
+  unrealized_pnl_net: number;
+  alpha: number;
+  beta: number;
+
+  // Return metrics
+  gross_return: number;
+  net_return: number;
+  annualized_return: number;
+  win_rate: number;
+  profit_factor: number;
+
+  // Contribution metrics
   take_profit_gain_pct: number;
   take_profit_loss_pct: number;
   stop_loss_gain_pct: number;
   stop_loss_loss_pct: number;
   signal_sell_gain_pct: number;
   signal_sell_loss_pct: number;
-  realized_ratio: number;
-  gross_realized_return: number;
-  net_realized_return: number;
-  gross_unrealized_return: number;
-  net_unrealized_return: number;
-}
 
-export interface TickerTradeMetrics {
-  ticker_id: number;
-  ticker_name: string;
-  total_trades: number;
-  buy_trades: number;
-  sell_trades: number;
-  avg_trades_per_day: number;
-  avg_buy_trades_per_day: number;
-  avg_sell_trades_per_day: number;
-  buy_trade_pct: number;
-  sell_trade_pct: number;
-  executed_trades: number;
-  failed_trades: number;
-  rejected_trades: number;
-  pending_trades: number;
-  executed_pct: number;
-  failed_pct: number;
-  rejected_pct: number;
-  pending_pct: number;
-  sell_trades_with_holding_period: number;
-  avg_holding_period_minutes: number;
-  max_holding_period_minutes: number;
-  min_holding_period_minutes: number;
-  sell_trades_with_returns: number;
-  avg_gross_return: number;
-  avg_net_return: number;
-  win_rate: number;
-  trading_days: number;
-  avg_win_rate_per_day: number;
-}
+  // Trade metrics
+  take_profit_trades_pct: number;
+  stop_loss_trades_pct: number;
+  signal_sell_trades_pct: number;
+  sell_pct: number;
+  buy_pct: number;
 
-export interface TradeMetrics {
-  ticker_metrics: Record<number, TickerTradeMetrics>;
-  total_trades: number;
-  total_buy_trades: number;
-  total_sell_trades: number;
-  overall_win_rate: number;
-  overall_avg_gross_return: number;
-  overall_avg_net_return: number;
+  net_position: number[];
 }
 
 import { DateTime } from "luxon";

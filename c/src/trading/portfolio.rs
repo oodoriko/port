@@ -23,6 +23,8 @@ pub struct Portfolio {
     pub pending_trades: Vec<Trade>,
     pub peak_equity: f32,
     pub num_assets: usize,
+    pub total_capital_distribution: f32,
+    pub status: String,
     commission_rate: f32,
     last_cash_distribution_period: Option<i64>, // Track the period when last cash distribution occurred
 }
@@ -57,6 +59,8 @@ impl Portfolio {
             num_assets,
             commission_rate: 0.001,
             last_cash_distribution_period: None,
+            total_capital_distribution: initial_cash,
+            status: "Open".to_string(),
         }
     }
 
@@ -165,15 +169,16 @@ impl Portfolio {
                             trade.set_comment("Insufficient cash".to_string());
                         }
                     } else {
+                        let pro_rata_buy_cost =
+                            position.cum_buy_cost * trade.quantity / position.total_shares_bought;
                         let realized_pnl = position.update_sell_position(
                             price,
                             trade.quantity,
                             timestamp,
                             initial_cost,
                             trade.trade_type,
+                            pro_rata_buy_cost,
                         );
-                        let pro_rata_buy_cost =
-                            position.cum_buy_cost * trade.quantity / position.total_shares_bought;
                         trade.update_sell_trade(
                             price,
                             timestamp,
@@ -241,6 +246,7 @@ impl Portfolio {
             total_realized_pnl,
         );
         self.pending_trades = Vec::new();
+        self.status = "Liquidated".to_string();
     }
 
     /// Get the period identifier for a timestamp based on frequency
@@ -289,11 +295,13 @@ impl Portfolio {
         self.last_cash_distribution_period = Some(current_period);
 
         let current_equity = self.get_current_equity();
-        return if self.portfolio_params.capital_growth_amount > 0.0 {
+        let new_cash = if self.portfolio_params.capital_growth_amount > 0.0 {
             self.portfolio_params.capital_growth_amount
         } else {
             current_equity * self.portfolio_params.capital_growth_pct
         };
+        self.total_capital_distribution += new_cash;
+        new_cash
     }
 
     #[inline(always)]

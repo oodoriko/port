@@ -5,6 +5,7 @@ import {
   Grid,
   Group,
   LoadingOverlay,
+  NumberFormatter,
   Paper,
   Stack,
   Tabs,
@@ -14,19 +15,24 @@ import {
 import { notifications } from "@mantine/notifications";
 import { useState } from "react";
 import { runBacktest } from "./api/backtest";
+import { BacktestDetails } from "./components/BacktestDetails";
 import { BacktestForm } from "./components/BacktestForm";
-import { BacktestKeyMetrics } from "./components/BacktestKeyMetrics";
+import { BacktestResults } from "./components/BacktestResults";
 import type { BacktestParams, BacktestResult } from "./types/backtest";
 
 function App() {
   console.log("🚀 App component is rendering!");
 
   const [results, setResults] = useState<BacktestResult | null>(null);
+  const [backtestParams, setBacktestParams] = useState<BacktestParams | null>(
+    null
+  );
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string | null>("backtest");
 
   const handleBacktest = async (params: BacktestParams) => {
     setLoading(true);
+    setBacktestParams(params);
     try {
       const result = await runBacktest(params);
       setResults(result);
@@ -52,7 +58,7 @@ function App() {
       <Stack gap="xl">
         <Box>
           <Title order={1} mb="md">
-            🫧 W~H~A~L~E 🫧
+            🩴🩱🌊🐬🪼🧢🧊
           </Title>
           <Text c="dimmed">
             吾輩はサトシである🐳
@@ -69,6 +75,7 @@ function App() {
         <Tabs value={activeTab} onChange={setActiveTab}>
           <Tabs.List>
             <Tabs.Tab value="backtest">Backtest Runner</Tabs.Tab>
+            <Tabs.Tab value="details">Backtest Details</Tabs.Tab>
             <Tabs.Tab value="charts">Price Charts</Tabs.Tab>
           </Tabs.List>
 
@@ -95,16 +102,20 @@ function App() {
                     </Title>
                     {results ? (
                       <Badge variant="light" size="sm">
-                        {results.total_records} records
+                        <NumberFormatter
+                          value={results.total_records}
+                          thousandSeparator
+                        />{" "}
+                        records
                       </Badge>
                     ) : (
                       <Box w={100} />
                     )}
                   </Group>
                   {results ? (
-                    <BacktestKeyMetrics results={results} />
+                    <BacktestResults results={results} />
                   ) : (
-                    // <BacktestResults results={results} />
+                    // <BacktestKeyMetrics results={results} />
                     <Text c="dimmed" ta="center" py="xl">
                       Run a backtest to see results here
                     </Text>
@@ -112,6 +123,33 @@ function App() {
                 </Paper>
               </Grid.Col>
             </Grid>
+          </Tabs.Panel>
+
+          <Tabs.Panel value="details" mt="xl">
+            <Paper shadow="sm" p="lg" radius="md">
+              <Group justify="space-between" align="center" mb="md">
+                <Title order={2} size="h3" m={0}>
+                  Backtest Configuration Details
+                </Title>
+                {backtestParams ? (
+                  <Badge variant="light" size="sm">
+                    {backtestParams.strategy_name}
+                  </Badge>
+                ) : (
+                  <Box w={100} />
+                )}
+              </Group>
+              {backtestParams ? (
+                <BacktestDetails
+                  backtestParams={backtestParams}
+                  backtestResult={results || undefined}
+                />
+              ) : (
+                <Text c="dimmed" ta="center" py="xl">
+                  Run a backtest to see configuration details here
+                </Text>
+              )}
+            </Paper>
           </Tabs.Panel>
 
           {/* <Tabs.Panel value="charts" mt="xl">

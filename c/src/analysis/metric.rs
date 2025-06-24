@@ -1,24 +1,30 @@
+use crate::analysis::backtest::BacktestResult;
 use crate::trading::position::{Position, PositionStatus};
-use crate::trading::trade::{Trade, TradeStatus, TradeType};
+use crate::trading::trade::{Trade, TradeType};
+use crate::utils::utils::timestamp_to_est_date;
 use std::collections::HashMap;
+use std::time::Instant;
 
 #[derive(Debug, Clone)]
-pub struct PositionPerformance {
-    pub ticker_id: u32,
-    pub quantity: f32,
-    pub sell_cost_ratio: f32, // cum_sell_cost/(cum_sell_cost + cum_buy_cost)
-    pub buy_cost_ratio: f32,  // cum_buy_cost/(cum_sell_cost + cum_buy_cost)
-    pub total_cum_cost: f32,  // cum_sell_cost + cum_buy_cost
-    pub realized_pnl: f32,
-    pub take_profit_gain: f32,
-    pub take_profit_loss: f32,
-    pub stop_loss_gain: f32,
-    pub stop_loss_loss: f32,
-    pub signal_sell_gain: f32,
-    pub signal_sell_loss: f32,
-    pub position_status: PositionStatus,
+pub struct PositionMetrics {
+    // position level metrics
+    pub status: PositionStatus,
+    pub asset_name: u32,
+    pub num_trades: f32,
+    // overview
+    pub realized_pnl_net: f32,
+    pub unrealized_pnl_net: f32,
+    pub alpha: f32,
+    pub beta: f32,
 
-    // Percentage calculations against realized PnL
+    //return metrics
+    pub gross_return: f32,
+    pub net_return: f32,
+    pub annualized_return: f32,
+    pub win_rate: f32,
+    pub profit_factor: f32,
+
+    // contribution metrics - against realized pnl
     pub take_profit_gain_pct: f32,
     pub take_profit_loss_pct: f32,
     pub stop_loss_gain_pct: f32,
@@ -26,498 +32,522 @@ pub struct PositionPerformance {
     pub signal_sell_gain_pct: f32,
     pub signal_sell_loss_pct: f32,
 
-    // Return calculations
-    pub realized_ratio: f32,        // total_sold_shares / total_bought_shares
-    pub gross_realized_return: f32, // (cum_sell_proceeds - cum_buy_proceeds * realized_ratio) / (cum_buy_proceeds * realized_ratio)
-    pub net_realized_return: f32,   // same as gross but net of costs
-    pub gross_unrealized_return: f32, // for remaining position
-    pub net_unrealized_return: f32, // for remaining position
+    // trade metrics
+    pub take_profit_trades_pct: f32,
+    pub stop_loss_trades_pct: f32,
+    pub signal_sell_trades_pct: f32,
+    pub sell_pct: f32,
+    pub buy_pct: f32,
+
+    pub net_position: Vec<f32>,
+}
+
+impl PositionMetrics {
+    pub fn from_position(position: &Position, price: f32, aggregate_trades: TradeMetrics) -> Self {
+        let ticker_id = position.ticker_id as usize;
+        let num_trades = aggregate_trades.position_sell_count[ticker_id]
+            + aggregate_trades.position_buy_count[ticker_id];
+        let profiting_trades_cnt = aggregate_trades.position_total_win_trades[ticker_id] as f32;
+        let realized_pnl_net =
+            position.realized_pnl_gross - position.cum_buy_cost - position.cum_sell_cost;
+        let net_return = (position.cum_sell_proceeds
+            - position.cum_buy_proceeds
+            - position.cum_sell_cost
+            - position.cum_buy_cost)
+            / (position.cum_buy_proceeds + position.cum_buy_cost);
+        let position_metrics = Self {
+            status: position.position_status,
+            asset_name: ticker_id as u32,
+            num_trades: num_trades,
+
+            realized_pnl_net: realized_pnl_net,
+            unrealized_pnl_net: position.quantity * price
+                - position.cum_buy_proceeds * (position.quantity / position.total_shares_bought),
+            alpha: 0.0,
+            beta: 0.0,
+
+            gross_return: (position.cum_sell_proceeds - position.cum_buy_proceeds)
+                / position.cum_buy_proceeds,
+            net_return: net_return,
+            annualized_return: calculate_annualized_return(
+                net_return,
+                position.cum_buy_proceeds as u64,
+                position.cum_sell_proceeds as u64,
+            ),
+            win_rate: profiting_trades_cnt / num_trades,
+            profit_factor: aggregate_trades.total_gross_gain / aggregate_trades.total_gross_loss,
+
+            take_profit_gain_pct: position.take_profit_gain / realized_pnl_net,
+            take_profit_loss_pct: position.take_profit_loss / realized_pnl_net,
+            stop_loss_gain_pct: position.stop_loss_gain / realized_pnl_net,
+            stop_loss_loss_pct: position.stop_loss_loss / realized_pnl_net,
+            signal_sell_gain_pct: position.signal_sell_gain / realized_pnl_net,
+            signal_sell_loss_pct: position.signal_sell_loss / realized_pnl_net,
+
+            take_profit_trades_pct: aggregate_trades.position_take_profit_count[ticker_id]
+                / aggregate_trades.position_sell_count[ticker_id],
+            stop_loss_trades_pct: aggregate_trades.position_stop_loss_count[ticker_id]
+                / aggregate_trades.position_sell_count[ticker_id],
+            signal_sell_trades_pct: aggregate_trades.position_signal_sell_count[ticker_id]
+                / aggregate_trades.position_sell_count[ticker_id],
+            sell_pct: aggregate_trades.position_sell_count[ticker_id] / num_trades,
+            buy_pct: aggregate_trades.position_buy_count[ticker_id] / num_trades,
+
+            net_position: position.net_position.clone(),
+        };
+
+        position_metrics
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct TradeMetrics {
-    // Per ticker metrics
-    pub ticker_metrics: HashMap<usize, TickerTradeMetrics>,
-    // Overall metrics
-    pub total_trades: usize,
-    pub total_buy_trades: usize,
-    pub total_sell_trades: usize,
-    pub overall_win_rate: f32,
-    pub overall_avg_gross_return: f32,
-    pub overall_avg_net_return: f32,
-}
-
-#[derive(Debug, Clone)]
-pub struct TickerTradeMetrics {
-    pub ticker_id: usize,
-    pub total_trades: usize,
-    pub buy_trades: usize,
-    pub sell_trades: usize,
-    pub avg_trades_per_day: f32,
-    pub avg_buy_trades_per_day: f32,
-    pub avg_sell_trades_per_day: f32,
-    pub buy_trade_pct: f32,
-    pub sell_trade_pct: f32,
-
-    // Trade status breakdown
-    pub executed_trades: usize,
-    pub failed_trades: usize,
-    pub rejected_trades: usize,
-    pub pending_trades: usize,
-    pub executed_pct: f32,
-    pub failed_pct: f32,
-    pub rejected_pct: f32,
-    pub pending_pct: f32,
-
-    // Sell trade specific metrics
-    pub sell_trades_with_holding_period: usize,
-    pub avg_holding_period_minutes: f32,
-    pub max_holding_period_minutes: f32,
-    pub min_holding_period_minutes: f32,
-
-    // Return metrics
-    pub sell_trades_with_returns: usize,
-    pub avg_gross_return: f32,
-    pub avg_net_return: f32,
-    pub win_rate: f32,
-
-    // Daily metrics
-    pub trading_days: usize,
-    pub avg_win_rate_per_day: f32,
+    pub daily_net_return: Vec<f32>,
+    pub position_gross_loss: Vec<f32>,
+    pub position_gross_gain: Vec<f32>,
+    pub position_buy_count: Vec<f32>,
+    pub position_sell_count: Vec<f32>,
+    pub position_take_profit_count: Vec<f32>,
+    pub position_stop_loss_count: Vec<f32>,
+    pub position_signal_sell_count: Vec<f32>,
+    pub position_total_win_trades: Vec<f32>,
+    pub position_first_trade: Vec<u64>,
+    pub position_last_trade: Vec<u64>,
+    pub total_gross_loss: f32,
+    pub total_gross_gain: f32,
 }
 
 impl TradeMetrics {
-    pub fn from_trades(trades: &[Trade]) -> Self {
-        let mut ticker_metrics: HashMap<usize, TickerTradeMetrics> = HashMap::new();
-        let mut total_trades = 0;
-        let mut total_buy_trades = 0;
-        let mut total_sell_trades = 0;
-        let mut total_wins = 0;
-        let mut total_gross_return_sum = 0.0;
-        let mut total_net_return_sum = 0.0;
-        let mut total_sell_trades_with_returns = 0;
+    pub fn to_hashmap(&self) -> HashMap<String, Vec<f32>> {
+        let mut map = HashMap::with_capacity(10);
+        map.insert(
+            "daily_net_return".to_string(),
+            self.daily_net_return.clone(),
+        );
+        map.insert(
+            "position_gross_loss".to_string(),
+            self.position_gross_loss.clone(),
+        );
+        map.insert(
+            "position_gross_gain".to_string(),
+            self.position_gross_gain.clone(),
+        );
+        map.insert(
+            "position_buy_count".to_string(),
+            self.position_buy_count.clone(),
+        );
+        map.insert(
+            "position_sell_count".to_string(),
+            self.position_sell_count.clone(),
+        );
+        map.insert(
+            "position_take_profit_count".to_string(),
+            self.position_take_profit_count.clone(),
+        );
+        map.insert(
+            "position_stop_loss_count".to_string(),
+            self.position_stop_loss_count.clone(),
+        );
+        map.insert(
+            "position_signal_sell_count".to_string(),
+            self.position_signal_sell_count.clone(),
+        );
+        map.insert(
+            "position_total_win_trades".to_string(),
+            self.position_total_win_trades.clone(),
+        );
+        map.insert(
+            "position_first_trade".to_string(),
+            self.position_first_trade
+                .iter()
+                .map(|&x| x as f32)
+                .collect(),
+        );
+        map.insert(
+            "position_last_trade".to_string(),
+            self.position_last_trade.iter().map(|&x| x as f32).collect(),
+        );
+        map
+    }
+}
 
-        // Group trades by ticker and day
-        let mut trades_by_ticker: HashMap<usize, Vec<&Trade>> = HashMap::new();
-        let mut trades_by_day: HashMap<u64, Vec<&Trade>> = HashMap::new();
+#[derive(Debug, Clone)]
+pub struct KeyMetrics {
+    // overview
+    pub status: String,
+    pub portfolio_name: String,
+    pub num_trades: f32,
+    pub duration: f32, // Duration in years
+
+    // overview
+    pub market_value: f32,
+    pub peak_equity: f32,
+    pub cash_injection: f32,
+    pub net_realized_pnl: f32,
+    pub composition: Vec<f32>,
+
+    // return metrics
+    pub gross_return: f32,
+    pub net_return: f32,
+    pub annualized_return: f32,
+    pub win_rate: f32,
+    pub profit_factor: f32,
+
+    // risk metrics
+    pub max_drawdown: f32,
+    pub max_drawdown_duration: f32,
+    pub sharpe_ratio: f32,
+    pub sortino_ratio: f32,
+    pub calmar_ratio: f32,
+
+    // position
+    pub position_metrics: Vec<PositionMetrics>,
+    pub risk_free_rate: f32,
+}
+
+impl KeyMetrics {
+    pub fn new(backtest_result: &BacktestResult, risk_free_rate: f32) -> Self {
+        let timer = Instant::now();
+        let portfolio = &backtest_result.portfolio;
+        let trades = backtest_result
+            .executed_trades_by_date
+            .values()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>();
+        let latest_prices = &backtest_result.exit_price;
+
+        let aggregate_trades = Self::aggregate_trades(&trades, portfolio.num_assets);
+        let mut position_metrics = Vec::new();
+        for position_option in &portfolio.positions {
+            if let Some(position) = position_option {
+                position_metrics.push(PositionMetrics::from_position(
+                    position,
+                    latest_prices[position.ticker_id as usize],
+                    aggregate_trades.clone(),
+                ));
+            }
+        }
+        let net_return = (portfolio.equity_curve.last().unwrap()
+            - portfolio.cash_curve.iter().sum::<f32>())
+            / portfolio.equity_curve.first().unwrap();
+        let unrealized_pnl = portfolio
+            .holdings
+            .iter()
+            .zip(latest_prices)
+            .map(|(h, p)| h * p)
+            .sum::<f32>();
+        let total_win_trades = aggregate_trades
+            .daily_net_return
+            .iter()
+            .filter(|&&x| x > 0.0)
+            .count() as f32;
+
+        let (max_drawdown, max_drawdown_duration) = calculate_max_drawdown(&portfolio.equity_curve);
+        let (sharpe_ratio, sortino_ratio, calmar_ratio) = calculate_risk_metrics(
+            &aggregate_trades.daily_net_return,
+            risk_free_rate,
+            max_drawdown,
+        );
+
+        // Calculate duration in years
+        let duration = if backtest_result.start_timestamp < backtest_result.end_timestamp {
+            let time_diff_seconds =
+                (backtest_result.end_timestamp - backtest_result.start_timestamp) as f64;
+            (time_diff_seconds / (365.25 * 24.0 * 60.0 * 60.0)) as f32
+        } else {
+            0.0
+        };
+
+        let result = Self {
+            status: portfolio.status.clone(),
+            portfolio_name: portfolio.name.clone(),
+            num_trades: aggregate_trades.position_buy_count.iter().sum::<f32>()
+                + aggregate_trades.position_sell_count.iter().sum::<f32>(),
+            duration,
+            market_value: unrealized_pnl,
+            peak_equity: portfolio.peak_equity,
+            cash_injection: portfolio.total_capital_distribution,
+            net_realized_pnl: portfolio.realized_pnl_curve.iter().sum::<f32>(),
+            composition: if unrealized_pnl > 0.0 {
+                portfolio
+                    .holdings
+                    .iter()
+                    .zip(latest_prices)
+                    .map(|(h, p)| h * p / unrealized_pnl)
+                    .collect()
+            } else {
+                vec![0.0; portfolio.num_assets]
+            },
+            gross_return: portfolio.equity_curve.last().unwrap()
+                / portfolio.equity_curve.first().unwrap(),
+            net_return: net_return,
+            annualized_return: calculate_annualized_return(
+                net_return,
+                backtest_result.start_timestamp as u64,
+                backtest_result.end_timestamp as u64,
+            ),
+            win_rate: total_win_trades / aggregate_trades.daily_net_return.len() as f32,
+            profit_factor: aggregate_trades.total_gross_gain / aggregate_trades.total_gross_loss,
+            max_drawdown,
+            max_drawdown_duration,
+            sharpe_ratio,
+            sortino_ratio,
+            calmar_ratio,
+            position_metrics,
+            risk_free_rate,
+        };
+        println!(
+            "[Timer] Time to run key metrics calculation: {:.3} seconds",
+            timer.elapsed().as_secs_f64()
+        );
+        result
+    }
+
+    pub fn aggregate_trades(trades: &[Trade], num_assets: usize) -> TradeMetrics {
+        if trades.is_empty() {
+            return TradeMetrics {
+                daily_net_return: Vec::new(),
+                position_gross_loss: vec![0.0; num_assets],
+                position_gross_gain: vec![0.0; num_assets],
+                position_buy_count: vec![0.0; num_assets],
+                position_sell_count: vec![0.0; num_assets],
+                position_take_profit_count: vec![0.0; num_assets],
+                position_stop_loss_count: vec![0.0; num_assets],
+                position_signal_sell_count: vec![0.0; num_assets],
+                position_total_win_trades: vec![0.0; num_assets],
+                position_first_trade: vec![0u64; num_assets],
+                position_last_trade: vec![0u64; num_assets],
+                total_gross_loss: 0.0,
+                total_gross_gain: 0.0,
+            };
+        }
+
+        let mut total_gross_loss = 0.0;
+        let mut total_gross_gain = 0.0;
+
+        let mut position_gross_loss = vec![0.0; num_assets];
+        let mut position_gross_gain = vec![0.0; num_assets];
+        let mut position_buy_count = vec![0.0; num_assets];
+        let mut position_sell_count = vec![0.0; num_assets];
+        let mut position_take_profit_count = vec![0.0; num_assets];
+        let mut position_stop_loss_count = vec![0.0; num_assets];
+        let mut position_signal_sell_count = vec![0.0; num_assets];
+        let mut position_total_win_trades = vec![0.0; num_assets];
+
+        let mut daily_net_return = Vec::new();
+
+        let mut prev_day = timestamp_to_est_date(trades[0].execution_timestamp as i64);
+        let mut daily_pnl_net = 0.0;
+        let mut daily_capital_used = 0.0;
+        let mut position_daily_pnl_net = vec![0.0; num_assets];
+
+        let mut position_first_trade = vec![0u64; num_assets];
+        let mut position_last_trade = vec![0u64; num_assets];
+        let mut position_has_trades = vec![false; num_assets];
 
         for trade in trades {
             let ticker_id = trade.ticker_id;
-            let day = trade.generated_at / (24 * 60 * 60); // Convert minutes to days
+            let day = timestamp_to_est_date(trade.execution_timestamp as i64);
 
-            trades_by_ticker
-                .entry(ticker_id)
-                .or_insert_with(Vec::new)
-                .push(trade);
-            trades_by_day
-                .entry(day)
-                .or_insert_with(Vec::new)
-                .push(trade);
-
-            total_trades += 1;
-            if trade.is_buy() {
-                total_buy_trades += 1;
-            } else {
-                total_sell_trades += 1;
+            if !position_has_trades[ticker_id] {
+                position_first_trade[ticker_id] = trade.execution_timestamp;
+                position_has_trades[ticker_id] = true;
             }
-        }
+            position_last_trade[ticker_id] = trade.execution_timestamp;
 
-        // Calculate metrics for each ticker
-        for (ticker_id, ticker_trades) in &trades_by_ticker {
-            let mut buy_trades = 0;
-            let mut sell_trades = 0;
-            let mut executed_trades = 0;
-            let mut failed_trades = 0;
-            let mut rejected_trades = 0;
-            let mut pending_trades = 0;
-
-            let mut holding_periods: Vec<u64> = Vec::new();
-            let mut gross_returns: Vec<f32> = Vec::new();
-            let mut net_returns: Vec<f32> = Vec::new();
-            let mut wins = 0;
-
-            let mut trading_days_set = std::collections::HashSet::new();
-            let mut executed_trading_days_set = std::collections::HashSet::new();
-            let mut sell_trading_days_set = std::collections::HashSet::new();
-
-            for trade in ticker_trades {
-                // Count by trade type
-                if trade.is_buy() {
-                    buy_trades += 1;
+            if day != prev_day {
+                daily_net_return.push(if daily_capital_used > 0.0 {
+                    daily_pnl_net / daily_capital_used
                 } else {
-                    sell_trades += 1;
-                }
+                    0.0
+                });
 
-                // Count by status
-                match trade.trade_status {
-                    TradeStatus::Executed => executed_trades += 1,
-                    TradeStatus::Failed => failed_trades += 1,
-                    TradeStatus::Rejected => rejected_trades += 1,
-                    TradeStatus::Pending => pending_trades += 1,
-                }
-
-                // Track trading days - any trade activity
-                let day = trade.generated_at / (24 * 60 * 60);
-                trading_days_set.insert(day);
-
-                // Track days with executed trades only
-                if trade.trade_status == TradeStatus::Executed {
-                    executed_trading_days_set.insert(day);
-                }
-
-                // Track days with sell trades only
-                if !trade.is_buy() {
-                    sell_trading_days_set.insert(day);
-                }
-
-                // Calculate sell trade specific metrics
-                if !trade.is_buy() && trade.holding_period > 0 {
-                    holding_periods.push(trade.holding_period);
-                }
-
-                // Calculate return metrics for executed sell trades
-                if !trade.is_buy()
-                    && trade.trade_status == TradeStatus::Executed
-                    && trade.price > 0.0
-                {
-                    let gross_return = if trade.avg_entry_price > 0.0 {
-                        trade.realized_pnl_gross / (trade.avg_entry_price * trade.quantity)
-                    } else {
-                        0.0
-                    };
-                    gross_returns.push(gross_return);
-
-                    let net_return = if trade.avg_entry_price > 0.0 {
-                        (trade.realized_pnl_gross - trade.pro_rata_buy_cost - trade.cost)
-                            / (trade.avg_entry_price * trade.quantity + trade.pro_rata_buy_cost)
-                    } else {
-                        0.0
-                    };
-                    net_returns.push(net_return);
-
-                    if gross_return > 0.0 {
-                        wins += 1;
+                for (i, &pnl) in position_daily_pnl_net.iter().enumerate() {
+                    if pnl > 0.0 {
+                        position_total_win_trades[i] += 1.0;
                     }
                 }
+
+                prev_day = day;
+                daily_pnl_net = 0.0;
+                daily_capital_used = 0.0;
+                position_daily_pnl_net.fill(0.0);
             }
 
-            let total_trading_days = trading_days_set.len();
-            let executed_trading_days = executed_trading_days_set.len();
-            let sell_trading_days = sell_trading_days_set.len();
-
-            // Use appropriate day counts for different metrics
-            let avg_trades_per_day = if total_trading_days > 0 {
-                ticker_trades.len() as f32 / total_trading_days as f32
+            if trade.is_buy() {
+                position_buy_count[ticker_id] += 1.0;
             } else {
-                0.0
-            };
-
-            let avg_buy_trades_per_day = if total_trading_days > 0 {
-                buy_trades as f32 / total_trading_days as f32
-            } else {
-                0.0
-            };
-
-            let avg_sell_trades_per_day = if total_trading_days > 0 {
-                sell_trades as f32 / total_trading_days as f32
-            } else {
-                0.0
-            };
-
-            let buy_trade_pct = if ticker_trades.len() > 0 {
-                buy_trades as f32 / ticker_trades.len() as f32 * 100.0
-            } else {
-                0.0
-            };
-
-            let sell_trade_pct = if ticker_trades.len() > 0 {
-                sell_trades as f32 / ticker_trades.len() as f32 * 100.0
-            } else {
-                0.0
-            };
-
-            let executed_pct = if ticker_trades.len() > 0 {
-                executed_trades as f32 / ticker_trades.len() as f32 * 100.0
-            } else {
-                0.0
-            };
-
-            let failed_pct = if ticker_trades.len() > 0 {
-                failed_trades as f32 / ticker_trades.len() as f32 * 100.0
-            } else {
-                0.0
-            };
-
-            let rejected_pct = if ticker_trades.len() > 0 {
-                rejected_trades as f32 / ticker_trades.len() as f32 * 100.0
-            } else {
-                0.0
-            };
-
-            let pending_pct = if ticker_trades.len() > 0 {
-                pending_trades as f32 / ticker_trades.len() as f32 * 100.0
-            } else {
-                0.0
-            };
-
-            let avg_holding_period_minutes = if !holding_periods.is_empty() {
-                holding_periods.iter().sum::<u64>() as f32 / holding_periods.len() as f32
-            } else {
-                0.0
-            };
-
-            let max_holding_period_minutes =
-                holding_periods.iter().max().copied().unwrap_or(0) as f32;
-            let min_holding_period_minutes =
-                holding_periods.iter().min().copied().unwrap_or(0) as f32;
-
-            let avg_gross_return = if !gross_returns.is_empty() {
-                gross_returns.iter().sum::<f32>() / gross_returns.len() as f32
-            } else {
-                0.0
-            };
-
-            let avg_net_return = if !net_returns.is_empty() {
-                net_returns.iter().sum::<f32>() / net_returns.len() as f32
-            } else {
-                0.0
-            };
-
-            let win_rate = if !gross_returns.is_empty() {
-                wins as f32 / gross_returns.len() as f32 * 100.0
-            } else {
-                0.0
-            };
-
-            // Calculate daily win rate - use days with executed sell trades
-            let mut daily_wins = 0;
-            let mut daily_trades = 0;
-            for (day, day_trades) in &trades_by_day {
-                let day_sell_trades: Vec<&&Trade> = day_trades
-                    .iter()
-                    .filter(|t| {
-                        t.ticker_id == *ticker_id
-                            && !t.is_buy()
-                            && t.trade_status == TradeStatus::Executed
-                            && t.price > 0.0
-                    })
-                    .collect();
-
-                if !day_sell_trades.is_empty() {
-                    daily_trades += 1;
-                    // Check if ANY trade on this day was a winner
-                    let has_winning_trade = day_sell_trades.iter().any(|t| {
-                        let gross_return = if t.avg_entry_price > 0.0 {
-                            t.realized_pnl_gross / (t.avg_entry_price * t.quantity)
-                        } else {
-                            0.0
-                        };
-                        gross_return > 0.0
-                    });
-                    if has_winning_trade {
-                        daily_wins += 1;
-                    }
+                let realized_pnl = trade.realized_pnl_gross;
+                if realized_pnl > 0.0 {
+                    position_gross_gain[ticker_id] += realized_pnl;
+                    total_gross_gain += realized_pnl;
+                } else {
+                    let abs_pnl = realized_pnl.abs();
+                    position_gross_loss[ticker_id] += abs_pnl;
+                    total_gross_loss += abs_pnl;
                 }
+
+                let pnl_net = realized_pnl - trade.pro_rata_buy_cost - trade.cost;
+                daily_pnl_net += pnl_net;
+                daily_capital_used += trade.avg_entry_price * trade.quantity;
+                position_daily_pnl_net[ticker_id] += pnl_net;
+
+                match trade.trade_type {
+                    TradeType::TakeProfit => position_take_profit_count[ticker_id] += 1.0,
+                    TradeType::StopLoss => position_stop_loss_count[ticker_id] += 1.0,
+                    TradeType::SignalSell => position_signal_sell_count[ticker_id] += 1.0,
+                    _ => {}
+                }
+                position_sell_count[ticker_id] += 1.0;
             }
-
-            let avg_win_rate_per_day = if daily_trades > 0 {
-                daily_wins as f32 / daily_trades as f32 * 100.0
-            } else {
-                0.0
-            };
-
-            // Update overall totals
-            if !gross_returns.is_empty() {
-                total_wins += wins;
-                total_gross_return_sum += gross_returns.iter().sum::<f32>();
-                total_net_return_sum += net_returns.iter().sum::<f32>();
-                total_sell_trades_with_returns += gross_returns.len();
-            }
-
-            ticker_metrics.insert(
-                *ticker_id,
-                TickerTradeMetrics {
-                    ticker_id: *ticker_id,
-                    total_trades: ticker_trades.len(),
-                    buy_trades,
-                    sell_trades,
-                    avg_trades_per_day,
-                    avg_buy_trades_per_day,
-                    avg_sell_trades_per_day,
-                    buy_trade_pct,
-                    sell_trade_pct,
-                    executed_trades,
-                    failed_trades,
-                    rejected_trades,
-                    pending_trades,
-                    executed_pct,
-                    failed_pct,
-                    rejected_pct,
-                    pending_pct,
-                    sell_trades_with_holding_period: holding_periods.len(),
-                    avg_holding_period_minutes,
-                    max_holding_period_minutes,
-                    min_holding_period_minutes,
-                    sell_trades_with_returns: gross_returns.len(),
-                    avg_gross_return,
-                    avg_net_return,
-                    win_rate,
-                    trading_days: total_trading_days,
-                    avg_win_rate_per_day,
-                },
-            );
         }
 
-        // Calculate overall metrics
-        let overall_win_rate = if total_sell_trades_with_returns > 0 {
-            total_wins as f32 / total_sell_trades_with_returns as f32 * 100.0
+        daily_net_return.push(if daily_capital_used > 0.0 {
+            daily_pnl_net / daily_capital_used
         } else {
             0.0
-        };
+        });
 
-        let overall_avg_gross_return = if total_sell_trades_with_returns > 0 {
-            total_gross_return_sum / total_sell_trades_with_returns as f32
-        } else {
-            0.0
-        };
+        for (i, &pnl) in position_daily_pnl_net.iter().enumerate() {
+            if pnl > 0.0 {
+                position_total_win_trades[i] += 1.0;
+            }
+        }
 
-        let overall_avg_net_return = if total_sell_trades_with_returns > 0 {
-            total_net_return_sum / total_sell_trades_with_returns as f32
-        } else {
-            0.0
-        };
-
-        Self {
-            ticker_metrics,
-            total_trades,
-            total_buy_trades,
-            total_sell_trades,
-            overall_win_rate,
-            overall_avg_gross_return,
-            overall_avg_net_return,
+        TradeMetrics {
+            daily_net_return,
+            position_gross_loss,
+            position_gross_gain,
+            position_buy_count,
+            position_sell_count,
+            position_take_profit_count,
+            position_stop_loss_count,
+            position_signal_sell_count,
+            position_total_win_trades,
+            position_last_trade,
+            position_first_trade,
+            total_gross_loss,
+            total_gross_gain,
         }
     }
 }
 
-impl PositionPerformance {
-    pub fn from_position(position: &Position) -> Self {
-        let total_cum_cost = position.cum_sell_cost + position.cum_buy_cost;
-        let sell_cost_ratio = if total_cum_cost > 0.0 {
-            position.cum_sell_cost / total_cum_cost
-        } else {
-            0.0
-        };
-        let buy_cost_ratio = if total_cum_cost > 0.0 {
-            position.cum_buy_cost / total_cum_cost
-        } else {
-            0.0
-        };
+pub fn calculate_max_drawdown(equity_curve: &[f32]) -> (f32, f32) {
+    if equity_curve.len() < 2 {
+        return (0.0, 0.0);
+    }
 
-        // Calculate percentages against realized PnL
-        let realized_pnl_abs = position.realized_pnl_gross.abs();
-        let take_profit_gain_pct = if realized_pnl_abs > 0.0 {
-            position.take_profit_gain / realized_pnl_abs * 100.0
-        } else {
-            0.0
-        };
-        let take_profit_loss_pct = if realized_pnl_abs > 0.0 {
-            position.take_profit_loss.abs() / realized_pnl_abs * 100.0
-        } else {
-            0.0
-        };
-        let stop_loss_gain_pct = if realized_pnl_abs > 0.0 {
-            position.stop_loss_gain / realized_pnl_abs * 100.0
-        } else {
-            0.0
-        };
-        let stop_loss_loss_pct = if realized_pnl_abs > 0.0 {
-            position.stop_loss_loss.abs() / realized_pnl_abs * 100.0
-        } else {
-            0.0
-        };
-        let signal_sell_gain_pct = if realized_pnl_abs > 0.0 {
-            position.signal_sell_gain / realized_pnl_abs * 100.0
-        } else {
-            0.0
-        };
-        let signal_sell_loss_pct = if realized_pnl_abs > 0.0 {
-            position.signal_sell_loss.abs() / realized_pnl_abs * 100.0
-        } else {
-            0.0
-        };
+    let mut max_equity = equity_curve[0];
+    let mut max_drawdown = 0.0;
+    let mut max_drawdown_duration = 0.0;
+    let mut current_drawdown_duration = 0.0;
+    let mut in_drawdown = false;
 
-        // Calculate realized ratio
-        let realized_ratio = if position.total_shares_bought > 0.0 {
-            position.total_shares_sold / position.total_shares_bought
-        } else {
-            0.0
-        };
+    for &equity in equity_curve {
+        if equity > max_equity {
+            max_equity = equity;
+            if in_drawdown {
+                in_drawdown = false;
+                current_drawdown_duration = 0.0;
+            }
+        } else if equity < max_equity {
+            let drawdown = (max_equity - equity) / max_equity;
+            if drawdown > max_drawdown {
+                max_drawdown = drawdown;
+            }
 
-        // Calculate gross realized return
-        let gross_realized_return = if position.cum_buy_proceeds * realized_ratio > 0.0 {
-            (position.cum_sell_proceeds - position.cum_buy_proceeds * realized_ratio)
-                / (position.cum_buy_proceeds * realized_ratio)
-        } else {
-            0.0
-        };
-
-        // Calculate net realized return
-        let net_realized_return =
-            if (position.cum_buy_proceeds + position.cum_buy_cost) * realized_ratio > 0.0 {
-                (position.cum_sell_proceeds
-                    - position.cum_sell_cost
-                    - (position.cum_buy_proceeds + position.cum_buy_cost) * realized_ratio)
-                    / ((position.cum_buy_proceeds + position.cum_buy_cost) * realized_ratio)
+            if !in_drawdown {
+                in_drawdown = true;
+                current_drawdown_duration = 1.0;
             } else {
-                0.0
-            };
+                current_drawdown_duration += 1.0;
+            }
 
-        // Calculate unrealized returns for remaining position
-        // let remaining_ratio = 1.0 - realized_ratio;
-        // let gross_unrealized_return = if position.cum_buy_proceeds * remaining_ratio > 0.0 {
-        //     (position.quantity * position.avg_entry_price
-        //         - position.cum_buy_proceeds * remaining_ratio)
-        //         / (position.cum_buy_proceeds * remaining_ratio)
-        // } else {
-        //     0.0
-        // };
-
-        // let net_unrealized_return =
-        //     if (position.cum_buy_proceeds + position.cum_buy_cost) * remaining_ratio > 0.0 {
-        //         (position.quantity * position.avg_entry_price
-        //             - (position.cum_buy_proceeds + position.cum_buy_cost) * remaining_ratio)
-        //             / ((position.cum_buy_proceeds + position.cum_buy_cost) * remaining_ratio)
-        //     } else {
-        //         0.0
-        //     };
-        let gross_unrealized_return = 0.0;
-        let net_unrealized_return = 0.0;
-
-        Self {
-            ticker_id: position.ticker_id,
-            quantity: position.quantity,
-            sell_cost_ratio,
-            buy_cost_ratio,
-            total_cum_cost,
-            realized_pnl: position.realized_pnl_gross,
-            take_profit_gain: position.take_profit_gain,
-            take_profit_loss: position.take_profit_loss,
-            stop_loss_gain: position.stop_loss_gain,
-            stop_loss_loss: position.stop_loss_loss,
-            signal_sell_gain: position.signal_sell_gain,
-            signal_sell_loss: position.signal_sell_loss,
-            position_status: position.position_status,
-            take_profit_gain_pct,
-            take_profit_loss_pct,
-            stop_loss_gain_pct,
-            stop_loss_loss_pct,
-            signal_sell_gain_pct,
-            signal_sell_loss_pct,
-            realized_ratio,
-            gross_realized_return,
-            net_realized_return,
-            gross_unrealized_return,
-            net_unrealized_return,
+            if current_drawdown_duration > max_drawdown_duration {
+                max_drawdown_duration = current_drawdown_duration;
+            }
         }
     }
+
+    (max_drawdown, max_drawdown_duration)
+}
+
+pub fn calculate_annualized_return(
+    total_return: f32,
+    start_timestamp: u64,
+    end_timestamp: u64,
+) -> f32 {
+    if start_timestamp >= end_timestamp {
+        return 0.0;
+    }
+
+    let time_diff_seconds = (end_timestamp - start_timestamp) as f64;
+    let years = time_diff_seconds / (365.25 * 24.0 * 60.0 * 60.0);
+
+    if years <= 0.0 {
+        return 0.0;
+    }
+
+    let annualized_return = ((1.0 + total_return as f64).powf(1.0 / years) - 1.0) as f32;
+
+    annualized_return
+}
+
+pub fn calculate_risk_metrics(
+    daily_returns: &[f32],
+    risk_free_rate: f32,
+    max_drawdown: f32,
+) -> (f32, f32, f32) {
+    if daily_returns.is_empty() {
+        return (0.0, 0.0, 0.0);
+    }
+
+    let avg_daily_return = daily_returns.iter().sum::<f32>() / daily_returns.len() as f32;
+    let annualized_return = avg_daily_return * 252.0;
+
+    let daily_rf_rate = risk_free_rate / 252.0;
+    let excess_return = avg_daily_return - daily_rf_rate;
+
+    let variance = daily_returns
+        .iter()
+        .map(|&r| (r - avg_daily_return).powi(2))
+        .sum::<f32>()
+        / daily_returns.len() as f32;
+    let std_dev = variance.sqrt();
+    let annualized_volatility = std_dev * (252.0_f32).sqrt();
+
+    let downside_returns: Vec<f32> = daily_returns
+        .iter()
+        .filter(|&&r| r < avg_daily_return)
+        .map(|&r| (r - avg_daily_return).powi(2))
+        .collect();
+
+    let downside_variance = if downside_returns.is_empty() {
+        0.0
+    } else {
+        downside_returns.iter().sum::<f32>() / downside_returns.len() as f32
+    };
+    let downside_deviation = downside_variance.sqrt();
+    let annualized_downside_deviation = downside_deviation * (252.0_f32).sqrt();
+
+    let sharpe_ratio = if annualized_volatility > 0.0 {
+        (excess_return * 252.0) / annualized_volatility
+    } else {
+        0.0
+    };
+
+    let sortino_ratio = if annualized_downside_deviation > 0.0 {
+        (excess_return * 252.0) / annualized_downside_deviation
+    } else {
+        0.0
+    };
+
+    let calmar_ratio = if max_drawdown.abs() > 0.0 {
+        annualized_return / max_drawdown.abs()
+    } else {
+        0.0
+    };
+
+    (sharpe_ratio, sortino_ratio, calmar_ratio)
 }
