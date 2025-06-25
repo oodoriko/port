@@ -1,7 +1,8 @@
 use crate::core::params::{Frequency, SignalParams};
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use std::collections::HashMap;
-
+use std::fs::File;
+use std::io::Write;
 pub fn id_to_ticker(ticker: i8) -> Option<String> {
     match ticker {
         0 => Some("BTC".to_string()),
@@ -176,3 +177,275 @@ pub fn _is_end_of_period(timestamp: DateTime<Utc>, frequency: &Frequency) -> boo
         }
     }
 }
+
+// for auditing
+// Function to export array of arrays to CSV with enum conversion and proper decimal formatting
+pub fn export_array_to_csv_with_enums(
+    data: &[Vec<i64>],
+    filename: &str,
+    headers: Option<Vec<&str>>,
+    convert_enums: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut file = File::create(filename)?;
+
+    // Write headers if provided
+    if let Some(headers) = headers {
+        writeln!(file, "{}", headers.join(","))?;
+    }
+
+    // Write data rows
+    for row in data {
+        let row_str: Vec<String> = row
+            .iter()
+            .enumerate()
+            .map(|(i, &val)| {
+                if convert_enums {
+                    // Convert enum values to strings based on position
+                    match i {
+                        2 => {
+                            // trade_type column
+                            match val {
+                                0 => "SignalBuy".to_string(),
+                                1 => "SignalSell".to_string(),
+                                2 => "StopLoss".to_string(),
+                                3 => "Liquidation".to_string(),
+                                4 => "TakeProfit".to_string(),
+                                _ => val.to_string(),
+                            }
+                        }
+                        3 => {
+                            // trade_status column
+                            match val {
+                                0 => "Pending".to_string(),
+                                1 => "Executed".to_string(),
+                                2 => "Failed".to_string(),
+                                3 => "Rejected".to_string(),
+                                _ => val.to_string(),
+                            }
+                        }
+                        _ => {
+                            // Convert i64 back to f32 and format with 4 decimal places
+                            let float_val = val as f32 / 10000.0; // Assuming values were multiplied by 10000
+                            format!("{:.4}", float_val)
+                        }
+                    }
+                } else {
+                    // For non-enum data, format as float with 4 decimal places
+                    let float_val = val as f32 / 10000.0; // Assuming values were multiplied by 10000
+                    format!("{:.4}", float_val)
+                }
+            })
+            .collect();
+        writeln!(file, "{}", row_str.join(","))?;
+    }
+
+    println!("Data exported to: {}", filename);
+    Ok(())
+}
+
+// Function to export trade and portfolio data separately
+pub fn export_backtest_data_to_csv(
+    all_trade: &[Vec<i64>],
+    all_portfolio: &[Vec<i64>],
+    all_positions: &[Vec<i64>],
+    base_filename: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Export trade data with enum conversion
+    if !all_trade.is_empty() {
+        let trade_headers = vec![
+            "timestamp",
+            "quantity",
+            "trade_type",
+            "trade_status",
+            "generated_at",
+            "execution_timestamp",
+            "price",
+            "cost",
+            "pro_rata_buy_cost",
+            "avg_entry_price",
+            "holding_period",
+            "realized_pnl_gross",
+            "realized_return",
+        ];
+        export_array_to_csv_with_enums(
+            all_trade,
+            &format!("{}_trades.csv", base_filename),
+            Some(trade_headers),
+            true,
+        )?;
+    }
+
+    // Export portfolio data (no enum conversion needed)
+    if !all_portfolio.is_empty() {
+        let portfolio_headers = vec![
+            "timestamp",
+            "equity",
+            "cash",
+            "notional",
+            "cost",
+            "realized_pnl",
+            "unrealized_pnl",
+            "peak_equity",
+            "num_assets",
+            "total_capital_distribution",
+            "holdings",
+        ];
+        export_array_to_csv_with_enums(
+            all_portfolio,
+            &format!("{}_portfolio.csv", base_filename),
+            Some(portfolio_headers),
+            false,
+        )?;
+    }
+
+    // Export position data (no enum conversion needed)
+    if !all_positions.is_empty() {
+        let position_headers = vec![
+            "ticker_id",
+            "price",
+            "quantity",
+            "avg_entry_price",
+            "entry_timestamp",
+            "notional",
+            "peak_price",
+            "trailing_stop_price",
+            "take_profit_price",
+            "unrealized_pnl",
+            "cum_buy_proceeds",
+            "cum_buy_cost",
+            "last_entry_price",
+            "last_entry_timestamp",
+            "cum_sell_proceeds",
+            "cum_sell_cost",
+            "realized_pnl_gross",
+            "last_exit_price",
+            "last_exit_timestamp",
+            "last_exit_pnl",
+            "total_shares_bought",
+            "total_shares_sold",
+            "take_profit_gain",
+            "take_profit_loss",
+            "stop_loss_gain",
+            "stop_loss_loss",
+            "signal_sell_gain",
+            "signal_sell_loss",
+        ];
+        export_array_to_csv_with_enums(
+            all_positions,
+            &format!("{}_positions.csv", base_filename),
+            Some(position_headers),
+            false,
+        )?;
+    }
+    Ok(())
+}
+
+//
+// let mut all_trade = Vec::new();
+// let mut all_positions = Vec::new();
+// let mut all_portfolio = Vec::new();
+
+// if temp_trades.len() > 0 {
+//     let mut portfolio_data = Vec::new();
+//     portfolio_data.push(time);
+//     portfolio_data
+//         .push((portfolio.equity_curve[portfolio.equity_curve.len() - 1] * 10000.0) as i64);
+//     portfolio_data
+//         .push((portfolio.cash_curve[portfolio.cash_curve.len() - 1] * 10000.0) as i64);
+//     portfolio_data.push(
+//         (portfolio.notional_curve[portfolio.notional_curve.len() - 1] * 10000.0) as i64,
+//     );
+//     portfolio_data
+//         .push((portfolio.cost_curve[portfolio.cost_curve.len() - 1] * 10000.0) as i64);
+//     portfolio_data.push(
+//         (portfolio.realized_pnl_curve[portfolio.realized_pnl_curve.len() - 1] * 10000.0)
+//             as i64,
+//     );
+//     portfolio_data.push(
+//         (portfolio.unrealized_pnl_curve[portfolio.unrealized_pnl_curve.len() - 1] * 10000.0)
+//             as i64,
+//     );
+//     portfolio_data.push((portfolio.peak_equity * 10000.0) as i64);
+//     portfolio_data.push(portfolio.num_assets as i64);
+//     portfolio_data.push((portfolio.total_capital_distribution * 10000.0) as i64);
+//     portfolio_data
+//         .push((portfolio.holdings[portfolio.holdings.len() - 1] * 10000.0) as i64);
+
+//     all_portfolio.push(portfolio_data);
+
+//     let mut position_data = Vec::new();
+//     let pos = portfolio.positions[0].as_ref().unwrap();
+//     position_data.push(pos.ticker_id as i64);
+//     position_data.push((prev_close_prices[pos.ticker_id as usize] * 10000.0) as i64);
+//     position_data.push((pos.quantity * 10000.0) as i64);
+//     position_data.push((pos.avg_entry_price * 10000.0) as i64);
+//     position_data.push(pos.entry_timestamp as i64);
+//     position_data.push((pos.notional * 10000.0) as i64);
+//     position_data.push((pos.peak_price * 10000.0) as i64);
+//     position_data.push((pos.trailing_stop_price * 10000.0) as i64);
+//     position_data.push((pos.take_profit_price * 10000.0) as i64);
+//     position_data.push((pos.unrealized_pnl * 10000.0) as i64);
+//     position_data.push((pos.cum_buy_proceeds * 10000.0) as i64);
+//     position_data.push((pos.cum_buy_cost * 10000.0) as i64);
+//     position_data.push((pos.last_entry_price * 10000.0) as i64);
+//     position_data.push(pos.last_entry_timestamp as i64);
+//     position_data.push((pos.cum_sell_proceeds * 10000.0) as i64);
+//     position_data.push((pos.cum_sell_cost * 10000.0) as i64);
+//     position_data.push((pos.realized_pnl_gross * 10000.0) as i64);
+//     position_data.push((pos.last_exit_price * 10000.0) as i64);
+//     position_data.push(pos.last_exit_timestamp as i64);
+//     position_data.push((pos.last_exit_pnl * 10000.0) as i64);
+//     position_data.push((pos.total_shares_bought * 10000.0) as i64);
+//     position_data.push((pos.total_shares_sold * 10000.0) as i64);
+//     position_data.push((pos.take_profit_gain * 10000.0) as i64);
+//     position_data.push((pos.take_profit_loss * 10000.0) as i64);
+//     position_data.push((pos.stop_loss_gain * 10000.0) as i64);
+//     position_data.push((pos.stop_loss_loss * 10000.0) as i64);
+//     position_data.push((pos.signal_sell_gain * 10000.0) as i64);
+//     position_data.push((pos.signal_sell_loss * 10000.0) as i64);
+//     all_positions.push(position_data);
+// }
+
+// for trade in pending_trades {
+//     let mut trade_data = Vec::new();
+//     trade_data.push(time);
+//     trade_data.push((trade.quantity * 10000.0) as i64);
+//     trade_data.push(trade.trade_type as i64);
+//     trade_data.push(trade.trade_status as i64);
+//     trade_data.push(trade.generated_at as i64);
+//     trade_data.push(trade.execution_timestamp as i64);
+//     trade_data.push((trade.price * 10000.0) as i64);
+//     trade_data.push((trade.cost * 10000.0) as i64);
+//     trade_data.push((trade.pro_rata_buy_cost * 10000.0) as i64);
+//     trade_data.push((trade.avg_entry_price * 10000.0) as i64);
+//     trade_data.push(trade.holding_period as i64);
+//     trade_data.push((trade.realized_pnl_gross * 10000.0) as i64);
+//     trade_data.push((trade.realized_return_net * 10000.0) as i64);
+//     all_trade.push(trade_data);
+// }
+
+// for trade in temp_executed_trades {
+//     let mut trade_data = Vec::new();
+//     trade_data.push(time);
+//     trade_data.push((trade.quantity * 10000.0) as i64);
+//     trade_data.push(trade.trade_type as i64);
+//     trade_data.push(trade.trade_status as i64);
+//     trade_data.push(trade.generated_at as i64);
+//     trade_data.push(trade.execution_timestamp as i64);
+//     trade_data.push((trade.price * 10000.0) as i64);
+//     trade_data.push((trade.cost * 10000.0) as i64);
+//     trade_data.push((trade.pro_rata_buy_cost * 10000.0) as i64);
+//     trade_data.push((trade.avg_entry_price * 10000.0) as i64);
+//     trade_data.push(trade.holding_period as i64);
+//     trade_data.push((trade.realized_pnl_gross * 10000.0) as i64);
+//     trade_data.push((trade.realized_return_net * 10000.0) as i64);
+//     all_trade.push(trade_data);
+// }
+
+// export_backtest_data_to_csv(
+//     &all_trade,
+//     &all_portfolio,
+//     &all_positions,
+//     &format!("{}_backtest", strategy_name),
+// )
+// .unwrap();

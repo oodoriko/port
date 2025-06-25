@@ -139,14 +139,14 @@ impl Default for PositionConstraintParams {
     fn default() -> Self {
         Self {
             max_position_size_pct: 1.0,
-            min_trade_size_pct: 0.05,
+            min_trade_size_pct: 0.1,
             min_holding_candle: 15,
-            trailing_stop_loss_pct: 0.05,
+            trailing_stop_loss_pct: 0.1,
             trailing_stop_update_threshold_pct: 0.02,
-            take_profit_pct: 0.2,
+            take_profit_pct: 0.8,
             risk_per_trade_pct: 0.05,
             sell_fraction: 0.5,
-            cool_down_period: 0,
+            cool_down_period: 2,
         }
     }
 }
@@ -161,9 +161,9 @@ pub struct PortfolioConstraintParams {
 impl Default for PortfolioConstraintParams {
     fn default() -> Self {
         Self {
-            rebalance_threshold_pct: 0.05,
+            rebalance_threshold_pct: 0.1,
             min_cash_pct: 0.1,
-            max_drawdown_pct: 0.2,
+            max_drawdown_pct: 0.8,
         }
     }
 }

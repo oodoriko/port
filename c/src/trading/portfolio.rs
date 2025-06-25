@@ -2,7 +2,7 @@ use crate::core::params::{
     Frequency, PortfolioConstraintParams, PortfolioParams, PositionConstraintParams,
 };
 use crate::trading::position::Position;
-use crate::trading::trade::{Trade, TradeStatus};
+use crate::trading::trade::Trade;
 use crate::utils::utils::{is_end_of_period, timestamp_to_datetime};
 use chrono::Datelike;
 
@@ -98,11 +98,6 @@ impl Portfolio {
                 unsafe {
                     *self.holdings.get_unchecked_mut(idx) = pos.quantity;
                 }
-            } else {
-                // Clear holdings for positions that no longer exist
-                unsafe {
-                    *self.holdings.get_unchecked_mut(idx) = 0.0;
-                }
             }
         }
 
@@ -121,6 +116,7 @@ impl Portfolio {
         prices: &[f32],
         timestamp: u64,
         no_trades_asset_ids: &[usize],
+        trades_type_count: &mut Vec<i32>,
     ) -> (f32, f32, f32, Vec<Trade>) {
         let available_cash =
             self.get_current_cash() * (1.0 - self.portfolio_constraints.min_cash_pct);
@@ -131,11 +127,7 @@ impl Portfolio {
         for trade in trades.iter_mut() {
             let ticker_id = trade.ticker_id;
             if no_trades_asset_ids.contains(&ticker_id) {
-                continue;
-            }
-            if ticker_id >= self.num_assets || ticker_id >= prices.len() {
-                trade.update_trade_status(TradeStatus::Failed);
-                trade.set_comment("Invalid ticker ID".to_string());
+                trades_type_count[3] += 1;
                 continue;
             }
 
@@ -164,9 +156,9 @@ impl Portfolio {
                             total_cost += actual_cost;
                             trade.update_buy_trade(price, timestamp, actual_cost, trade.quantity);
                             executed_trades.push(trade.clone());
+                            trades_type_count[0] += 1;
                         } else {
-                            trade.update_trade_status(TradeStatus::Failed);
-                            trade.set_comment("Insufficient cash".to_string());
+                            trades_type_count[1] += 1;
                         }
                     } else {
                         let pro_rata_buy_cost =
@@ -179,6 +171,7 @@ impl Portfolio {
                             trade.trade_type,
                             pro_rata_buy_cost,
                         );
+
                         trade.update_sell_trade(
                             price,
                             timestamp,
@@ -193,6 +186,7 @@ impl Portfolio {
                         total_cost += initial_cost;
 
                         executed_trades.push(trade.clone());
+                        trades_type_count[0] += 1;
                     }
                 }
                 None => {
@@ -206,27 +200,27 @@ impl Portfolio {
                         let actual_cost = trade.quantity * price * self.commission_rate;
 
                         if trade.quantity > 0.0 {
+                            let total_trade_cost = trade.quantity * price + actual_cost;
                             let position = Position::new(
                                 ticker_id as u32,
                                 price,
                                 Some(trade.quantity),
+                                Some(actual_cost),
                                 Some(timestamp),
                                 self.position_constraints.get(ticker_id).cloned(),
                             );
                             trade.update_buy_trade(price, timestamp, actual_cost, trade.quantity);
 
-                            let total_trade_cost = trade.quantity * price + actual_cost;
                             net_cash -= total_trade_cost;
                             total_cost += actual_cost;
                             self.positions[ticker_id] = Some(position);
                             executed_trades.push(trade.clone());
+                            trades_type_count[0] += 1;
                         } else {
-                            trade.update_trade_status(TradeStatus::Failed);
-                            trade.set_comment("Insufficient cash".to_string());
+                            trades_type_count[1] += 1;
                         }
                     } else {
-                        trade.update_trade_status(TradeStatus::Failed);
-                        trade.set_comment("Short sell prohibited".to_string());
+                        trades_type_count[2] += 1;
                     }
                 }
             }
@@ -235,9 +229,15 @@ impl Portfolio {
     }
 
     #[inline(always)]
-    pub fn liquidation(&mut self, prices: &[f32], trades: &mut [Trade], timestamp: u64) {
+    pub fn liquidation(
+        &mut self,
+        prices: &[f32],
+        trades: &mut [Trade],
+        timestamp: u64,
+        trades_type_count: &mut Vec<i32>,
+    ) {
         let (available_cash, total_cost, total_realized_pnl, _) =
-            self.execute_trades(trades, prices, timestamp, &[]);
+            self.execute_trades(trades, prices, timestamp, &[], trades_type_count);
 
         self.post_order_update(
             prices, // Same slice for both executed and next

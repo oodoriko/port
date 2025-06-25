@@ -50,11 +50,13 @@ impl PositionMetrics {
         let profiting_trades_cnt = aggregate_trades.position_total_win_trades[ticker_id] as f32;
         let realized_pnl_net =
             position.realized_pnl_gross - position.cum_buy_cost - position.cum_sell_cost;
+
         let net_return = (position.cum_sell_proceeds
             - position.cum_buy_proceeds
             - position.cum_sell_cost
             - position.cum_buy_cost)
             / (position.cum_buy_proceeds + position.cum_buy_cost);
+
         let position_metrics = Self {
             status: position.position_status,
             asset_name: ticker_id as u32,
@@ -71,8 +73,8 @@ impl PositionMetrics {
             net_return: net_return,
             annualized_return: calculate_annualized_return(
                 net_return,
-                position.cum_buy_proceeds as u64,
-                position.cum_sell_proceeds as u64,
+                position.entry_timestamp as u64,
+                position.last_exit_timestamp as u64,
             ),
             win_rate: profiting_trades_cnt / num_trades,
             profit_factor: aggregate_trades.total_gross_gain / aggregate_trades.total_gross_loss,
@@ -229,7 +231,7 @@ impl KeyMetrics {
             }
         }
         let net_return = (portfolio.equity_curve.last().unwrap()
-            - portfolio.cash_curve.iter().sum::<f32>())
+            - portfolio.cost_curve.iter().sum::<f32>())
             / portfolio.equity_curve.first().unwrap();
         let unrealized_pnl = portfolio
             .holdings
@@ -485,12 +487,7 @@ pub fn calculate_annualized_return(
     let time_diff_seconds = (end_timestamp - start_timestamp) as f64;
     let years = time_diff_seconds / (365.25 * 24.0 * 60.0 * 60.0);
 
-    if years <= 0.0 {
-        return 0.0;
-    }
-
     let annualized_return = ((1.0 + total_return as f64).powf(1.0 / years) - 1.0) as f32;
-
     annualized_return
 }
 

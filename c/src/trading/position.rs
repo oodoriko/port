@@ -55,6 +55,7 @@ impl Position {
         ticker_id: u32,
         price: f32,
         quantity: Option<f32>,
+        cost: Option<f32>,
         entry_timestamp: Option<u64>,
         constraint: Option<PositionConstraintParams>,
     ) -> Self {
@@ -75,10 +76,10 @@ impl Position {
             notional: qty * price,
             peak_price: price,
             trailing_stop_price,
-            take_profit_price: f32::MAX,
+            take_profit_price: price,
             unrealized_pnl: 0.0,
-            cum_buy_proceeds: 0.0,
-            cum_buy_cost: 0.0,
+            cum_buy_proceeds: price * qty,
+            cum_buy_cost: cost.unwrap_or(0.0),
             last_entry_price: price,
             last_entry_timestamp: timestamp,
             cum_sell_proceeds: 0.0,
@@ -95,7 +96,7 @@ impl Position {
             signal_sell_loss: 0.0,
             constraint,
             position_status: PositionStatus::Open,
-            total_shares_bought: 0.0,
+            total_shares_bought: qty,
             total_shares_sold: 0.0,
             net_position: vec![0.0],
         }
@@ -104,28 +105,31 @@ impl Position {
     #[inline(always)]
     fn update_trailing_stop_price(&mut self, price: f32) {
         if let Some(constraint) = &self.constraint {
-            let trailing_stop_pct = constraint.trailing_stop_loss_pct;
-            let trailing_stop_update_threshold_pct = constraint.trailing_stop_update_threshold_pct;
-
-            let threshold_price = self.peak_price * (1.0 + trailing_stop_update_threshold_pct);
+            let threshold_price =
+                self.peak_price * (1.0 + constraint.trailing_stop_update_threshold_pct);
             if price > threshold_price {
-                self.trailing_stop_price = price * (1.0 - trailing_stop_pct);
+                self.trailing_stop_price = price * (1.0 - constraint.trailing_stop_loss_pct);
             }
+        }
+    }
+
+    fn update_take_profit_price(&mut self) {
+        if let Some(constraint) = &self.constraint {
+            self.take_profit_price = self.avg_entry_price * (1.0 + constraint.take_profit_pct);
         }
     }
 
     #[inline(always)]
     pub fn pre_order_update(&mut self, price: f32) {
-        if price > self.peak_price {
-            self.peak_price = price;
-            self.update_trailing_stop_price(price);
-        }
+        self.peak_price = self.peak_price.max(price);
+        self.update_trailing_stop_price(price);
+        self.update_take_profit_price();
     }
 
     #[inline(always)]
     pub fn post_order_update(&mut self, price: f32) -> (f32, f32) {
         self.notional = self.quantity * price;
-        self.unrealized_pnl += (price - self.avg_entry_price) * self.quantity;
+        self.unrealized_pnl = (price - self.avg_entry_price) * self.quantity;
         (self.notional, self.unrealized_pnl)
     }
 
@@ -133,20 +137,21 @@ impl Position {
     pub fn update_buy_position(&mut self, price: f32, quantity: f32, timestamp: u64, cost: f32) {
         let old_quantity = self.quantity;
         let new_quantity = old_quantity + quantity;
-
         self.quantity = new_quantity;
 
         self.avg_entry_price =
             (self.avg_entry_price * old_quantity + price * quantity) / new_quantity;
-        self.last_entry_timestamp = timestamp;
-        self.last_entry_price = price;
-        self.cum_buy_proceeds += price * quantity;
+
+        self.cum_buy_proceeds += price * self.quantity;
         self.cum_buy_cost += cost;
         self.total_shares_bought += quantity;
         self.net_position.push(self.quantity);
 
-        self.notional = new_quantity * price;
+        self.notional = self.quantity * price;
         self.position_status = PositionStatus::Open;
+
+        self.last_entry_timestamp = timestamp;
+        self.last_entry_price = price;
     }
 
     #[inline(always)]
@@ -159,42 +164,45 @@ impl Position {
         trade_type: TradeType,
         pro_rata_buy_cost: f32,
     ) -> f32 {
-        let pnl = (price - self.avg_entry_price) * quantity - cost - pro_rata_buy_cost;
-        let sell_proceeds = price * quantity;
+        let net_pnl = (price - self.avg_entry_price) * quantity - cost - pro_rata_buy_cost;
 
-        self.cum_sell_proceeds += sell_proceeds;
+        self.cum_sell_proceeds += price * quantity;
         self.cum_sell_cost += cost;
-        self.realized_pnl_gross += pnl + cost + pro_rata_buy_cost;
+
+        self.realized_pnl_gross += (price - self.avg_entry_price) * quantity;
+
         self.last_exit_price = price;
         self.last_exit_timestamp = timestamp;
-        self.quantity = (self.quantity - quantity).max(0.0);
-        self.last_exit_pnl = pnl;
-        self.notional = self.quantity * price;
+        self.last_exit_pnl = net_pnl;
+
         self.total_shares_sold += quantity;
+
+        self.quantity = (self.quantity - quantity).max(0.0);
+        self.notional = self.quantity * price;
         self.net_position.push(self.quantity);
         if self.quantity < 0.000001 {
             self.position_status = PositionStatus::Closed;
         }
 
-        if pnl > 0.0 {
+        if net_pnl > 0.0 {
             if trade_type == TradeType::TakeProfit {
-                self.take_profit_gain += pnl;
+                self.take_profit_gain += net_pnl;
             } else if trade_type == TradeType::StopLoss {
-                self.stop_loss_gain += pnl;
+                self.stop_loss_gain += net_pnl;
             } else if trade_type == TradeType::SignalSell {
-                self.signal_sell_gain += pnl;
+                self.signal_sell_gain += net_pnl;
             }
         } else {
             if trade_type == TradeType::TakeProfit {
-                self.take_profit_loss += pnl;
+                self.take_profit_loss += net_pnl;
             } else if trade_type == TradeType::StopLoss {
-                self.stop_loss_loss += pnl;
+                self.stop_loss_loss += net_pnl;
             } else if trade_type == TradeType::SignalSell {
-                self.signal_sell_loss += pnl;
+                self.signal_sell_loss += net_pnl;
             }
         }
 
-        pnl
+        net_pnl
     }
 
     #[inline(always)]

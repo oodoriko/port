@@ -28,10 +28,10 @@ pub struct Trade {
     pub cost: f32,                // 0.0 if not calculated
     pub pro_rata_buy_cost: f32,   // 0.0 if not applicable
 
-    pub avg_entry_price: f32,    // 0.0 if not applicable
-    pub holding_period: u64,     // 0 if not applicable
-    pub realized_pnl_gross: f32, // 0.0 if not applicable
-    pub realized_return: f32,    // 0.0 if not applicable
+    pub avg_entry_price: f32,     // 0.0 if not applicable
+    pub holding_period: u64,      // 0 if not applicable
+    pub realized_pnl_gross: f32,  // 0.0 if not applicable
+    pub realized_return_net: f32, // 0.0 if not applicable
 
     pub trade_comment: Option<String>,
 }
@@ -51,7 +51,7 @@ impl Trade {
             avg_entry_price: 0.0,
             holding_period: 0,
             realized_pnl_gross: 0.0,
-            realized_return: 0.0,
+            realized_return_net: 0.0,
             trade_comment: None,
         }
     }
@@ -71,7 +71,7 @@ impl Trade {
             avg_entry_price: 0.0,
             holding_period: 0,
             realized_pnl_gross: 0.0,
-            realized_return: 0.0,
+            realized_return_net: 0.0,
             trade_comment: None,
         }
     }
@@ -91,7 +91,7 @@ impl Trade {
             avg_entry_price: 0.0,
             holding_period: 0,
             realized_pnl_gross: 0.0,
-            realized_return: 0.0,
+            realized_return_net: 0.0,
             trade_comment: None,
         }
     }
@@ -111,7 +111,7 @@ impl Trade {
             avg_entry_price: 0.0,
             holding_period: 0,
             realized_pnl_gross: 0.0,
-            realized_return: 0.0,
+            realized_return_net: 0.0,
             trade_comment: None,
         }
     }
@@ -131,7 +131,7 @@ impl Trade {
             avg_entry_price: 0.0,
             holding_period: 0,
             realized_pnl_gross: 0.0,
-            realized_return: 0.0,
+            realized_return_net: 0.0,
             trade_comment: None,
         }
     }
@@ -163,9 +163,9 @@ impl Trade {
         self.avg_entry_price = avg_entry_price;
         self.realized_pnl_gross = (price - avg_entry_price) * self.quantity;
         self.trade_status = TradeStatus::Executed;
-        self.realized_return =
-            ((price - cost) * self.quantity - pro_rata_buy_cost) / avg_entry_price * self.quantity
-                - 1.0;
+        self.realized_return_net = ((price - cost) * self.quantity - pro_rata_buy_cost)
+            / (avg_entry_price * self.quantity + pro_rata_buy_cost)
+            - 1.0;
     }
 
     #[inline(always)]
@@ -176,11 +176,6 @@ impl Trade {
     #[inline(always)]
     pub fn set_comment(&mut self, comment: String) {
         self.trade_comment = Some(comment);
-    }
-
-    #[inline(always)]
-    pub fn clear_comment(&mut self) {
-        self.trade_comment = None;
     }
 
     #[inline(always)]
@@ -217,4 +212,47 @@ impl Trade {
     pub fn is_take_profit(&self) -> bool {
         matches!(self.trade_type, TradeType::TakeProfit)
     }
+}
+
+pub fn trade_type_comments_map() -> std::collections::HashMap<i8, (TradeStatus, String)> {
+    std::collections::HashMap::from([
+        (0, (TradeStatus::Executed, "".to_string())),
+        (
+            1,
+            (
+                TradeStatus::Failed,
+                "Insufficient cash after cost".to_string(),
+            ),
+        ),
+        (
+            2,
+            (TradeStatus::Failed, "Short sell prohibited".to_string()),
+        ),
+        (
+            3,
+            (TradeStatus::Failed, "Asset in cool down period".to_string()),
+        ),
+        (
+            4,
+            (
+                TradeStatus::Rejected,
+                "Holding period too short".to_string(),
+            ),
+        ),
+        (
+            5,
+            (
+                TradeStatus::Rejected,
+                "Exited at loss last time, in cool down period".to_string(),
+            ),
+        ),
+        (
+            6,
+            (TradeStatus::Rejected, "Trade size too small".to_string()),
+        ),
+        (
+            7,
+            (TradeStatus::Rejected, "Short sell prohibited".to_string()),
+        ),
+    ])
 }

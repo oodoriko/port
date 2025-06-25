@@ -6,13 +6,13 @@ use chrono::Utc;
 
 #[tokio::test]
 async fn test_backtest() {
-    let tickers = vec!["BTC-USD".to_string(), "ETH-USD".to_string()];
-    let start = Utc.with_ymd_and_hms(2025, 6, 17, 16, 0, 0).unwrap();
-    let end = Utc.with_ymd_and_hms(2025, 6, 19, 17, 0, 0).unwrap();
+    let tickers = vec!["BTC-USD".to_string()];
+    let start = Utc.with_ymd_and_hms(2025, 2, 1, 16, 0, 0).unwrap();
+    let end = Utc.with_ymd_and_hms(2025, 4, 1, 17, 0, 0).unwrap();
 
     let strategies = create_sample_strategies();
 
-    let (portfolio, executed_trades_by_date, exited_early) = backtest(
+    let result = backtest(
         String::from("test_strategy"),
         String::from("test_portfolio"),
         start,
@@ -23,15 +23,20 @@ async fn test_backtest() {
         PortfolioConstraintParams::default(),
         vec![
             PositionConstraintParams::default(),
-            PositionConstraintParams::default(),
+            // PositionConstraintParams::default(),
         ],
-        2,
+        50,
         1,
-        true,
+        false,
     )
     .await
     .unwrap();
 
     // Print the backtest results
-    backtest_result(&portfolio, &executed_trades_by_date, exited_early);
+    backtest_result(
+        &result.portfolio,
+        &result.executed_trades_by_date,
+        result.exited_early,
+        &result.trades_type_count,
+    );
 }

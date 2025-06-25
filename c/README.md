@@ -1,4 +1,4 @@
-![](./ababa/hahahahaha.png)
+![](./ababa/hahahahahaha.png)
 
 DONE:
 

@@ -41,6 +41,18 @@ pub struct BacktestRequest {
 
 // Response structure that matches the frontend expectations
 #[derive(Debug, Serialize)]
+pub struct TradeTypeCount {
+    pub executed: i32,
+    pub failed_insufficient_cash: i32,
+    pub failed_short_sell_prohibited: i32,
+    pub failed_cool_down_period: i32,
+    pub rejected_holding_period_too_short: i32,
+    pub rejected_cool_down_after_loss: i32,
+    pub rejected_trade_size_too_small: i32,
+    pub rejected_short_sell_prohibited: i32,
+}
+
+#[derive(Debug, Serialize)]
 pub struct BacktestResponse {
     pub backtest_id: String,
     pub portfolio_name: String,
@@ -62,6 +74,8 @@ pub struct BacktestResponse {
     pub tickers: Vec<String>,
     // New KeyMetrics fields
     pub key_metrics: KeyMetricsResponse,
+    pub risk_free_rate: f32,
+    pub trade_type_count: TradeTypeCount,
 }
 
 // Response structure for KeyMetrics
@@ -370,6 +384,49 @@ pub async fn backtest_handler(
         total_records,
         tickers: tickers.clone(),
         key_metrics: key_metrics_to_response(&key_metrics, &tickers),
+        risk_free_rate: 0.05,
+        trade_type_count: TradeTypeCount {
+            executed: backtest_result
+                .trades_type_count
+                .get(0)
+                .copied()
+                .unwrap_or(0),
+            failed_insufficient_cash: backtest_result
+                .trades_type_count
+                .get(1)
+                .copied()
+                .unwrap_or(0),
+            failed_short_sell_prohibited: backtest_result
+                .trades_type_count
+                .get(2)
+                .copied()
+                .unwrap_or(0),
+            failed_cool_down_period: backtest_result
+                .trades_type_count
+                .get(3)
+                .copied()
+                .unwrap_or(0),
+            rejected_holding_period_too_short: backtest_result
+                .trades_type_count
+                .get(4)
+                .copied()
+                .unwrap_or(0),
+            rejected_cool_down_after_loss: backtest_result
+                .trades_type_count
+                .get(5)
+                .copied()
+                .unwrap_or(0),
+            rejected_trade_size_too_small: backtest_result
+                .trades_type_count
+                .get(6)
+                .copied()
+                .unwrap_or(0),
+            rejected_short_sell_prohibited: backtest_result
+                .trades_type_count
+                .get(7)
+                .copied()
+                .unwrap_or(0),
+        },
     };
 
     Ok(ResponseJson(response))

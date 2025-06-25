@@ -159,8 +159,9 @@ impl Constraint {
         available_cash: f32,
         timestamp: u64,
         positions: &[Option<Position>],
+        trades_type_count: &mut Vec<i32>,
     ) -> Vec<Trade> {
-        let mut valid_trades = Vec::with_capacity(self.n_assets / 2);
+        let mut valid_trades = Vec::with_capacity(self.n_assets);
         let mut total_size = 0.0;
 
         let rebalance_threshold = self.rebalance_threshold_pct * portfolio_value;
@@ -178,6 +179,7 @@ impl Constraint {
                         let holding_period = (timestamp - pos.entry_timestamp) / self.candle_time;
                         let min_holding = unsafe { *self.min_holding_candle.get_unchecked(idx) };
                         if holding_period < min_holding {
+                            trades_type_count[4] += 1;
                             continue;
                         }
                         let cool_down_period = unsafe { *self.cool_down_period.get_unchecked(idx) };
@@ -185,6 +187,7 @@ impl Constraint {
                             let holding_period =
                                 (timestamp - pos.last_exit_timestamp) / self.candle_time;
                             if holding_period < cool_down_period && pos.last_exit_pnl < 0.0 {
+                                trades_type_count[5] += 1;
                                 continue;
                             }
                         }
@@ -207,11 +210,15 @@ impl Constraint {
                     if trade_value > min_trade_threshold {
                         total_size += trade_value;
                         valid_trades.push(Trade::signal_buy(max_pos_size, idx, timestamp));
+                    } else {
+                        trades_type_count[6] += 1;
                     }
                 }
                 -1 => {
                     if let Some(pos) = position {
+                        println!("pos.quantity: {}", pos.quantity);
                         if pos.quantity <= 0.0 {
+                            trades_type_count[7] += 1;
                             continue;
                         }
                         let sell_fraction = unsafe { *self.sell_fraction.get_unchecked(idx) };

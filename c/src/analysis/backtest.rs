@@ -7,6 +7,7 @@ use crate::trading::strategy::Strategy;
 use crate::trading::trade::{Trade, TradeType};
 use chrono::{DateTime, Utc};
 use port_etl::InfluxDBHandler;
+
 use std::time::Instant;
 
 pub struct BacktestResult {
@@ -15,7 +16,9 @@ pub struct BacktestResult {
     pub exited_early: bool,
     pub start_timestamp: u64,
     pub end_timestamp: u64,
+    pub timestamps: Vec<i64>,
     pub exit_price: Vec<f32>, // use to calculate unrealized pnl is positions are still open
+    pub trades_type_count: Vec<i32>,
 }
 
 #[inline(always)]
@@ -33,18 +36,8 @@ pub async fn backtest(
     cadence: u64, // in minutes
     debug: bool,
 ) -> Result<BacktestResult, Box<dyn std::error::Error>> {
-    let total_timer = Instant::now();
-    let data_timer = Instant::now();
-
-    let mut early_exit = false;
-
+    //*************** preparing data ***************
     let (data, timestamps) = get_data(tickers.clone(), start, end, debug, cadence).await?;
-
-    println!(
-        "[Timer] Time to get data: {:.3} seconds",
-        data_timer.elapsed().as_secs_f64()
-    );
-
     // Safety check: ensure we have enough data for warm-up period
     if data.len() <= warm_up_period {
         return Err(format!(
@@ -56,7 +49,12 @@ pub async fn backtest(
     }
 
     let warm_up_price_data: Vec<Vec<Vec<f32>>> = data[..warm_up_period].to_vec();
+    let n_assets = tickers.len();
+    let mut prev_close_prices = Vec::with_capacity(n_assets);
+    let mut prev_open_prices = Vec::with_capacity(n_assets);
+    let mut curr_open_prices = Vec::with_capacity(n_assets);
 
+    //*************** rehydrate portfolio ***************
     let mut strategy = Strategy::new(
         &strategy_name,
         &portfolio_name,
@@ -71,18 +69,19 @@ pub async fn backtest(
     constraint.set_cadence(cadence * 60);
     strategy.warm_up_signals(&warm_up_price_data);
 
-    let n_assets = tickers.len();
-    let mut prev_close_prices = Vec::with_capacity(n_assets);
-    let mut prev_open_prices = Vec::with_capacity(n_assets);
-    let mut curr_open_prices = Vec::with_capacity(n_assets);
-
-    // Track executed trades by date - key: timestamp, value: executed trades
-    let mut executed_trades_by_date = std::collections::HashMap::new();
-
+    //*************** initiate backtest variables ***************
+    let mut early_exit = false;
     let data_len = data.len();
-
-    println!("Start backtesting...");
     let mut exit_idx = data_len - 2;
+    let mut executed_trades_by_date: std::collections::HashMap<i64, Vec<Trade>> =
+        std::collections::HashMap::new();
+    let mut trades_type_count = Vec::with_capacity(10);
+    for _ in 0..10 {
+        trades_type_count.push(0);
+    }
+
+    //*************** backtest ***************
+    println!("Start backtesting...");
     let backtest_timer = Instant::now();
     for idx in warm_up_period..data_len - 1 {
         // Ensure we don't exceed timestamps array bounds
@@ -114,7 +113,6 @@ pub async fn backtest(
 
         // update position with t-1 close
         portfolio.pre_order_update(&prev_close_prices);
-
         // pre order check: mark portfolio at t-1 close, check take profit, stop loss, max drawdown
         let (is_exit, mut risk_management_trades, take_profit_trades) = constraint.pre_order_check(
             &prev_close_prices,
@@ -125,7 +123,12 @@ pub async fn backtest(
         );
 
         if is_exit {
-            portfolio.liquidation(&curr_open_prices, &mut risk_management_trades, time as u64);
+            portfolio.liquidation(
+                &curr_open_prices,
+                &mut risk_management_trades,
+                time as u64,
+                &mut trades_type_count,
+            );
             executed_trades_by_date.insert(time, risk_management_trades);
             println!("江南皮革厂倒闭啦！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！");
             early_exit = true;
@@ -158,13 +161,13 @@ pub async fn backtest(
                 &curr_open_prices,
                 time as u64,
                 &[],
+                &mut trades_type_count,
             );
             cash_after_trades += new_cash_after_trades;
             total_cost += new_total_cost;
             total_realized_pnl += new_total_realized_pnl;
             total_executed_trades.extend(new_executed_trades);
         }
-
         // then execute previous trades using t-1 close prices
         let mut pending_trades = portfolio.pending_trades.clone(); // previous period trades
         if !pending_trades.is_empty() {
@@ -178,12 +181,14 @@ pub async fn backtest(
                 &prev_close_prices,
                 time as u64,
                 &stop_loss_triggered_pos,
+                &mut trades_type_count,
             );
             cash_after_trades += new_cash_after_trades;
             total_cost += new_total_cost;
             total_realized_pnl += new_total_realized_pnl;
             total_executed_trades.extend(new_executed_trades);
         }
+
         if total_executed_trades.len() > 0 {
             executed_trades_by_date.insert(time, total_executed_trades);
         }
@@ -199,6 +204,7 @@ pub async fn backtest(
             available_cash,
             time as u64,
             &portfolio.positions,
+            &mut trades_type_count,
         );
 
         portfolio.pending_trades = new_signal_based_trades;
@@ -213,25 +219,9 @@ pub async fn backtest(
     }
 
     println!("Backtesting completed");
-    if early_exit {
-        println!("Early exit due to max drawdown");
-    }
-
-    println!("Total trade executions: {}", executed_trades_by_date.len());
-    println!("Total time periods: {}", data_len - 1 - warm_up_period);
-    println!(
-        "Trade execution rate: {:.2}%",
-        (executed_trades_by_date.len() as f64 / (data_len - warm_up_period) as f64) * 100.0
-    );
-
     println!(
         "[Timer] Time to run backtest: {:.3} seconds",
         backtest_timer.elapsed().as_secs_f64()
-    );
-
-    println!(
-        "[Timer] Total time for backtest function: {:.3} seconds",
-        total_timer.elapsed().as_secs_f64()
     );
 
     Ok(BacktestResult {
@@ -240,7 +230,9 @@ pub async fn backtest(
         exited_early: early_exit,
         start_timestamp: timestamps[warm_up_period + 1] as u64,
         end_timestamp: timestamps[exit_idx] as u64,
+        timestamps: timestamps,
         exit_price: data[data_len - 1].iter().map(|x| x[3]).collect::<Vec<_>>(),
+        trades_type_count,
     })
 }
 
@@ -251,6 +243,8 @@ async fn get_data(
     debug: bool,
     cadence: u64,
 ) -> Result<(Vec<Vec<Vec<f32>>>, Vec<i64>), Box<dyn std::error::Error>> {
+    let data_timer = Instant::now();
+
     let (data, timestamps) = if debug {
         // Use InfluxDB for debug mode
         let handler = InfluxDBHandler::new()?;
@@ -264,6 +258,12 @@ async fn get_data(
             .await
             .map_err(|e| -> Box<dyn std::error::Error> { e })?;
 
+        println!(
+            "[Timer] Time to query nen: {:.3} seconds",
+            data_timer.elapsed().as_secs_f64()
+        );
+
+        let convert_timer = Instant::now();
         // Convert database service data to the format expected by the backtest
         let mut converted_data = Vec::new();
         let mut converted_timestamps = Vec::new();
@@ -305,6 +305,11 @@ async fn get_data(
             }
         }
 
+        println!(
+            "[Timer] Time to convert data: {:.3} seconds",
+            convert_timer.elapsed().as_secs_f64()
+        );
+
         (converted_data, converted_timestamps)
     };
     Ok((data, timestamps))
@@ -315,6 +320,7 @@ pub fn backtest_result(
     portfolio: &Portfolio,
     executed_trades_by_date: &std::collections::HashMap<i64, Vec<crate::trading::trade::Trade>>,
     exited_early: bool,
+    trades_type_count: &Vec<i32>,
 ) {
     println!("=== BACKTEST RESULTS ===\n");
     if exited_early {
@@ -325,6 +331,10 @@ pub fn backtest_result(
     println!("📈 Total Records: {}", equity_len);
     println!("📅 Trade Events: {}", executed_trades_by_date.len());
 
+    println!(
+        "Trade execution rate: {:.2}%",
+        trades_type_count[0] as f64 / trades_type_count.iter().sum::<i32>() as f64 * 100.0
+    );
     if equity_len == 0 {
         println!("❌ No data to display");
         return;
