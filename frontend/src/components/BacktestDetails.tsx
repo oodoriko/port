@@ -12,7 +12,9 @@ import {
 } from "@mantine/core";
 import { useState } from "react";
 import { MANTINE_THEME_A_COLORS, THEME_A_COLORS } from "../theme/theme_a";
+import { THEME_C_COLORS } from "../theme/theme_c";
 import type { BacktestParams, BacktestResult } from "../types/backtest";
+import { LineChart } from "./LineChart";
 
 interface BacktestDetailsProps {
   backtestParams: BacktestParams;
@@ -25,6 +27,8 @@ export function BacktestDetails({
 }: BacktestDetailsProps) {
   const [opened, setOpened] = useState(false);
   const [performanceOpened, setPerformanceOpened] = useState(false);
+  const [signalSummaryOpened, setSignalSummaryOpened] = useState(false);
+  const [curvesOpened, setCurvesOpened] = useState(false);
   const {
     portfolio_params,
     portfolio_constraints_params,
@@ -32,9 +36,139 @@ export function BacktestDetails({
     strategies,
     tickers,
   } = backtestParams;
-
+  backtestResult?.timestamps.sort((a, b) => a - b);
   return (
     <Stack gap="md">
+      {/* Signal Summary */}
+      <Fieldset
+        legend={
+          <Group gap="xs" justify="space-between" style={{ width: "100%" }}>
+            <Text fw={600} c={MANTINE_THEME_A_COLORS.teal}>
+              Signal Summary
+            </Text>
+            <Button
+              variant="subtle"
+              size="xs"
+              onClick={() => setSignalSummaryOpened(!signalSummaryOpened)}
+              style={{
+                padding: "2px 6px",
+                height: "auto",
+                fontSize: "12px",
+                minWidth: "auto",
+                color: MANTINE_THEME_A_COLORS.teal,
+                marginLeft: "auto",
+              }}
+            >
+              {signalSummaryOpened ? "Hide" : "Show"}
+            </Button>
+          </Group>
+        }
+      >
+        <Collapse in={signalSummaryOpened}>
+          <Stack gap="md">
+            {/* Executed Trades */}
+            <Divider
+              label={
+                <Text fw={600} size="sm">
+                  Executed Trades
+                </Text>
+              }
+              labelPosition="left"
+            />
+            <Text size="lg" fw={600} c="green">
+              {backtestResult?.trade_type_count?.executed || 0}
+            </Text>
+
+            {/* Failed Trades */}
+            <Divider
+              label={
+                <Text fw={600} size="sm">
+                  Trades Failed During Trading
+                </Text>
+              }
+              labelPosition="left"
+            />
+            <Grid>
+              <Grid.Col span={3}>
+                <Text size="sm" c="dimmed" mb="xs">
+                  Insufficient cash after cost
+                </Text>
+                <Text size="lg" fw={600} c="red">
+                  {backtestResult?.trade_type_count?.failed_insufficient_cash ||
+                    0}
+                </Text>
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <Text size="sm" c="dimmed" mb="xs">
+                  Short sell prohibited
+                </Text>
+                <Text size="lg" fw={600} c="red">
+                  {backtestResult?.trade_type_count
+                    ?.failed_short_sell_prohibited || 0}
+                </Text>
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <Text size="sm" c="dimmed" mb="xs">
+                  Asset in cool down period
+                </Text>
+                <Text size="lg" fw={600} c="red">
+                  {backtestResult?.trade_type_count?.failed_cool_down_period ||
+                    0}
+                </Text>
+              </Grid.Col>
+            </Grid>
+
+            {/* Rejected Trades */}
+            <Divider
+              label={
+                <Text fw={600} size="sm">
+                  Trades Rejected by Constraints
+                </Text>
+              }
+              labelPosition="left"
+            />
+            <Grid>
+              <Grid.Col span={3}>
+                <Text size="sm" c="dimmed" mb="xs">
+                  Holding period too short
+                </Text>
+                <Text size="lg" fw={600} c="orange">
+                  {backtestResult?.trade_type_count
+                    ?.rejected_holding_period_too_short || 0}
+                </Text>
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <Text size="sm" c="dimmed" mb="xs">
+                  Exited at loss last time, in cool down period
+                </Text>
+                <Text size="lg" fw={600} c="orange">
+                  {backtestResult?.trade_type_count
+                    ?.rejected_cool_down_after_loss || 0}
+                </Text>
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <Text size="sm" c="dimmed" mb="xs">
+                  Trade size too small
+                </Text>
+                <Text size="lg" fw={600} c="orange">
+                  {backtestResult?.trade_type_count
+                    ?.rejected_trade_size_too_small || 0}
+                </Text>
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <Text size="sm" c="dimmed" mb="xs">
+                  Short sell prohibited
+                </Text>
+                <Text size="lg" fw={600} c="orange">
+                  {backtestResult?.trade_type_count
+                    ?.rejected_short_sell_prohibited || 0}
+                </Text>
+              </Grid.Col>
+            </Grid>
+          </Stack>
+        </Collapse>
+      </Fieldset>
+
       <Fieldset
         legend={
           <Group gap="xs" justify="space-between" style={{ width: "100%" }}>
@@ -712,11 +846,12 @@ export function BacktestDetails({
                             </Text>
                             <Text size="lg" fw={600}>
                               {Number.isFinite(position.alpha) ? (
-                                <NumberFormatter
-                                  value={position.alpha}
-                                  decimalScale={4}
-                                />
+                                "N/A"
                               ) : (
+                                // <NumberFormatter
+                                //   value={position.alpha}
+                                //   decimalScale={4}
+                                // />
                                 <span style={{ color: "black" }}>-</span>
                               )}
                             </Text>
@@ -727,10 +862,11 @@ export function BacktestDetails({
                             </Text>
                             <Text size="lg" fw={600}>
                               {Number.isFinite(position.beta) ? (
-                                <NumberFormatter
-                                  value={position.beta}
-                                  decimalScale={4}
-                                />
+                                // <NumberFormatter
+                                //   value={position.beta}
+                                //   decimalScale={4}
+                                // />
+                                "N/A"
                               ) : (
                                 <span style={{ color: "black" }}>-</span>
                               )}
@@ -990,6 +1126,146 @@ export function BacktestDetails({
                     )
                   )}
                 </Stack>
+              </Box>
+            </Stack>
+          </Collapse>
+        </Fieldset>
+      )}
+
+      {/* The Curves */}
+      {backtestResult && (
+        <Fieldset
+          legend={
+            <Group gap="xs" justify="space-between" style={{ width: "100%" }}>
+              <Text fw={600} c={MANTINE_THEME_A_COLORS.teal}>
+                The Curves
+              </Text>
+              <Button
+                variant="subtle"
+                size="xs"
+                onClick={() => setCurvesOpened(!curvesOpened)}
+                style={{
+                  padding: "2px 6px",
+                  height: "auto",
+                  fontSize: "12px",
+                  minWidth: "auto",
+                  color: MANTINE_THEME_A_COLORS.teal,
+                  marginLeft: "auto",
+                }}
+              >
+                {curvesOpened ? "Hide" : "Show"}
+              </Button>
+            </Group>
+          }
+        >
+          <Collapse in={curvesOpened}>
+            <Stack gap="lg">
+              {/* Chart 1: Notional, Equity, and Cash Curves */}
+              <Box>
+                <Text size="sm" c="dimmed" mb="xs" fw={500}>
+                  Portfolio Value Curves
+                </Text>
+                <LineChart
+                  data={[
+                    {
+                      name: "Notional",
+                      data: backtestResult.timestamps.map((time, index) => ({
+                        time,
+                        value: backtestResult.notional_curve[index],
+                      })),
+                      color: THEME_A_COLORS.primary.blue,
+                    },
+                    {
+                      name: "Equity",
+                      data: backtestResult.timestamps.map((time, index) => ({
+                        time,
+                        value: backtestResult.equity_curve[index],
+                      })),
+                      color: THEME_A_COLORS.primary.gold,
+                    },
+                    {
+                      name: "Cash",
+                      data: backtestResult.timestamps.map((time, index) => ({
+                        time,
+                        value: backtestResult.cash_curve[index],
+                      })),
+                      color: THEME_A_COLORS.system.teal,
+                    },
+                  ]}
+                  height={300}
+                />
+              </Box>
+
+              {/* Chart 2: Cost Curve */}
+              <Box>
+                <Text size="sm" c="dimmed" mb="xs" fw={500}>
+                  Cost Curve
+                </Text>
+                <LineChart
+                  data={[
+                    {
+                      name: "Cumulative Cost",
+                      data: backtestResult.timestamps.map((time, index) => {
+                        // Compute running sum (cumulative cost)
+                        let cumulative = 0;
+                        for (let i = 0; i <= index; i++) {
+                          cumulative += backtestResult.cost_curve[i] || 0;
+                        }
+                        return {
+                          time,
+                          value: cumulative,
+                        };
+                      }),
+                      color: THEME_A_COLORS.tertiary.cyan,
+                    },
+                  ]}
+                  height={300}
+                />
+              </Box>
+
+              {/* Chart 3: PnL Curves */}
+              <Box>
+                <Text size="sm" c="dimmed" mb="xs" fw={500}>
+                  PnL Curves
+                </Text>
+                <LineChart
+                  data={[
+                    {
+                      name: "Cumulative Realized PnL",
+                      data: backtestResult.timestamps.map((time, index) => {
+                        // Compute running sum (cumulative realized PnL)
+                        let cumulative = 0;
+                        for (let i = 0; i <= index; i++) {
+                          cumulative +=
+                            backtestResult.realized_pnl_curve[i] || 0;
+                        }
+                        return {
+                          time,
+                          value: cumulative,
+                        };
+                      }),
+                      color: THEME_C_COLORS.core.primaryRed,
+                    },
+                    // Dummy series for legend spacing
+                    {
+                      name: "",
+                      data:
+                        backtestResult.timestamps.length > 0
+                          ? [{ time: backtestResult.timestamps[0], value: 0 }]
+                          : [],
+                      color: "rgba(0,0,0,0)",
+                    },
+                    {
+                      name: "Unrealized PnL",
+                      data: backtestResult.timestamps.map((time, index) => ({
+                        time,
+                        value: backtestResult.unrealized_pnl_curve[index],
+                      })),
+                      color: THEME_A_COLORS.system.lightBlue,
+                    },
+                  ]}
+                  height={300}
+                />
               </Box>
             </Stack>
           </Collapse>

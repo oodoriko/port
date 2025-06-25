@@ -61,15 +61,9 @@ function App() {
             🩴🩱🌊🐬🪼🧢🧊
           </Title>
           <Text c="dimmed">
-            吾輩はサトシである🐳
-            <br />
-            肩が痛いです。
-            <br />
-            外に出たいけど、めちゃ暑いです。🫠
-            <br />
-            まいにちアイスだけ食べたいです。
-            <br />
-            夏休みが欲しいんだ！🏖️
+            {/* 吾輩はサトシである🐳 */}
+            夏休み!夏休み!夏休み!夏休み!夏休み!夏休み!夏休み!夏休み!!!!!! ねぇ
+            summertime~ 海岸通りを歩きたい~
           </Text>
         </Box>
         <Tabs value={activeTab} onChange={setActiveTab}>

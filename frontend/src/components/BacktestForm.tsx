@@ -14,11 +14,10 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { DatePickerInput } from "@mantine/dates";
+import { DateInput } from "@mantine/dates";
 import { useForm } from "@mantine/form";
 import { useDisclosure } from "@mantine/hooks";
 import { IconInfoCircle, IconPlus, IconTrash } from "@tabler/icons-react";
-import { DateTime } from "luxon";
 import { useEffect, useRef, useState } from "react";
 import { fetchDateRanges, fetchTradingPairs } from "../api/data";
 import { MANTINE_THEME_A_COLORS } from "../theme/theme_a";
@@ -49,6 +48,12 @@ interface BacktestFormProps {
   loading?: boolean;
 }
 
+// Define a separate type for form state
+interface BacktestFormState extends Omit<BacktestParams, "start" | "end"> {
+  start: Date | null;
+  end: Date | null;
+}
+
 export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
   const [opened, { open, close }] = useDisclosure(false);
   const [strategyOpened, { open: openStrategy, close: closeStrategy }] =
@@ -71,8 +76,12 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
   // Ref to track the last calculated date range to prevent infinite loops
   const lastDateRangeRef = useRef<{ start: string; end: string } | null>(null);
 
-  const form = useForm<BacktestParams>({
-    initialValues: defaultBacktestParams,
+  const form = useForm<BacktestFormState>({
+    initialValues: {
+      ...defaultBacktestParams,
+      start: null,
+      end: null,
+    },
     validate: {
       strategy_name: (value) =>
         value.length < 1 ? "Strategy name is required" : null,
@@ -140,8 +149,8 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
           setLatestDate(latest);
 
           // Set default dates in the form
-          form.setFieldValue("start", earliest.toISOString().split("T")[0]);
-          form.setFieldValue("end", latest.toISOString().split("T")[0]);
+          form.setFieldValue("start", earliest);
+          form.setFieldValue("end", latest);
         }
       } catch (error) {
         console.error("Failed to fetch trading data:", error);
@@ -173,8 +182,8 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
         lastRange.start !== newStartDate ||
         lastRange.end !== newEndDate
       ) {
-        form.setFieldValue("start", newStartDate);
-        form.setFieldValue("end", newEndDate);
+        form.setFieldValue("start", validMinDate);
+        form.setFieldValue("end", validMaxDate);
 
         // Update the ref to track what we just set
         lastDateRangeRef.current = { start: newStartDate, end: newEndDate };
@@ -248,12 +257,22 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
     },
   });
 
-  const handleSubmit = (values: BacktestParams) => {
-    // Convert dates to ISO format for the backend with specific times
-    const submitValues = {
+  const handleSubmit = (values: BacktestFormState) => {
+    // Convert start and end to proper Date objects if they're strings
+    let startDate: Date | null = values.start;
+    let endDate: Date | null = values.end;
+
+    if (typeof values.start === "string") {
+      startDate = new Date(values.start);
+    }
+
+    if (typeof values.end === "string") {
+      endDate = new Date(values.end);
+    }
+
+    const submitValues: BacktestParams = {
       ...values,
       tickers: assets.map((asset) => asset.ticker),
-      // Use only asset-specific strategies, not the default form strategies
       strategies: assets.map((asset) => asset.strategies || []),
       portfolio_params: {
         ...values.portfolio_params,
@@ -279,17 +298,30 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
         risk_per_trade_pct: (asset.risk_per_trade_pct || 0) / 100,
         sell_fraction: asset.sell_fraction || 0,
       })),
-      start: values.start
-        ? DateTime.fromISO(values.start)
-            .set({ hour: 7, minute: 0, second: 0, millisecond: 0 })
-            .toISO()!
+      start: startDate
+        ? new Date(
+            startDate.getFullYear(),
+            startDate.getMonth(),
+            startDate.getDate(),
+            0,
+            0,
+            0,
+            0
+          ).toISOString()
         : "",
-      end: values.end
-        ? DateTime.fromISO(values.end)
-            .set({ hour: 23, minute: 59, second: 59, millisecond: 999 })
-            .toISO()!
+      end: endDate
+        ? new Date(
+            endDate.getFullYear(),
+            endDate.getMonth(),
+            endDate.getDate(),
+            23,
+            59,
+            59,
+            999
+          ).toISOString()
         : "",
     };
+
     onSubmit(submitValues);
   };
 
@@ -298,14 +330,10 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
     const newDefaults = {
       ...defaultBacktestParams,
       backtest_id: crypto.randomUUID(), // Generate new UUID
+      start: earliestDate,
+      end: latestDate,
     };
     form.setValues(newDefaults);
-
-    // Set dates to earliest and latest if available
-    if (earliestDate && latestDate) {
-      form.setFieldValue("start", earliestDate.toISOString().split("T")[0]);
-      form.setFieldValue("end", latestDate.toISOString().split("T")[0]);
-    }
 
     // Also reset the assets state
     setAssets([]);
@@ -1120,11 +1148,6 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
               </Text>
             }
           >
-            <Text size="sm" c="dimmed" mb="md">
-              Backtest will run from 7:00 AM of the start date to 11:59 PM of
-              the end date
-            </Text>
-
             {/* Show trading pair date ranges */}
             {assets.length > 0 && (
               <Stack gap="xs" mb="md">
@@ -1162,27 +1185,85 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
             )}
             <Grid>
               <Grid.Col span={6}>
-                <DatePickerInput
+                <DateInput
                   label="Start Date"
-                  placeholder="Select start date"
+                  placeholder="YYYY-MM-DD"
                   required
                   clearable
                   valueFormat="YYYY-MM-DD"
                   minDate={validMinDate || undefined}
                   maxDate={validMaxDate || undefined}
-                  {...form.getInputProps("start")}
+                  value={form.values.start}
+                  onChange={(value) => {
+                    if (
+                      value &&
+                      typeof value === "object" &&
+                      "getTime" in value
+                    ) {
+                      form.setFieldValue("start", value as Date);
+                    } else if (typeof value === "string" && value) {
+                      const parsed = new Date(value);
+                      if (!isNaN(parsed.getTime())) {
+                        form.setFieldValue("start", parsed);
+                      }
+                    } else {
+                      form.setFieldValue("start", null);
+                    }
+                  }}
+                  onBlur={(event) => {
+                    const value = event.target.value;
+                    if (
+                      value &&
+                      value !== form.values.start?.toISOString().split("T")[0]
+                    ) {
+                      const parsed = new Date(value);
+                      if (!isNaN(parsed.getTime())) {
+                        form.setFieldValue("start", parsed);
+                      }
+                    }
+                  }}
+                  error={form.errors.start}
                 />
               </Grid.Col>
               <Grid.Col span={6}>
-                <DatePickerInput
+                <DateInput
                   label="End Date"
-                  placeholder="Select end date"
+                  placeholder="YYYY-MM-DD"
                   required
                   clearable
                   valueFormat="YYYY-MM-DD"
                   minDate={validMinDate || undefined}
                   maxDate={validMaxDate || undefined}
-                  {...form.getInputProps("end")}
+                  value={form.values.end}
+                  onChange={(value) => {
+                    if (
+                      value &&
+                      typeof value === "object" &&
+                      "getTime" in value
+                    ) {
+                      form.setFieldValue("end", value as Date);
+                    } else if (typeof value === "string" && value) {
+                      const parsed = new Date(value);
+                      if (!isNaN(parsed.getTime())) {
+                        form.setFieldValue("end", parsed);
+                      }
+                    } else {
+                      form.setFieldValue("end", null);
+                    }
+                  }}
+                  onBlur={(event) => {
+                    const value = event.target.value;
+                    if (
+                      value &&
+                      value !== form.values.end?.toISOString().split("T")[0]
+                    ) {
+                      const parsed = new Date(value);
+                      if (!isNaN(parsed.getTime())) {
+                        form.setFieldValue("end", parsed);
+                      }
+                    }
+                  }}
+                  error={form.errors.end}
                 />
               </Grid.Col>
               <Grid.Col span={6}>

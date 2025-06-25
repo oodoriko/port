@@ -164,14 +164,26 @@ export function BacktestResults({ results }: BacktestResultsProps) {
               <Text
                 size="lg"
                 fw={600}
-                c={key_metrics.net_realized_pnl >= 0 ? "green" : "red"}
+                c={
+                  !Number.isFinite(key_metrics.net_realized_pnl)
+                    ? "black"
+                    : key_metrics.net_realized_pnl === 0
+                    ? "black"
+                    : key_metrics.net_realized_pnl >= 0
+                    ? "green"
+                    : "red"
+                }
               >
-                <NumberFormatter
-                  value={key_metrics.net_realized_pnl}
-                  prefix="$"
-                  thousandSeparator
-                  decimalScale={2}
-                />
+                {Number.isFinite(key_metrics.net_realized_pnl) ? (
+                  <NumberFormatter
+                    value={key_metrics.net_realized_pnl}
+                    prefix="$"
+                    thousandSeparator
+                    decimalScale={2}
+                  />
+                ) : (
+                  <span style={{ color: "black" }}>-</span>
+                )}
               </Text>
             </Grid.Col>
           </Grid>
@@ -308,13 +320,25 @@ export function BacktestResults({ results }: BacktestResultsProps) {
               <Text
                 size="lg"
                 fw={600}
-                c={key_metrics.gross_return >= 0 ? "green" : "red"}
+                c={
+                  !Number.isFinite(key_metrics.gross_return)
+                    ? "black"
+                    : key_metrics.gross_return === 0
+                    ? "black"
+                    : key_metrics.gross_return >= 0
+                    ? "green"
+                    : "red"
+                }
               >
-                <NumberFormatter
-                  value={key_metrics.gross_return * 100}
-                  suffix="%"
-                  decimalScale={2}
-                />
+                {Number.isFinite(key_metrics.gross_return) ? (
+                  <NumberFormatter
+                    value={key_metrics.gross_return * 100}
+                    suffix="%"
+                    decimalScale={2}
+                  />
+                ) : (
+                  <span style={{ color: "black" }}>-</span>
+                )}
               </Text>
               <Text size="sm" c="dimmed" mt="md" mb="xs">
                 Win Rate
@@ -335,13 +359,25 @@ export function BacktestResults({ results }: BacktestResultsProps) {
               <Text
                 size="lg"
                 fw={600}
-                c={key_metrics.net_return >= 0 ? "green" : "red"}
+                c={
+                  !Number.isFinite(key_metrics.net_return)
+                    ? "black"
+                    : key_metrics.net_return === 0
+                    ? "black"
+                    : key_metrics.net_return >= 0
+                    ? "green"
+                    : "red"
+                }
               >
-                <NumberFormatter
-                  value={key_metrics.net_return * 100}
-                  suffix="%"
-                  decimalScale={2}
-                />
+                {Number.isFinite(key_metrics.net_return) ? (
+                  <NumberFormatter
+                    value={key_metrics.net_return * 100}
+                    suffix="%"
+                    decimalScale={2}
+                  />
+                ) : (
+                  <span style={{ color: "black" }}>-</span>
+                )}
               </Text>
               <Text size="sm" c="dimmed" mt="md" mb="xs">
                 Profit Factor
@@ -361,13 +397,25 @@ export function BacktestResults({ results }: BacktestResultsProps) {
               <Text
                 size="lg"
                 fw={600}
-                c={key_metrics.annualized_return >= 0 ? "green" : "red"}
+                c={
+                  !Number.isFinite(key_metrics.annualized_return)
+                    ? "black"
+                    : key_metrics.annualized_return === 0
+                    ? "black"
+                    : key_metrics.annualized_return >= 0
+                    ? "green"
+                    : "red"
+                }
               >
-                <NumberFormatter
-                  value={key_metrics.annualized_return * 100}
-                  suffix="%"
-                  decimalScale={2}
-                />
+                {Number.isFinite(key_metrics.annualized_return) ? (
+                  <NumberFormatter
+                    value={key_metrics.annualized_return * 100}
+                    suffix="%"
+                    decimalScale={2}
+                  />
+                ) : (
+                  <span style={{ color: "black" }}>-</span>
+                )}
               </Text>
             </Grid.Col>
           </Grid>
@@ -477,7 +525,15 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                       <Text
                         size="lg"
                         fw={600}
-                        c={position.realized_pnl_net >= 0 ? "green" : "red"}
+                        c={
+                          !Number.isFinite(position.realized_pnl_net)
+                            ? "black"
+                            : position.realized_pnl_net === 0
+                            ? "black"
+                            : position.realized_pnl_net >= 0
+                            ? "green"
+                            : "red"
+                        }
                       >
                         {Number.isFinite(position.realized_pnl_net) ? (
                           <NumberFormatter
@@ -496,7 +552,15 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                       <Text
                         size="lg"
                         fw={600}
-                        c={position.gross_return >= 0 ? "green" : "red"}
+                        c={
+                          !Number.isFinite(position.gross_return)
+                            ? "black"
+                            : position.gross_return === 0
+                            ? "black"
+                            : position.gross_return >= 0
+                            ? "green"
+                            : "red"
+                        }
                       >
                         {Number.isFinite(position.gross_return) ? (
                           <NumberFormatter
@@ -531,7 +595,15 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                       <Text
                         size="lg"
                         fw={600}
-                        c={position.unrealized_pnl_net >= 0 ? "green" : "red"}
+                        c={
+                          !Number.isFinite(position.unrealized_pnl_net)
+                            ? "black"
+                            : position.unrealized_pnl_net === 0
+                            ? "black"
+                            : position.unrealized_pnl_net >= 0
+                            ? "green"
+                            : "red"
+                        }
                       >
                         {Number.isFinite(position.unrealized_pnl_net) ? (
                           <NumberFormatter
@@ -550,7 +622,15 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                       <Text
                         size="lg"
                         fw={600}
-                        c={position.net_return >= 0 ? "green" : "red"}
+                        c={
+                          !Number.isFinite(position.net_return)
+                            ? "black"
+                            : position.net_return === 0
+                            ? "black"
+                            : position.net_return >= 0
+                            ? "green"
+                            : "red"
+                        }
                       >
                         {Number.isFinite(position.net_return) ? (
                           <NumberFormatter
@@ -582,14 +662,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                         Alpha
                       </Text>
                       <Text size="lg" fw={600}>
-                        {Number.isFinite(position.alpha) ? (
-                          <NumberFormatter
-                            value={position.alpha}
-                            decimalScale={4}
-                          />
-                        ) : (
-                          <span style={{ color: "black" }}>-</span>
-                        )}
+                        N/A
                       </Text>
                       <Text size="sm" c="dimmed" mt="md" mb="xs">
                         Ann. Return
@@ -597,7 +670,15 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                       <Text
                         size="lg"
                         fw={600}
-                        c={position.annualized_return >= 0 ? "green" : "red"}
+                        c={
+                          !Number.isFinite(position.annualized_return)
+                            ? "black"
+                            : position.annualized_return === 0
+                            ? "black"
+                            : position.annualized_return >= 0
+                            ? "green"
+                            : "red"
+                        }
                       >
                         {Number.isFinite(position.annualized_return) ? (
                           <NumberFormatter
@@ -616,14 +697,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                         Beta
                       </Text>
                       <Text size="lg" fw={600}>
-                        {Number.isFinite(position.beta) ? (
-                          <NumberFormatter
-                            value={position.beta}
-                            decimalScale={4}
-                          />
-                        ) : (
-                          <span style={{ color: "black" }}>-</span>
-                        )}
+                        N/A
                       </Text>
                     </Grid.Col>
                   </Grid>

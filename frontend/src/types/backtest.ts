@@ -206,6 +206,16 @@ export interface BacktestResult {
   tickers: string[];
   key_metrics: KeyMetrics;
   risk_free_rate: number;
+  trade_type_count?: {
+    executed: number;
+    failed_insufficient_cash: number;
+    failed_short_sell_prohibited: number;
+    failed_cool_down_period: number;
+    rejected_holding_period_too_short: number;
+    rejected_cool_down_after_loss: number;
+    rejected_trade_size_too_small: number;
+    rejected_short_sell_prohibited: number;
+  };
 }
 
 export interface KeyMetrics {
