@@ -18,18 +18,6 @@ interface BacktestResultsProps {
   results: BacktestResult;
 }
 
-// Use only non-black/white colors, fallback to a known blue if needed
-const PIE_COLORS = [
-  THEME_A_COLORS.primary.blue || "#2774AE",
-  "#FF6B6B",
-  "#4ECDC4",
-  "#45B7D1",
-  "#96CEB4",
-  "#FFEAA7",
-  "#DDA0DD",
-  "#98D8C8",
-];
-
 export function BacktestResults({ results }: BacktestResultsProps) {
   const { backtest_id, portfolio_name, key_metrics, tickers } = results;
 
@@ -146,7 +134,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
           <Grid>
             <Grid.Col span={6}>
               <Text size="sm" c="dimmed" mb="xs">
-                Cash Injection
+                Capital Contribution post t0
               </Text>
               <Text size="lg" fw={600}>
                 <NumberFormatter
@@ -303,7 +291,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
           <Divider
             label={
               <Text fw={600} size="sm">
-                Return Metrics
+                Return Metrics (excl. Cash Injection)
               </Text>
             }
             labelPosition="center"
@@ -312,7 +300,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
 
           {/* Compact 3-column layout for returns and win/profit metrics */}
           <Grid>
-            {/* Column 1: Gross Return, Win Rate */}
+            {/* Column 1: Gross Return, Cash Contribution, Win Rate */}
             <Grid.Col span={4}>
               <Text size="sm" c="dimmed" mb="xs">
                 Gross Return
@@ -351,7 +339,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                 />
               </Text>
             </Grid.Col>
-            {/* Column 2: Net Return, Profit Factor */}
+            {/* Column 2: Net Return, Position Contribution, Profit Factor */}
             <Grid.Col span={4}>
               <Text size="sm" c="dimmed" mb="xs">
                 Net Return
@@ -383,13 +371,17 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                 Profit Factor
               </Text>
               <Text size="lg" fw={600}>
-                <NumberFormatter
-                  value={key_metrics.profit_factor}
-                  decimalScale={2}
-                />
+                {Number.isFinite(key_metrics.profit_factor) ? (
+                  <NumberFormatter
+                    value={key_metrics.profit_factor}
+                    decimalScale={2}
+                  />
+                ) : (
+                  <span>∞</span>
+                )}
               </Text>
             </Grid.Col>
-            {/* Column 3: Annualized Return (spans both rows) */}
+            {/* Column 3: Annualized Return, Gain Contribution */}
             <Grid.Col span={4}>
               <Text size="sm" c="dimmed" mb="xs">
                 Annualized Return
@@ -410,6 +402,20 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                 {Number.isFinite(key_metrics.annualized_return) ? (
                   <NumberFormatter
                     value={key_metrics.annualized_return * 100}
+                    suffix="%"
+                    decimalScale={2}
+                  />
+                ) : (
+                  <span style={{ color: "black" }}>-</span>
+                )}
+              </Text>
+              <Text size="sm" c="dimmed" mt="md" mb="xs">
+                Cash Utilization Ratio
+              </Text>
+              <Text size="lg" fw={600} c="black">
+                {Number.isFinite(key_metrics.cash_utilization_ratio) ? (
+                  <NumberFormatter
+                    value={key_metrics.cash_utilization_ratio * 100}
                     suffix="%"
                     decimalScale={2}
                   />
@@ -474,7 +480,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
               <Text size="sm" c="dimmed" mb="xs">
                 Max Drawdown
               </Text>
-              <Text size="lg" fw={600} c="red">
+              <Text size="lg" fw={600} c="black">
                 <NumberFormatter
                   value={key_metrics.max_drawdown * 100}
                   suffix="%"
@@ -520,7 +526,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                     {/* Column 1 */}
                     <Grid.Col span={3}>
                       <Text size="sm" c="dimmed" mb="xs">
-                        Realized PnL
+                        Net Realized PnL
                       </Text>
                       <Text
                         size="lg"
@@ -590,7 +596,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                     {/* Column 2 */}
                     <Grid.Col span={3}>
                       <Text size="sm" c="dimmed" mb="xs">
-                        Unrealized PnL
+                        Approx. NUPL
                       </Text>
                       <Text
                         size="lg"
@@ -652,7 +658,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                             decimalScale={2}
                           />
                         ) : (
-                          <span style={{ color: "black" }}>-</span>
+                          <span>∞</span>
                         )}
                       </Text>
                     </Grid.Col>
@@ -705,11 +711,11 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                   {/* Trade Statistics Table */}
                   <Box mt="lg">
                     <Text size="sm" c="dimmed" mb="xs">
-                      Trade Type Breakdown
+                      Sell Trade Type Breakdown
                     </Text>
                     <Grid>
                       {/* Left: Trade Statistics Table (2/3 width) */}
-                      <Grid.Col span={8}>
+                      <Grid.Col span={9}>
                         <Box
                           style={{
                             border: `1px solid ${THEME_A_COLORS.system.gray}`,
@@ -755,9 +761,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                             }}
                           >
                             <Grid.Col span={3} p="xs">
-                              <Text size="sm" fw={500}>
-                                Take Profit
-                              </Text>
+                              <Text size="sm">Take Profit</Text>
                             </Grid.Col>
                             <Grid.Col span={3} p="xs">
                               <Text size="sm">
@@ -777,7 +781,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                               </Text>
                             </Grid.Col>
                             <Grid.Col span={3} p="xs">
-                              <Text size="sm" c="green">
+                              <Text size="sm" c="black">
                                 {Number.isFinite(
                                   position.take_profit_gain_pct
                                 ) ? (
@@ -792,7 +796,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                               </Text>
                             </Grid.Col>
                             <Grid.Col span={3} p="xs">
-                              <Text size="sm" c="red">
+                              <Text size="sm" c="black">
                                 {Number.isFinite(
                                   position.take_profit_loss_pct
                                 ) ? (
@@ -816,9 +820,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                             }}
                           >
                             <Grid.Col span={3} p="xs">
-                              <Text size="sm" fw={500}>
-                                Stop Loss
-                              </Text>
+                              <Text size="sm">Stop Loss</Text>
                             </Grid.Col>
                             <Grid.Col span={3} p="xs">
                               <Text size="sm">
@@ -836,7 +838,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                               </Text>
                             </Grid.Col>
                             <Grid.Col span={3} p="xs">
-                              <Text size="sm" c="green">
+                              <Text size="sm" c="black">
                                 {Number.isFinite(
                                   position.stop_loss_gain_pct
                                 ) ? (
@@ -851,7 +853,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                               </Text>
                             </Grid.Col>
                             <Grid.Col span={3} p="xs">
-                              <Text size="sm" c="red">
+                              <Text size="sm" c="black">
                                 {Number.isFinite(
                                   position.stop_loss_loss_pct
                                 ) ? (
@@ -868,11 +870,14 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                           </Grid>
 
                           {/* Signal Sell Row */}
-                          <Grid m={0}>
+                          <Grid
+                            m={0}
+                            style={{
+                              borderBottom: `1px solid ${THEME_A_COLORS.system.warmGray3}`,
+                            }}
+                          >
                             <Grid.Col span={3} p="xs">
-                              <Text size="sm" fw={500}>
-                                Signal Sell
-                              </Text>
+                              <Text size="sm">Signal Sell</Text>
                             </Grid.Col>
                             <Grid.Col span={3} p="xs">
                               <Text size="sm">
@@ -892,7 +897,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                               </Text>
                             </Grid.Col>
                             <Grid.Col span={3} p="xs">
-                              <Text size="sm" c="green">
+                              <Text size="sm" c="black">
                                 {Number.isFinite(
                                   position.signal_sell_gain_pct
                                 ) ? (
@@ -907,7 +912,7 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                               </Text>
                             </Grid.Col>
                             <Grid.Col span={3} p="xs">
-                              <Text size="sm" c="red">
+                              <Text size="sm" c="black">
                                 {Number.isFinite(
                                   position.signal_sell_loss_pct
                                 ) ? (
@@ -922,11 +927,65 @@ export function BacktestResults({ results }: BacktestResultsProps) {
                               </Text>
                             </Grid.Col>
                           </Grid>
+
+                          {/* Liquidation Row */}
+                          <Grid m={0}>
+                            <Grid.Col span={3} p="xs">
+                              <Text size="sm">Liquidation</Text>
+                            </Grid.Col>
+                            <Grid.Col span={3} p="xs">
+                              <Text size="sm">
+                                {Number.isFinite(
+                                  position.liquidation_trades_pct
+                                ) ? (
+                                  <NumberFormatter
+                                    value={
+                                      position.liquidation_trades_pct * 100
+                                    }
+                                    suffix="%"
+                                    decimalScale={1}
+                                  />
+                                ) : (
+                                  <span style={{ color: "black" }}>-</span>
+                                )}
+                              </Text>
+                            </Grid.Col>
+                            <Grid.Col span={3} p="xs">
+                              <Text size="sm" c="black">
+                                {Number.isFinite(
+                                  position.liquidation_gain_pct
+                                ) ? (
+                                  <NumberFormatter
+                                    value={position.liquidation_gain_pct * 100}
+                                    suffix="%"
+                                    decimalScale={1}
+                                  />
+                                ) : (
+                                  <span style={{ color: "black" }}>-</span>
+                                )}
+                              </Text>
+                            </Grid.Col>
+                            <Grid.Col span={3} p="xs">
+                              <Text size="sm" c="black">
+                                {Number.isFinite(
+                                  position.liquidation_loss_pct
+                                ) ? (
+                                  <NumberFormatter
+                                    value={position.liquidation_loss_pct * 100}
+                                    suffix="%"
+                                    decimalScale={1}
+                                  />
+                                ) : (
+                                  <span style={{ color: "black" }}>-</span>
+                                )}
+                              </Text>
+                            </Grid.Col>
+                          </Grid>
                         </Box>
                       </Grid.Col>
 
                       {/* Right: Buy/Sell Pie Chart (1/3 width) */}
-                      <Grid.Col span={4}>
+                      <Grid.Col span={3}>
                         <Box>
                           <Box style={{ minWidth: 80, width: 80, height: 80 }}>
                             <ResponsiveContainer width="100%" height="100%">

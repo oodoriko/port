@@ -59,7 +59,7 @@ impl Portfolio {
             num_assets,
             commission_rate: 0.001,
             last_cash_distribution_period: None,
-            total_capital_distribution: initial_cash,
+            total_capital_distribution: 0.0,
             status: "Open".to_string(),
         }
     }
@@ -161,7 +161,7 @@ impl Portfolio {
                             trades_type_count[1] += 1;
                         }
                     } else {
-                        let pro_rata_buy_cost =
+                        let pro_rata_buy_cost = // pro rata buy cost assumes uniformly distributed price
                             position.cum_buy_cost * trade.quantity / position.total_shares_bought;
                         let realized_pnl = position.update_sell_position(
                             price,

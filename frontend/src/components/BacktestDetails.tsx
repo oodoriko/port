@@ -37,6 +37,7 @@ export function BacktestDetails({
     tickers,
   } = backtestParams;
   backtestResult?.timestamps.sort((a, b) => a - b);
+
   return (
     <Stack gap="md">
       {/* Signal Summary */}
@@ -572,7 +573,7 @@ export function BacktestDetails({
                   </Grid.Col>
                   <Grid.Col span={2.4}>
                     <Text size="sm" c="dimmed" mb="xs">
-                      Cash Injection
+                      Capital Contribution post t0
                     </Text>
                     <Text size="lg" fw={600}>
                       <NumberFormatter
@@ -612,7 +613,7 @@ export function BacktestDetails({
               {/* Return Metrics */}
               <Box>
                 <Text size="sm" c="dimmed" mb="xs" fw={500}>
-                  Return Metrics
+                  Return Metrics (excl. Cash Injection)
                 </Text>
                 <Grid>
                   <Grid.Col span={2.4}>
@@ -694,10 +695,16 @@ export function BacktestDetails({
                       Profit Factor
                     </Text>
                     <Text size="lg" fw={600}>
-                      <NumberFormatter
-                        value={backtestResult.key_metrics.profit_factor}
-                        decimalScale={2}
-                      />
+                      {Number.isFinite(
+                        backtestResult.key_metrics.profit_factor
+                      ) ? (
+                        <NumberFormatter
+                          value={backtestResult.key_metrics.profit_factor}
+                          decimalScale={2}
+                        />
+                      ) : (
+                        <span>∞</span>
+                      )}
                     </Text>
                   </Grid.Col>
                 </Grid>
@@ -802,7 +809,7 @@ export function BacktestDetails({
                         <Grid mb="xs">
                           <Grid.Col span={2.4}>
                             <Text size="sm" c="dimmed" mb="xs">
-                              Realized PnL
+                              Net Realized PnL
                             </Text>
                             <Text
                               size="lg"
@@ -821,7 +828,7 @@ export function BacktestDetails({
                           </Grid.Col>
                           <Grid.Col span={2.4}>
                             <Text size="sm" c="dimmed" mb="xs">
-                              Unrealized PnL
+                              Net Unrealized PnL
                             </Text>
                             <Text
                               size="lg"
@@ -949,10 +956,14 @@ export function BacktestDetails({
                               Profit Factor
                             </Text>
                             <Text size="lg" fw={600}>
-                              <NumberFormatter
-                                value={position.profit_factor}
-                                decimalScale={2}
-                              />
+                              {Number.isFinite(position.profit_factor) ? (
+                                <NumberFormatter
+                                  value={position.profit_factor}
+                                  decimalScale={2}
+                                />
+                              ) : (
+                                <span>∞</span>
+                              )}
                             </Text>
                           </Grid.Col>
                         </Grid>
@@ -1053,12 +1064,18 @@ export function BacktestDetails({
                               </Grid.Col>
                               <Grid.Col span={3} p="xs">
                                 <Text size="xs" style={{ color: "black" }}>
-                                  -
+                                  {(position.stop_loss_gain_pct * 100).toFixed(
+                                    1
+                                  )}
+                                  %
                                 </Text>
                               </Grid.Col>
                               <Grid.Col span={3} p="xs">
                                 <Text size="xs" style={{ color: "black" }}>
-                                  -
+                                  {(position.stop_loss_loss_pct * 100).toFixed(
+                                    1
+                                  )}
+                                  %
                                 </Text>
                               </Grid.Col>
                             </Grid>
@@ -1087,12 +1104,57 @@ export function BacktestDetails({
                               </Grid.Col>
                               <Grid.Col span={3} p="xs">
                                 <Text size="xs" style={{ color: "black" }}>
-                                  -
+                                  {(
+                                    position.signal_sell_gain_pct * 100
+                                  ).toFixed(1)}
+                                  %
                                 </Text>
                               </Grid.Col>
                               <Grid.Col span={3} p="xs">
                                 <Text size="xs" style={{ color: "black" }}>
-                                  -
+                                  {(
+                                    position.signal_sell_loss_pct * 100
+                                  ).toFixed(1)}
+                                  %
+                                </Text>
+                              </Grid.Col>
+                            </Grid>
+                            {/* Liquidation Row */}
+                            <Grid
+                              style={{
+                                borderBottom: `1px solid ${THEME_A_COLORS.system.gray}`,
+                              }}
+                              m={0}
+                            >
+                              <Grid.Col span={3} p="xs">
+                                <Text size="xs" fw={500}>
+                                  Liquidation
+                                </Text>
+                              </Grid.Col>
+                              <Grid.Col span={3} p="xs">
+                                <Text size="xs">
+                                  {(
+                                    position.liquidation_trades_pct *
+                                    position.sell_pct *
+                                    100
+                                  ).toFixed(1)}
+                                  %
+                                </Text>
+                              </Grid.Col>
+                              <Grid.Col span={3} p="xs">
+                                <Text size="xs" style={{ color: "black" }}>
+                                  {(
+                                    position.liquidation_gain_pct * 100
+                                  ).toFixed(1)}
+                                  %
+                                </Text>
+                              </Grid.Col>
+                              <Grid.Col span={3} p="xs">
+                                <Text size="xs" style={{ color: "black" }}>
+                                  {(
+                                    position.liquidation_loss_pct * 100
+                                  ).toFixed(1)}
+                                  %
                                 </Text>
                               </Grid.Col>
                             </Grid>

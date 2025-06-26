@@ -29,6 +29,7 @@ pub struct Position {
     pub cum_sell_proceeds: f32,
     pub cum_sell_cost: f32,
     pub realized_pnl_gross: f32,
+    pub realized_pnl_net: f32,
     pub last_exit_price: f32,
     pub last_exit_timestamp: u64,
     pub last_exit_pnl: f32,
@@ -44,6 +45,8 @@ pub struct Position {
     pub stop_loss_loss: f32,
     pub signal_sell_gain: f32,
     pub signal_sell_loss: f32,
+    pub liquidation_gain: f32,
+    pub liquidation_loss: f32,
 
     pub constraint: Option<PositionConstraintParams>,
     pub position_status: PositionStatus,
@@ -85,6 +88,7 @@ impl Position {
             cum_sell_proceeds: 0.0,
             cum_sell_cost: 0.0,
             realized_pnl_gross: 0.0,
+            realized_pnl_net: 0.0,
             last_exit_price: 0.0,
             last_exit_timestamp: 0,
             last_exit_pnl: 0.0,
@@ -94,6 +98,8 @@ impl Position {
             stop_loss_loss: 0.0,
             signal_sell_gain: 0.0,
             signal_sell_loss: 0.0,
+            liquidation_gain: 0.0,
+            liquidation_loss: 0.0,
             constraint,
             position_status: PositionStatus::Open,
             total_shares_bought: qty,
@@ -134,17 +140,23 @@ impl Position {
     }
 
     #[inline(always)]
-    pub fn update_buy_position(&mut self, price: f32, quantity: f32, timestamp: u64, cost: f32) {
+    pub fn update_buy_position(
+        &mut self,
+        price: f32,
+        additional_quantity: f32,
+        timestamp: u64,
+        cost: f32,
+    ) {
         let old_quantity = self.quantity;
-        let new_quantity = old_quantity + quantity;
+        let new_quantity = old_quantity + additional_quantity;
         self.quantity = new_quantity;
 
         self.avg_entry_price =
-            (self.avg_entry_price * old_quantity + price * quantity) / new_quantity;
+            (self.avg_entry_price * old_quantity + price * additional_quantity) / new_quantity;
 
-        self.cum_buy_proceeds += price * self.quantity;
+        self.cum_buy_proceeds += price * additional_quantity;
         self.cum_buy_cost += cost;
-        self.total_shares_bought += quantity;
+        self.total_shares_bought += additional_quantity;
         self.net_position.push(self.quantity);
 
         self.notional = self.quantity * price;
@@ -158,26 +170,27 @@ impl Position {
     pub fn update_sell_position(
         &mut self,
         price: f32,
-        quantity: f32,
+        sold_quantity: f32,
         timestamp: u64,
         cost: f32,
         trade_type: TradeType,
         pro_rata_buy_cost: f32,
     ) -> f32 {
-        let net_pnl = (price - self.avg_entry_price) * quantity - cost - pro_rata_buy_cost;
+        let net_pnl = (price - self.avg_entry_price) * sold_quantity - cost - pro_rata_buy_cost;
 
-        self.cum_sell_proceeds += price * quantity;
+        self.cum_sell_proceeds += price * sold_quantity;
         self.cum_sell_cost += cost;
 
-        self.realized_pnl_gross += (price - self.avg_entry_price) * quantity;
+        self.realized_pnl_gross += (price - self.avg_entry_price) * sold_quantity;
+        self.realized_pnl_net += net_pnl;
 
         self.last_exit_price = price;
         self.last_exit_timestamp = timestamp;
         self.last_exit_pnl = net_pnl;
 
-        self.total_shares_sold += quantity;
+        self.total_shares_sold += sold_quantity;
 
-        self.quantity = (self.quantity - quantity).max(0.0);
+        self.quantity = (self.quantity - sold_quantity).max(0.0);
         self.notional = self.quantity * price;
         self.net_position.push(self.quantity);
         if self.quantity < 0.000001 {
@@ -191,6 +204,8 @@ impl Position {
                 self.stop_loss_gain += net_pnl;
             } else if trade_type == TradeType::SignalSell {
                 self.signal_sell_gain += net_pnl;
+            } else if trade_type == TradeType::Liquidation {
+                self.liquidation_gain += net_pnl;
             }
         } else {
             if trade_type == TradeType::TakeProfit {
@@ -199,6 +214,8 @@ impl Position {
                 self.stop_loss_loss += net_pnl;
             } else if trade_type == TradeType::SignalSell {
                 self.signal_sell_loss += net_pnl;
+            } else if trade_type == TradeType::Liquidation {
+                self.liquidation_loss += net_pnl;
             }
         }
 

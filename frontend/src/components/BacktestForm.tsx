@@ -1200,11 +1200,20 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
                       typeof value === "object" &&
                       "getTime" in value
                     ) {
-                      form.setFieldValue("start", value as Date);
+                      // Create a new Date object in local timezone to avoid timezone issues
+                      const dateValue = value as Date;
+                      const localDate = new Date(
+                        dateValue.getFullYear(),
+                        dateValue.getMonth(),
+                        dateValue.getDate()
+                      );
+                      form.setFieldValue("start", localDate);
                     } else if (typeof value === "string" && value) {
-                      const parsed = new Date(value);
-                      if (!isNaN(parsed.getTime())) {
-                        form.setFieldValue("start", parsed);
+                      // Parse date string in local timezone
+                      const [year, month, day] = value.split("-").map(Number);
+                      if (year && month && day) {
+                        const localDate = new Date(year, month - 1, day);
+                        form.setFieldValue("start", localDate);
                       }
                     } else {
                       form.setFieldValue("start", null);
@@ -1216,9 +1225,10 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
                       value &&
                       value !== form.values.start?.toISOString().split("T")[0]
                     ) {
-                      const parsed = new Date(value);
-                      if (!isNaN(parsed.getTime())) {
-                        form.setFieldValue("start", parsed);
+                      const [year, month, day] = value.split("-").map(Number);
+                      if (year && month && day) {
+                        const localDate = new Date(year, month - 1, day);
+                        form.setFieldValue("start", localDate);
                       }
                     }
                   }}
@@ -1241,11 +1251,20 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
                       typeof value === "object" &&
                       "getTime" in value
                     ) {
-                      form.setFieldValue("end", value as Date);
+                      // Create a new Date object in local timezone to avoid timezone issues
+                      const dateValue = value as Date;
+                      const localDate = new Date(
+                        dateValue.getFullYear(),
+                        dateValue.getMonth(),
+                        dateValue.getDate()
+                      );
+                      form.setFieldValue("end", localDate);
                     } else if (typeof value === "string" && value) {
-                      const parsed = new Date(value);
-                      if (!isNaN(parsed.getTime())) {
-                        form.setFieldValue("end", parsed);
+                      // Parse date string in local timezone
+                      const [year, month, day] = value.split("-").map(Number);
+                      if (year && month && day) {
+                        const localDate = new Date(year, month - 1, day);
+                        form.setFieldValue("end", localDate);
                       }
                     } else {
                       form.setFieldValue("end", null);
@@ -1257,9 +1276,10 @@ export function BacktestForm({ onSubmit, loading = false }: BacktestFormProps) {
                       value &&
                       value !== form.values.end?.toISOString().split("T")[0]
                     ) {
-                      const parsed = new Date(value);
-                      if (!isNaN(parsed.getTime())) {
-                        form.setFieldValue("end", parsed);
+                      const [year, month, day] = value.split("-").map(Number);
+                      if (year && month && day) {
+                        const localDate = new Date(year, month - 1, day);
+                        form.setFieldValue("end", localDate);
                       }
                     }
                   }}

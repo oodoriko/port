@@ -239,6 +239,9 @@ export interface KeyMetrics {
   win_rate: number;
   profit_factor: number;
 
+  // Contribution metrics
+  cash_utilization_ratio: number;
+
   // Risk metrics
   max_drawdown: number;
   max_drawdown_duration: number;
@@ -276,11 +279,14 @@ export interface PositionMetrics {
   stop_loss_loss_pct: number;
   signal_sell_gain_pct: number;
   signal_sell_loss_pct: number;
+  liquidation_gain_pct: number;
+  liquidation_loss_pct: number;
 
   // Trade metrics
   take_profit_trades_pct: number;
   stop_loss_trades_pct: number;
   signal_sell_trades_pct: number;
+  liquidation_trades_pct: number;
   sell_pct: number;
   buy_pct: number;
 

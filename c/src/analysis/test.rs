@@ -36,7 +36,6 @@ async fn test_backtest() {
     backtest_result(
         &result.portfolio,
         &result.executed_trades_by_date,
-        result.exited_early,
         &result.trades_type_count,
     );
 }

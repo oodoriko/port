@@ -101,6 +101,9 @@ pub struct KeyMetricsResponse {
     pub win_rate: f32,
     pub profit_factor: f32,
 
+    // Contribution metrics
+    pub cash_utilization_ratio: f32,
+
     // Risk metrics
     pub max_drawdown: f32,
     pub max_drawdown_duration: f32,
@@ -140,11 +143,14 @@ pub struct PositionMetricsResponse {
     pub stop_loss_loss_pct: f32,
     pub signal_sell_gain_pct: f32,
     pub signal_sell_loss_pct: f32,
+    pub liquidation_gain_pct: f32,
+    pub liquidation_loss_pct: f32,
 
     // Trade metrics
     pub take_profit_trades_pct: f32,
     pub stop_loss_trades_pct: f32,
     pub signal_sell_trades_pct: f32,
+    pub liquidation_trades_pct: f32,
     pub sell_pct: f32,
     pub buy_pct: f32,
 
@@ -202,9 +208,12 @@ fn key_metrics_to_response(metrics: &KeyMetrics, tickers: &[String]) -> KeyMetri
                 stop_loss_loss_pct: pos_metrics.stop_loss_loss_pct,
                 signal_sell_gain_pct: pos_metrics.signal_sell_gain_pct,
                 signal_sell_loss_pct: pos_metrics.signal_sell_loss_pct,
+                liquidation_gain_pct: pos_metrics.liquidation_gain_pct,
+                liquidation_loss_pct: pos_metrics.liquidation_loss_pct,
                 take_profit_trades_pct: pos_metrics.take_profit_trades_pct,
                 stop_loss_trades_pct: pos_metrics.stop_loss_trades_pct,
                 signal_sell_trades_pct: pos_metrics.signal_sell_trades_pct,
+                liquidation_trades_pct: pos_metrics.liquidation_trades_pct,
                 sell_pct: pos_metrics.sell_pct,
                 buy_pct: pos_metrics.buy_pct,
                 net_position: pos_metrics.net_position.clone(),
@@ -227,6 +236,7 @@ fn key_metrics_to_response(metrics: &KeyMetrics, tickers: &[String]) -> KeyMetri
         annualized_return: metrics.annualized_return,
         win_rate: metrics.win_rate,
         profit_factor: metrics.profit_factor,
+        cash_utilization_ratio: metrics.cash_utilization_ratio,
         max_drawdown: metrics.max_drawdown,
         max_drawdown_duration: metrics.max_drawdown_duration,
         sharpe_ratio: metrics.sharpe_ratio,

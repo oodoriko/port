@@ -318,6 +318,7 @@ pub fn export_backtest_data_to_csv(
             "cum_sell_proceeds",
             "cum_sell_cost",
             "realized_pnl_gross",
+            "realized_pnl_net",
             "last_exit_price",
             "last_exit_timestamp",
             "last_exit_pnl",
@@ -392,6 +393,7 @@ pub fn export_backtest_data_to_csv(
 //     position_data.push((pos.cum_sell_proceeds * 10000.0) as i64);
 //     position_data.push((pos.cum_sell_cost * 10000.0) as i64);
 //     position_data.push((pos.realized_pnl_gross * 10000.0) as i64);
+//     position_data.push((pos.realized_pnl_net * 10000.0) as i64);
 //     position_data.push((pos.last_exit_price * 10000.0) as i64);
 //     position_data.push(pos.last_exit_timestamp as i64);
 //     position_data.push((pos.last_exit_pnl * 10000.0) as i64);
