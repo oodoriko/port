@@ -13,31 +13,38 @@ mod tests {
 
     // Helper function to create test config with conservative settings
     fn get_test_config() -> CoinbaseConfig {
-        CoinbaseConfig {
-            max_retries: 3,
-            initial_backoff_ms: 1000, // 1 second initial backoff
-            backoff_multiplier: 2,    // Double the backoff each retry
-            chunk_size_days: 1,       // Small chunks for testing
-            enable_caching: true,
-            delay_between_requests_ms: 500, // Conservative 500ms delay for testing (~2 req/sec)
-        }
+        // Load environment variables (will load from .env file)
+        dotenv::dotenv().ok();
+
+        let api_key_id =
+            std::env::var("COINBASE_API_KEY_ID").unwrap_or_else(|_| "test_key_id".to_string());
+        let private_key = std::env::var("COINBASE_PRIVATE_KEY")
+            .unwrap_or_else(|_| "test_private_key".to_string());
+
+        let mut config = CoinbaseConfig::with_credentials(api_key_id, private_key);
+        config.max_retries = 3;
+        config.initial_backoff_ms = 1000; // 1 second initial backoff
+        config.backoff_multiplier = 2; // Double the backoff each retry
+        config.chunk_size_days = 1; // Small chunks for testing
+        config.enable_caching = true;
+        config.delay_between_requests_ms = 500; // Conservative 500ms delay for testing (~2 req/sec)
+        config
     }
 
     #[tokio::test]
     async fn test_short_timeframe_basic_functionality() {
         // Test with just 1 hour of data to validate basic functionality
-        let tickers = vec!["BTC-USD".to_string()];
+        let tickers = vec!["BTC-USDC".to_string()]; // Use USDC pair for brokerage API
         let end_time = Utc::now();
         let start_time = end_time - Duration::hours(1);
 
-        let config = CoinbaseConfig {
-            max_retries: 2,
-            initial_backoff_ms: 500, // Short backoff for quick test
-            backoff_multiplier: 2,
-            chunk_size_days: 1,
-            enable_caching: false, // Disable caching for this quick test
-            delay_between_requests_ms: 300, // 300ms delay for quick test
-        };
+        let mut config = get_test_config();
+        config.max_retries = 2;
+        config.initial_backoff_ms = 500; // Short backoff for quick test
+        config.backoff_multiplier = 2;
+        config.chunk_size_days = 1;
+        config.enable_caching = false; // Disable caching for this quick test
+        config.delay_between_requests_ms = 300; // 300ms delay for quick test
 
         // This should complete quickly and validate the basic API interaction
         let result = fetch_coinbase_historical_resumable(
@@ -207,14 +214,13 @@ mod tests {
 
         let tickers = vec!["BTC-USD".to_string(), "ETH-USD".to_string()];
 
-        let config = CoinbaseConfig {
-            max_retries: 5,           // More retries for this important test
-            initial_backoff_ms: 2000, // 2 second initial backoff for important test
-            backoff_multiplier: 2,    // Double the backoff each retry
-            chunk_size_days: 7,       // Weekly chunks for good granularity
-            enable_caching: true,
-            delay_between_requests_ms: 300, // Conservative 300ms delay (~3.3 req/sec)
-        };
+        let mut config = get_test_config();
+        config.max_retries = 5; // More retries for this important test
+        config.initial_backoff_ms = 2000; // 2 second initial backoff for important test
+        config.backoff_multiplier = 2; // Double the backoff each retry
+        config.chunk_size_days = 7; // Weekly chunks for good granularity
+        config.enable_caching = true;
+        config.delay_between_requests_ms = 300; // Conservative 300ms delay (~3.3 req/sec)
 
         println!("📅 Test parameters:");
         println!(
@@ -339,14 +345,13 @@ mod tests {
         // Test that validates our sequential processing approach
         println!("🔄 Testing sequential processing logic:");
 
-        let config = CoinbaseConfig {
-            delay_between_requests_ms: 100, // Fast for testing
-            chunk_size_days: 1,
-            max_retries: 2,
-            initial_backoff_ms: 500,
-            backoff_multiplier: 2,
-            enable_caching: false,
-        };
+        let mut config = get_test_config();
+        config.delay_between_requests_ms = 100; // Fast for testing
+        config.chunk_size_days = 1;
+        config.max_retries = 2;
+        config.initial_backoff_ms = 500;
+        config.backoff_multiplier = 2;
+        config.enable_caching = false;
 
         println!("   ✅ Sequential processing configuration validated");
         println!("   - No complex rate limiting needed");

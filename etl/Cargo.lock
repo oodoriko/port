@@ -1902,6 +1902,7 @@ name = "port-etl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "chrono-tz",
  "config",
@@ -1911,6 +1912,7 @@ dependencies = [
  "env_logger",
  "futures",
  "governor",
+ "hmac",
  "influxdb2",
  "influxdb2-structmap",
  "log",
@@ -1919,6 +1921,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "sha2",
  "thiserror 1.0.69",
  "tokio",
  "tokio-postgres",

@@ -67,6 +67,11 @@ futures = "0.3"
 # Timezone support
 chrono-tz = "0.8"
 
+# Cryptographic libraries for API authentication
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+
 
 
 [dev-dependencies]

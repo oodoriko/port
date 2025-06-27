@@ -1,20 +1,35 @@
 use anyhow::Result;
 use chrono::{Duration, Utc};
-use port_etl::{CoinbaseDataFetcher, OhlcvData};
+use port_etl::{CoinbaseConfig, CoinbaseDataFetcher, OhlcvData};
+use std::env;
+
+// Helper function to create test configuration
+fn create_test_config() -> Result<CoinbaseConfig> {
+    // Load environment variables (will load from .env file)
+    dotenv::dotenv().ok();
+
+    let api_key_id = env::var("COINBASE_API_KEY_ID")
+        .map_err(|_| anyhow::anyhow!("COINBASE_API_KEY_ID not set in .env file"))?;
+    let private_key = env::var("COINBASE_PRIVATE_KEY")
+        .map_err(|_| anyhow::anyhow!("COINBASE_PRIVATE_KEY not set in .env file"))?;
+
+    Ok(CoinbaseConfig::with_credentials(api_key_id, private_key))
+}
 
 // Regular function that can be called from anywhere
 pub async fn coinbase_connection_test() -> Result<()> {
     println!("Testing Coinbase connection...");
 
-    // Test creating a new fetcher
-    let fetcher = CoinbaseDataFetcher::new();
-    println!("✅ Successfully created Coinbase data fetcher");
+    // Test creating a new fetcher with API credentials
+    let config = create_test_config()?;
+    let fetcher = CoinbaseDataFetcher::new(config);
+    println!("✅ Successfully created Coinbase data fetcher with API credentials");
 
     // Test fetching a small amount of recent data
     let end = Utc::now();
     let start = end - Duration::minutes(30); // Just 30 minutes of data
-    let symbol = "BTC-USD";
-    let granularity = 300; // 5 minutes
+    let symbol = "BTC-USDC"; // Use USDC pair which is available on brokerage API
+    let granularity = 60; // 1 minute
 
     println!(
         "Fetching recent data for {} from {} to {}",
@@ -107,12 +122,13 @@ async fn test_ohlcv_data_methods() -> Result<()> {
 async fn test_coinbase_chunking() -> Result<()> {
     println!("Testing Coinbase chunking logic...");
 
-    let fetcher = CoinbaseDataFetcher::new();
+    let config = create_test_config()?;
+    let fetcher = CoinbaseDataFetcher::new(config);
     let end = Utc::now();
     // Request more data than can fit in a single API call to test chunking
     let start = end - Duration::hours(24); // 24 hours should require chunking
-    let symbol = "BTC-USD";
-    let granularity = 60; // 1 minute granularity
+    let symbol = "BTC-USDC"; // Use USDC pair which is available on brokerage API
+    let granularity = 60; // 1 minute - should be supported by brokerage API
 
     println!(
         "Fetching large dataset for {} to test chunking: {} to {}",

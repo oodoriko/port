@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use port_etl::fetch_coinbase_historical_resumable;
+use port_etl::{fetch_coinbase_historical_resumable, CoinbaseConfig};
 use std::io::{self, Write};
 
 #[tokio::main]
@@ -20,16 +20,25 @@ async fn run_coinbase_historical_10() -> Result<(), Box<dyn std::error::Error>> 
         .with_timezone(&Utc);
 
     let tickers = vec![
-        "BTC-USD".to_string(),
-        "ETH-USD".to_string(),
-        "SOL-USD".to_string(),
-        "LINK-USD".to_string(),
-        "AVAX-USD".to_string(),
+        "BTC-USDC".to_string(),
+        "ETH-USDC".to_string(),
+        "SOL-USDC".to_string(),
+        "LINK-USDC".to_string(),
+        "AVAX-USDC".to_string(),
     ];
 
-    // Process ALL tickers in parallel for maximum speed
+    // Create config with API credentials from environment variables
+    let api_key_id =
+        std::env::var("COINBASE_API_KEY_ID").expect("COINBASE_API_KEY_ID must be set in .env file");
+    let private_key = std::env::var("COINBASE_PRIVATE_KEY")
+        .expect("COINBASE_PRIVATE_KEY must be set in .env file");
+
+    let config = CoinbaseConfig::with_credentials(api_key_id, private_key);
+
+    // Process ALL tickers using the new brokerage API
     let result =
-        fetch_coinbase_historical_resumable(tickers, start_date, end_date, 60, None, None).await;
+        fetch_coinbase_historical_resumable(tickers, start_date, end_date, 60, Some(config), None)
+            .await;
 
     match result {
         Ok(_) => {

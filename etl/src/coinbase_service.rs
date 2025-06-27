@@ -1,6 +1,9 @@
 use anyhow::Result;
+use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, TimeZone, Utc};
 use chrono_tz::America::New_York;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use std::cmp::min;
 use tokio::time::{sleep, Duration as TokioDuration};
 
@@ -20,6 +23,8 @@ pub struct CoinbaseConfig {
     pub backoff_multiplier: u64,
     pub enable_caching: bool,
     pub delay_between_requests_ms: u64,
+    pub api_key_id: String,
+    pub private_key: String,
 }
 
 impl Default for CoinbaseConfig {
@@ -31,6 +36,23 @@ impl Default for CoinbaseConfig {
             backoff_multiplier: BACKOFF_MULTIPLIER,
             enable_caching: true,
             delay_between_requests_ms: 250, // Simple 250ms delay between requests (~4 requests/second)
+            api_key_id: String::new(),
+            private_key: String::new(),
+        }
+    }
+}
+
+impl CoinbaseConfig {
+    pub fn with_credentials(api_key_id: String, private_key: String) -> Self {
+        Self {
+            chunk_size_days: CHUNK_SIZE_DAYS,
+            max_retries: MAX_RETRY_ATTEMPTS,
+            initial_backoff_ms: INITIAL_BACKOFF_MS,
+            backoff_multiplier: BACKOFF_MULTIPLIER,
+            enable_caching: true,
+            delay_between_requests_ms: 250,
+            api_key_id,
+            private_key,
         }
     }
 }
@@ -65,23 +87,57 @@ impl OhlcvData {
 
 pub struct CoinbaseDataFetcher {
     http_client: HttpClient,
+    config: CoinbaseConfig,
 }
 
 impl CoinbaseDataFetcher {
-    pub fn new() -> Self {
+    pub fn new(config: CoinbaseConfig) -> Self {
         Self {
             http_client: HttpClient::with_config(RetryConfig {
-                max_retries: 3,
-                initial_backoff_ms: 1000,
-                backoff_multiplier: 2,
+                max_retries: config.max_retries,
+                initial_backoff_ms: config.initial_backoff_ms,
+                backoff_multiplier: config.backoff_multiplier,
                 timeout_seconds: 30,
             }),
+            config,
         }
     }
 
-    pub fn with_retry_config(retry_config: RetryConfig) -> Self {
+    pub fn with_retry_config(retry_config: RetryConfig, config: CoinbaseConfig) -> Self {
         Self {
             http_client: HttpClient::with_config(retry_config),
+            config,
+        }
+    }
+
+    fn generate_signature(
+        &self,
+        timestamp: u64,
+        method: &str,
+        path: &str,
+        body: &str,
+    ) -> Result<String> {
+        let message = format!("{}{}{}{}", timestamp, method, path, body);
+        let decoded_key = general_purpose::STANDARD.decode(&self.config.private_key)?;
+
+        let mut mac = Hmac::<Sha256>::new_from_slice(&decoded_key)
+            .map_err(|e| anyhow::anyhow!("Invalid key: {}", e))?;
+        mac.update(message.as_bytes());
+        let signature = mac.finalize().into_bytes();
+
+        Ok(general_purpose::STANDARD.encode(signature))
+    }
+
+    // Convert numeric granularity to brokerage API format
+    fn convert_granularity_to_brokerage_format(&self, granularity: u32) -> String {
+        match granularity {
+            60 => "ONE_MINUTE".to_string(),
+            300 => "FIVE_MINUTE".to_string(),
+            900 => "FIFTEEN_MINUTE".to_string(),
+            3600 => "ONE_HOUR".to_string(),
+            21600 => "SIX_HOUR".to_string(),
+            86400 => "ONE_DAY".to_string(),
+            _ => granularity.to_string(), // Fallback to numeric value
         }
     }
 
@@ -93,16 +149,29 @@ impl CoinbaseDataFetcher {
         granularity: u32,
     ) -> Result<Vec<OhlcvData>> {
         let url = format!(
-            "https://api.exchange.coinbase.com/products/{}/candles",
+            "https://api.coinbase.com/api/v3/brokerage/market/products/{}/candles",
             symbol
         );
+        let path = format!("/api/v3/brokerage/market/products/{}/candles", symbol);
+        let method = "GET";
+        let body = "";
+
+        // Generate timestamp for authentication
+        let timestamp = Utc::now().timestamp() as u64;
+
+        // Generate signature for authentication
+        let signature = self.generate_signature(timestamp, method, &path, body)?;
+
+        // Convert granularity to brokerage API format
+        let granularity_str = self.convert_granularity_to_brokerage_format(granularity);
 
         println!("Requesting URL: {}", url);
         println!(
-            "Query params: start={}, end={}, granularity={}",
-            start.to_rfc3339(),
-            end.to_rfc3339(),
-            granularity
+            "Query params for {}: start={}, end={}, granularity={}",
+            symbol,
+            start.timestamp(),
+            end.timestamp(),
+            granularity_str
         );
 
         let operation_name = format!("fetch_single_chunk({})", symbol);
@@ -114,10 +183,13 @@ impl CoinbaseDataFetcher {
                     .client()
                     .get(&url)
                     .header("User-Agent", "bikini-bottom/0.1.0")
+                    .header("CB-ACCESS-KEY", &self.config.api_key_id)
+                    .header("CB-ACCESS-SIGN", &signature)
+                    .header("CB-ACCESS-TIMESTAMP", timestamp.to_string())
                     .query(&[
-                        ("start", start.to_rfc3339()),
-                        ("end", end.to_rfc3339()),
-                        ("granularity", granularity.to_string()),
+                        ("start", &start.timestamp().to_string()),
+                        ("end", &end.timestamp().to_string()),
+                        ("granularity", &granularity_str),
                     ])
                     .send()
             })
@@ -130,18 +202,26 @@ impl CoinbaseDataFetcher {
             ));
         }
 
-        let candles: Vec<Vec<f32>> = response.json().await?;
-        println!("Received {} candles from API", candles.len());
+        // The brokerage API returns a JSON object with a "candles" array
+        let api_response: serde_json::Value = response.json().await?;
+        let candles_array = api_response["candles"]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("No candles array found in response"))?;
 
-        let candles = candles
-            .into_iter()
-            .map(|candle| OhlcvData {
-                timestamp: candle[0] as i64,
-                open: candle[3],
-                high: candle[2],
-                low: candle[1],
-                close: candle[4],
-                volume: candle[5],
+        println!("Received {} candles from API", candles_array.len());
+
+        let candles = candles_array
+            .iter()
+            .filter_map(|candle_obj| {
+                let candle = candle_obj.as_object()?;
+                Some(OhlcvData {
+                    timestamp: candle.get("start")?.as_str()?.parse::<i64>().ok()?,
+                    open: candle.get("open")?.as_str()?.parse::<f32>().ok()?,
+                    high: candle.get("high")?.as_str()?.parse::<f32>().ok()?,
+                    low: candle.get("low")?.as_str()?.parse::<f32>().ok()?,
+                    close: candle.get("close")?.as_str()?.parse::<f32>().ok()?,
+                    volume: candle.get("volume")?.as_str()?.parse::<f32>().ok()?,
+                })
             })
             .collect();
 
@@ -189,7 +269,7 @@ impl CoinbaseDataFetcher {
 
 impl Default for CoinbaseDataFetcher {
     fn default() -> Self {
-        Self::new()
+        Self::new(CoinbaseConfig::default())
     }
 }
 
@@ -209,7 +289,7 @@ pub async fn fetch_ohlcv_data_single(
     };
 
     // Create fetcher with custom retry configuration
-    let fetcher = CoinbaseDataFetcher::with_retry_config(retry_config);
+    let fetcher = CoinbaseDataFetcher::with_retry_config(retry_config, config.clone());
     let result = fetcher
         .fetch_candles(
             ticker,
