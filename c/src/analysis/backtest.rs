@@ -4,8 +4,8 @@ use crate::core::params::{
 use crate::data::database_service;
 use crate::trading::portfolio::Portfolio;
 use crate::trading::strategy::Strategy;
-use crate::trading::trade::{Trade, TradeType};
-use crate::utils::utils::export_backtest_data_to_csv;
+use crate::trading::trade::Trade;
+// use crate::utils::utils::export_backtest_data_to_csv;
 use chrono::{DateTime, Utc};
 use port_etl::InfluxDBHandler;
 
@@ -54,12 +54,6 @@ pub async fn backtest(
     let mut prev_close_prices = Vec::with_capacity(n_assets);
     let mut prev_open_prices = Vec::with_capacity(n_assets);
     let mut curr_open_prices = Vec::with_capacity(n_assets);
-
-    //*************** audit trail ***************
-    let mut all_trade = Vec::new();
-    let mut all_positions = Vec::new();
-    let mut all_portfolio = Vec::new();
-    //*************** audit trail ***************
 
     //*************** rehydrate portfolio ***************
     let mut strategy = Strategy::new(
@@ -152,133 +146,14 @@ pub async fn backtest(
                 &[],
                 &mut trades_type_count,
             );
-
-            //*************** audit trail ***************
-            let mut position_data = Vec::new();
-            let pos = portfolio.positions[0].as_ref().unwrap();
-            position_data.push(pos.ticker_id as i64);
-            position_data.push((curr_open_prices[pos.ticker_id as usize] * 10000.0) as i64);
-            position_data.push((pos.quantity * 10000.0) as i64);
-            position_data.push((pos.avg_entry_price * 10000.0) as i64);
-            position_data.push(pos.entry_timestamp as i64);
-            position_data.push((pos.notional * 10000.0) as i64);
-            position_data.push((pos.peak_price * 10000.0) as i64);
-            position_data.push((pos.trailing_stop_price * 10000.0) as i64);
-            position_data.push((pos.take_profit_price * 10000.0) as i64);
-            position_data.push((pos.unrealized_pnl * 10000.0) as i64);
-            position_data.push((pos.cum_buy_proceeds * 10000.0) as i64);
-            position_data.push((pos.cum_buy_cost * 10000.0) as i64);
-            position_data.push((pos.last_entry_price * 10000.0) as i64);
-            position_data.push(pos.last_entry_timestamp as i64);
-            position_data.push((pos.cum_sell_proceeds * 10000.0) as i64);
-            position_data.push((pos.cum_sell_cost * 10000.0) as i64);
-            position_data.push((pos.realized_pnl_gross * 10000.0) as i64);
-            position_data.push((pos.realized_pnl_net * 10000.0) as i64);
-            position_data.push((pos.last_exit_price * 10000.0) as i64);
-            position_data.push(pos.last_exit_timestamp as i64);
-            position_data.push((pos.last_exit_pnl * 10000.0) as i64);
-            position_data.push((pos.total_shares_bought * 10000.0) as i64);
-            position_data.push((pos.total_shares_sold * 10000.0) as i64);
-            position_data.push((pos.take_profit_gain * 10000.0) as i64);
-            position_data.push((pos.take_profit_loss * 10000.0) as i64);
-            position_data.push((pos.stop_loss_gain * 10000.0) as i64);
-            position_data.push((pos.stop_loss_loss * 10000.0) as i64);
-            position_data.push((pos.signal_sell_gain * 10000.0) as i64);
-            position_data.push((pos.signal_sell_loss * 10000.0) as i64);
-            all_positions.push(position_data);
-            //*************** audit trail ***************
-
             available_cash += new_cash_after_trades;
             new_cost += new_total_cost;
             new_realized_pnl += new_total_realized_pnl;
             executed_trades.extend(new_executed_trades);
         }
 
-        // then execute previous trades using t-1 close prices
-        // pick out the asset id of asset that just triggered stop loss - they are no longer tradable
-        let stop_loss_triggered_pos = risk_management_trades
-            .iter()
-            .filter(|t| t.trade_type == TradeType::StopLoss)
-            .map(|t| t.ticker_id)
-            .collect::<Vec<_>>();
-
-        let mut pending_trades = portfolio.pending_trades.clone(); // previous period trades
-        if !pending_trades.is_empty() {
-            let (
-                new_cash_after_trades,
-                new_total_cost,
-                new_total_realized_pnl,
-                new_executed_trades,
-            ) = portfolio.execute_trades(
-                &mut pending_trades,
-                &prev_close_prices,
-                time as u64,
-                &stop_loss_triggered_pos,
-                &mut trades_type_count,
-            );
-            //*************** audit trail ***************
-            let mut position_data = Vec::new();
-            let pos = portfolio.positions[0].as_ref().unwrap();
-            position_data.push(pos.ticker_id as i64);
-            position_data.push((prev_close_prices[pos.ticker_id as usize] * 10000.0) as i64);
-            position_data.push((pos.quantity * 10000.0) as i64);
-            position_data.push((pos.avg_entry_price * 10000.0) as i64);
-            position_data.push(pos.entry_timestamp as i64);
-            position_data.push((pos.notional * 10000.0) as i64);
-            position_data.push((pos.peak_price * 10000.0) as i64);
-            position_data.push((pos.trailing_stop_price * 10000.0) as i64);
-            position_data.push((pos.take_profit_price * 10000.0) as i64);
-            position_data.push((pos.unrealized_pnl * 10000.0) as i64);
-            position_data.push((pos.cum_buy_proceeds * 10000.0) as i64);
-            position_data.push((pos.cum_buy_cost * 10000.0) as i64);
-            position_data.push((pos.last_entry_price * 10000.0) as i64);
-            position_data.push(pos.last_entry_timestamp as i64);
-            position_data.push((pos.cum_sell_proceeds * 10000.0) as i64);
-            position_data.push((pos.cum_sell_cost * 10000.0) as i64);
-            position_data.push((pos.realized_pnl_gross * 10000.0) as i64);
-            position_data.push((pos.realized_pnl_net * 10000.0) as i64);
-            position_data.push((pos.last_exit_price * 10000.0) as i64);
-            position_data.push(pos.last_exit_timestamp as i64);
-            position_data.push((pos.last_exit_pnl * 10000.0) as i64);
-            position_data.push((pos.total_shares_bought * 10000.0) as i64);
-            position_data.push((pos.total_shares_sold * 10000.0) as i64);
-            position_data.push((pos.take_profit_gain * 10000.0) as i64);
-            position_data.push((pos.take_profit_loss * 10000.0) as i64);
-            position_data.push((pos.stop_loss_gain * 10000.0) as i64);
-            position_data.push((pos.stop_loss_loss * 10000.0) as i64);
-            position_data.push((pos.signal_sell_gain * 10000.0) as i64);
-            position_data.push((pos.signal_sell_loss * 10000.0) as i64);
-            all_positions.push(position_data);
-            //*************** audit trail ***************
-            available_cash += new_cash_after_trades;
-            new_cost += new_total_cost;
-            new_realized_pnl += new_total_realized_pnl;
-            executed_trades.extend(new_executed_trades);
-        }
-
-        let temp_trades = executed_trades.clone();
         if executed_trades.len() > 0 {
-            //*************** audit trail ***************
-
-            for trade in executed_trades.clone() {
-                let mut trade_data = Vec::new();
-                trade_data.push(time);
-                trade_data.push((trade.quantity * 10000.0) as i64);
-                trade_data.push(trade.trade_type as i64);
-                trade_data.push(trade.trade_status as i64);
-                trade_data.push(trade.generated_at as i64);
-                trade_data.push(trade.execution_timestamp as i64);
-                trade_data.push((trade.price * 10000.0) as i64);
-                trade_data.push((trade.cost * 10000.0) as i64);
-                trade_data.push((trade.pro_rata_buy_cost * 10000.0) as i64);
-                trade_data.push((trade.avg_entry_price * 10000.0) as i64);
-                trade_data.push(trade.holding_period as i64);
-                trade_data.push((trade.realized_pnl_gross * 10000.0) as i64);
-                trade_data.push((trade.realized_return_net * 10000.0) as i64);
-                all_trade.push(trade_data);
-            }
             executed_trades_by_date.insert(time, executed_trades);
-            //*************** audit trail ***************
         }
 
         // handle cash distribution event, being conservative here, t0 cash is not available for trading
@@ -308,36 +183,6 @@ pub async fn backtest(
             new_cost,
             new_realized_pnl,
         );
-        //*************** audit trail ***************
-        if temp_trades.len() > 0 {
-            let mut portfolio_data = Vec::new();
-            portfolio_data.push(time);
-            portfolio_data
-                .push((portfolio.equity_curve[portfolio.equity_curve.len() - 1] * 10000.0) as i64);
-            portfolio_data
-                .push((portfolio.cash_curve[portfolio.cash_curve.len() - 1] * 10000.0) as i64);
-            portfolio_data.push(
-                (portfolio.notional_curve[portfolio.notional_curve.len() - 1] * 10000.0) as i64,
-            );
-            portfolio_data
-                .push((portfolio.cost_curve[portfolio.cost_curve.len() - 1] * 10000.0) as i64);
-            portfolio_data.push(
-                (portfolio.realized_pnl_curve[portfolio.realized_pnl_curve.len() - 1] * 10000.0)
-                    as i64,
-            );
-            portfolio_data.push(
-                (portfolio.unrealized_pnl_curve[portfolio.unrealized_pnl_curve.len() - 1] * 10000.0)
-                    as i64,
-            );
-            portfolio_data.push((portfolio.peak_equity * 10000.0) as i64);
-            portfolio_data.push(portfolio.num_assets as i64);
-            portfolio_data.push((portfolio.total_capital_distribution * 10000.0) as i64);
-            portfolio_data
-                .push((portfolio.holdings[portfolio.holdings.len() - 1] * 10000.0) as i64);
-
-            all_portfolio.push(portfolio_data);
-        };
-        //*************** audit trail ***************
     }
 
     println!("Backtesting completed");
@@ -345,16 +190,6 @@ pub async fn backtest(
         "[Timer] Time to run backtest: {:.3} seconds",
         backtest_timer.elapsed().as_secs_f64()
     );
-
-    //*************** export audit trail ***************
-    export_backtest_data_to_csv(
-        &all_trade,
-        &all_portfolio,
-        &all_positions,
-        &format!("{}_backtest", strategy_name),
-    )
-    .unwrap();
-    //*************** export audit trail ***************
 
     Ok(BacktestResult {
         portfolio,

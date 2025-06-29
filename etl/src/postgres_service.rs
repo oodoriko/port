@@ -295,7 +295,10 @@ impl NeonConnection {
         table_name: &str,
         schema: &str,
     ) -> Result<(), NeonError> {
-        let query = format!("CREATE TABLE IF NOT EXISTS {} ({})", table_name, schema);
+        let query = format!(
+            "CREATE TABLE IF NOT EXISTS historical.{} ({})",
+            table_name, schema
+        );
         self.execute(&query, &[]).await?;
         Ok(())
     }
@@ -306,7 +309,7 @@ impl NeonConnection {
             .query_opt(
                 "SELECT EXISTS (
                 SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
+                WHERE table_schema = 'historical' 
                 AND table_name = $1
             )",
                 &[&table_name],
@@ -320,7 +323,7 @@ impl NeonConnection {
     pub async fn get_table_names(&self) -> Result<Vec<String>, NeonError> {
         let rows = self
             .query(
-                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'historical'",
                 &[],
             )
             .await?;
@@ -400,7 +403,7 @@ impl NeonConnection {
 
         // Create index on timestamp for better query performance
         let index_query = format!(
-            "CREATE INDEX IF NOT EXISTS idx_{}_timestamp ON {} (timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_{}_timestamp ON historical.{} (timestamp)",
             table_name.replace("-", "_"),
             table_name
         );
@@ -457,7 +460,7 @@ impl NeonConnection {
 
         // Build multi-value INSERT query
         let mut query = format!(
-            "INSERT INTO {} (timestamp, open, high, low, close, volume) VALUES ",
+            "INSERT INTO historical.{} (timestamp, open, high, low, close, volume) VALUES ",
             table_name
         );
 
@@ -529,9 +532,9 @@ impl NeonConnection {
 
         // Create indexes for better query performance
         let indexes = vec![
-            "CREATE INDEX IF NOT EXISTS idx_etl_progress_job_id ON etl_job_progress (job_id)",
-            "CREATE INDEX IF NOT EXISTS idx_etl_progress_status ON etl_job_progress (status)",
-            "CREATE INDEX IF NOT EXISTS idx_etl_progress_job_status ON etl_job_progress (job_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_etl_progress_job_id ON historical.etl_job_progress (job_id)",
+            "CREATE INDEX IF NOT EXISTS idx_etl_progress_status ON historical.etl_job_progress (status)",
+            "CREATE INDEX IF NOT EXISTS idx_etl_progress_job_status ON historical.etl_job_progress (job_id, status)",
         ];
 
         for index_query in indexes {
@@ -555,7 +558,7 @@ impl NeonConnection {
         let transaction = client.transaction().await?;
 
         let insert_query = "
-            INSERT INTO etl_job_progress 
+            INSERT INTO historical.etl_job_progress 
             (job_id, exchange, ticker, granularity, chunk_start, chunk_end, status) 
             VALUES ($1, $2, $3, $4, $5, $6, 'pending') 
             ON CONFLICT (job_id, chunk_start, chunk_end) DO NOTHING";
@@ -594,7 +597,7 @@ impl NeonConnection {
     ) -> Result<Vec<(DateTime<Utc>, DateTime<Utc>)>, NeonError> {
         let rows = self
             .query(
-                "SELECT chunk_start, chunk_end FROM etl_job_progress 
+                "SELECT chunk_start, chunk_end FROM historical.etl_job_progress 
              WHERE job_id = $1 AND status IN ('pending', 'failed') 
              ORDER BY chunk_start",
                 &[&job_id],
@@ -615,7 +618,7 @@ impl NeonConnection {
     ) -> Result<Vec<(DateTime<Utc>, DateTime<Utc>, u32)>, NeonError> {
         let rows = self
             .query(
-                "SELECT chunk_start, chunk_end, retry_count FROM etl_job_progress 
+                "SELECT chunk_start, chunk_end, retry_count FROM historical.etl_job_progress 
              WHERE job_id = $1 AND status = 'failed' AND retry_count < $2
              ORDER BY chunk_start",
                 &[&job_id, &(max_retries as i32)],
@@ -635,7 +638,7 @@ impl NeonConnection {
         chunk_start: DateTime<Utc>,
     ) -> Result<(), NeonError> {
         self.execute(
-            "UPDATE etl_job_progress 
+            "UPDATE historical.etl_job_progress 
              SET status = 'in_progress', started_at = NOW() 
              WHERE job_id = $1 AND chunk_start = $2",
             &[&job_id, &chunk_start],
@@ -653,7 +656,7 @@ impl NeonConnection {
         records_cached: usize,
     ) -> Result<(), NeonError> {
         self.execute(
-            "UPDATE etl_job_progress 
+            "UPDATE historical.etl_job_progress 
              SET status = 'completed', 
                  records_fetched = $1, 
                  records_cached = $2, 
@@ -678,7 +681,7 @@ impl NeonConnection {
         error_message: &str,
     ) -> Result<(), NeonError> {
         self.execute(
-            "UPDATE etl_job_progress 
+            "UPDATE historical.etl_job_progress 
              SET status = 'failed', 
                  retry_count = retry_count + 1,
                  error_message = $1,
@@ -704,7 +707,7 @@ impl NeonConnection {
                 COUNT(*) FILTER (WHERE status = 'in_progress') as in_progress,
                 COUNT(*) FILTER (WHERE status = 'pending') as pending,
                 SUM(records_cached) FILTER (WHERE status = 'completed') as total_records
-             FROM etl_job_progress 
+             FROM historical.etl_job_progress 
              WHERE job_id = $1",
                 &[&job_id],
             )

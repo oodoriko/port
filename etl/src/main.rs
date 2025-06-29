@@ -22,9 +22,9 @@ async fn run_coinbase_historical_10() -> Result<(), Box<dyn std::error::Error>> 
     let tickers = vec![
         "BTC-USDC".to_string(),
         "ETH-USDC".to_string(),
-        "SOL-USDC".to_string(),
-        "LINK-USDC".to_string(),
-        "AVAX-USDC".to_string(),
+        // "SOL-USDC".to_string(),
+        // "LINK-USDC".to_string(),
+        // "AVAX-USDC".to_string(),
     ];
 
     // Create config with API credentials from environment variables
