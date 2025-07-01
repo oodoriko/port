@@ -34,3 +34,4 @@ npm-debug.log*
 **/data_cache
 **outputs
 *.txt
+data/
