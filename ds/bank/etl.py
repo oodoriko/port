@@ -49,7 +49,7 @@ class IndicatorsETL:
 
         df = pl.DataFrame(indicators_data)
         df = df.sort("timestamp")
-        self._save_to_parquet(df)
+        df.write_parquet(f"data/indicators/{self.table_name}.parquet")
 
 
 class TargetsETL:
@@ -72,4 +72,4 @@ class TargetsETL:
         for w, t in targets.keys():
             df = pl.DataFrame(targets[(w, t)])
             df = df.sort("timestamp")
-            self._save_to_parquet(df, f"targets/{self.table_name}_{w}_{t}.parquet")
+            df.write_parquet(f"data/targets/{self.table_name}_{w}_{t}.parquet")
