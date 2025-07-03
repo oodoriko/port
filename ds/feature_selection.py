@@ -238,7 +238,15 @@ def run_experiment(
 
     print(f"\nRFECV DETAILS:")
     print(f"  Best number of features: {sel.n_features_}")
-    print(f"  Grid scores: {sel.grid_scores_}")
+    if hasattr(sel, "grid_scores_"):
+        print(f"  Grid scores: {sel.grid_scores_}")
+    elif hasattr(sel, "cv_results_"):
+        print(
+            f"  CV results available: {len(sel.cv_results_['mean_test_score'])} scores"
+        )
+        print(f"  Best score: {sel.cv_results_['mean_test_score'].max():.6f}")
+    else:
+        print("  Grid scores not available in this sklearn version")
 
     return pipe, selected_features, cv_score.mean()
 
