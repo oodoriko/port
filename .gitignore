@@ -35,4 +35,3 @@ npm-debug.log*
 **outputs
 *.txt
 data/
-**/*.csv

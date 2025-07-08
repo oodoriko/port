@@ -4,10 +4,8 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict
 
 import numpy as np
-import pandas as pd
-
-from .config import *
-from .mathy import (
+from config import *
+from mathy import (
     _atr_talib,
     _bollinger_talib,
     _donchian_talib,
@@ -259,14 +257,10 @@ def build_indicator(
     return cls(params, feature_names)
 
 
-def build_indicators(config: FeatureBankConfig) -> list[Indicator]:
+def build_indicators(config: List[IndicatorConfig]) -> list[Indicator]:
     ind = []
-    for group_name, group_cfg in vars(config).items():  # momentum, volatility, ...
-        print(f"Initiating {group_name}")
-        if isinstance(group_cfg, str):
-            continue
-        for sub_name, sub_cfg in vars(group_cfg).items():  # stochastic, macd, rsi, ...
-            for params, feature_names in sub_cfg.features.items():
-                indicator = build_indicator(sub_name, params, feature_names)
-                ind.append(indicator)
+    for cfg in config:
+        for params, feature_names in cfg.features.items():
+            indicator = build_indicator(cfg.name, params, feature_names)
+            ind.append(indicator)
     return ind

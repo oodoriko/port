@@ -1,8 +1,7 @@
-from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 
 import numpy as np
-from bank.config import CONFIG_y_v1
+from config import TargetConfig
 from numpy.lib.stride_tricks import sliding_window_view
 
 
@@ -100,10 +99,10 @@ def build_targets(
     price: np.array,
     volume: np.array,
     timestamps: np.array,
+    config: TargetConfig,
 ) -> Dict[Tuple[int, float], Dict[str, np.array]]:
     targets = {}
-    config = CONFIG_y_v1.windows_thresholds
-    for w, t in config:
+    for w, t in config.windows_thresholds:
         vwap_ret, label_vwap, quant_vwap, close_ret, label_close, (mae, mfe) = (
             build_target(low, high, price, volume, timestamps, w, t)
         )

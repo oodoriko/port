@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import itertools
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
+
+import yaml
 
 
 def cartesian_product(lists: List[List[Any]]) -> List[Tuple[Any, ...]]:
@@ -30,12 +32,13 @@ class IndicatorConfig(ABC):
 
 @dataclass
 class StochasticConfig(IndicatorConfig):
-    k_line: List[int] = field(default_factory=lambda: [9, 14, 21])
-    d_line: List[int] = field(default_factory=lambda: [3, 5])
+    k_line: List[int]
+    d_line: List[int]
 
-    include_delta: bool = True
-    include_k_lag1: bool = True
-    include_d_lag1: bool = True
+    include_delta: bool
+    include_k_lag1: bool
+    include_d_lag1: bool
+    name: str = "stochastic"
 
     def __post_init__(self):
         self.k_d_pairs = cartesian_product([self.k_line, self.d_line])
@@ -77,11 +80,12 @@ class StochasticConfig(IndicatorConfig):
 
 @dataclass
 class MACDConfig(IndicatorConfig):
-    fast_line: List[int] = field(default_factory=lambda: [3, 5, 6, 8, 10, 12])
-    slow_line: List[int] = field(default_factory=lambda: [10, 13, 10, 21, 26, 35])
-    signal_line: List[int] = field(default_factory=lambda: [3, 5, 9])
-    include_lag1: bool = True
-    include_hist_delta: bool = True
+    fast_line: List[int]
+    slow_line: List[int]
+    signal_line: List[int]
+    include_lag1: bool
+    include_hist_delta: bool
+    name: str = "macd"
 
     def __post_init__(self):
         triplets = cartesian_product([self.fast_line, self.slow_line, self.signal_line])
@@ -120,8 +124,9 @@ class MACDConfig(IndicatorConfig):
 
 @dataclass
 class RSIConfig(IndicatorConfig):
-    windows: List[int] = field(default_factory=lambda: [6, 9, 14, 21, 30])
-    include_delta: bool = True
+    windows: List[int]
+    include_delta: bool
+    name: str = "rsi"
 
     def __post_init__(self):
         self.features = self._generate_features()
@@ -151,9 +156,10 @@ class RSIConfig(IndicatorConfig):
 
 @dataclass
 class BollingerConfig(IndicatorConfig):
-    windows: List[int] = field(default_factory=lambda: [10, 20, 30])
-    std_multipliers: List[float] = field(default_factory=lambda: [1.5, 2.0, 2.5])
-    types: Tuple[str, ...] = ("bandwidth", "zscore")
+    windows: List[int]
+    std_multipliers: List[float]
+    types: List[str]
+    name: str = "bollinger"
 
     def __post_init__(self):
         self.triplets = cartesian_product(
@@ -185,8 +191,9 @@ class BollingerConfig(IndicatorConfig):
 
 @dataclass
 class MFIConfig(IndicatorConfig):
-    mfi_windows: List[int] = field(default_factory=lambda: [6, 14, 21])
-    include_delta: bool = True
+    mfi_windows: List[int]
+    include_delta: bool
+    name: str = "mfi"
 
     def __post_init__(self):
         self.features = self._generate_features()
@@ -216,7 +223,8 @@ class MFIConfig(IndicatorConfig):
 
 @dataclass
 class VWAPConfig(IndicatorConfig):
-    vwap_rolling_windows: List[int] = field(default_factory=lambda: [20, 50])
+    vwap_rolling_windows: List[int]
+    name: str = "vwap"
 
     def __post_init__(self):
         self.features = self._generate_features()
@@ -243,7 +251,8 @@ class VWAPConfig(IndicatorConfig):
 
 @dataclass
 class DonchianConfig(IndicatorConfig):
-    windows: List[int] = field(default_factory=lambda: [10, 20, 30, 50, 100])
+    windows: List[int]
+    name: str = "donchian"
 
     def __post_init__(self):
         self.features = self._generate_features()
@@ -272,7 +281,8 @@ class DonchianConfig(IndicatorConfig):
 
 @dataclass
 class ATRConfig(IndicatorConfig):
-    windows: List[int] = field(default_factory=lambda: [5, 10, 14, 21, 30])
+    windows: List[int]
+    name: str = "atr"
 
     def __post_init__(self):
         self.features = self._generate_features()
@@ -299,136 +309,81 @@ class ATRConfig(IndicatorConfig):
 
 
 @dataclass
-class MomentumConfig:
-    stochastic: StochasticConfig
-    macd: MACDConfig
-    rsi: RSIConfig
-
-    def total_features_summary(self) -> None:
-        print("MomentumConfig:")
-        print(f"# stochastic: {self.stochastic.total_features}")
-        print(f"# macd: {self.macd.total_features}")
-        print(f"# rsi: {self.rsi.total_features}")
-
-    def total_features(self) -> int:
-        return (
-            self.stochastic.total_features
-            + self.macd.total_features
-            + self.rsi.total_features
-        )
-
-
-@dataclass
-class VolatilityConfig:
-    bollinger: BollingerConfig
-
-    def total_features_summary(self) -> None:
-        print("VolatilityConfig:")
-        print(f"# bollinger: {self.bollinger.total_features}")
-
-    def total_features(self) -> int:
-        return self.bollinger.total_features
-
-
-@dataclass
-class VolumeConfig:
-    mfi: MFIConfig
-    vwap: VWAPConfig
-
-    def total_features_summary(self) -> None:
-        print("VolumeConfig:")
-        print(f"# mfi: {self.mfi.total_features}")
-        print(f"# vwap: {self.vwap.total_features}")
-
-    def total_features(self) -> int:
-        return self.mfi.total_features + self.vwap.total_features
-
-
-@dataclass
-class PriceStructureConfig:
-    donchian: DonchianConfig
-    atr: ATRConfig
-
-    def total_features_summary(self) -> None:
-        print("PriceStructureConfig:")
-        print(f"# donchian: {self.donchian.total_features}")
-        print(f"# atr: {self.atr.total_features}")
-
-    def total_features(self) -> int:
-        return self.donchian.total_features + self.atr.total_features
-
-
-@dataclass
-class FeatureBankConfig:
-    name: str
-    momentum: MomentumConfig
-    volatility: VolatilityConfig
-    volume: VolumeConfig
-    price_structure: PriceStructureConfig
-
-    def total_features_summary(self) -> None:
-        self.momentum.total_features_summary()
-        self.volatility.total_features_summary()
-        self.volume.total_features_summary()
-        self.price_structure.total_features_summary()
-
-        print("total features: ", self.total_features())
-
-    def total_features(self) -> int:
-        return (
-            self.momentum.total_features()
-            + self.volatility.total_features()
-            + self.volume.total_features()
-            + self.price_structure.total_features()
-        )
-
-
-CONFIG_v1 = FeatureBankConfig(
-    name="config_v1",
-    momentum=MomentumConfig(
-        stochastic=StochasticConfig(),
-        macd=MACDConfig(),
-        rsi=RSIConfig(),
-    ),
-    volatility=VolatilityConfig(
-        bollinger=BollingerConfig(),
-    ),
-    volume=VolumeConfig(
-        mfi=MFIConfig(),
-        vwap=VWAPConfig(),
-    ),
-    price_structure=PriceStructureConfig(
-        donchian=DonchianConfig(),
-        atr=ATRConfig(),
-    ),
-)
-
-
-@dataclass
 class TargetConfig:
-    name: str
-    windows: List[int] = field(default_factory=lambda: [1, 3, 5, 10, 15])
-    thresholds: Dict[int, float] = field(
-        default_factory=lambda: {1: 0.0007, 3: 0.001, 5: 0.0015, 10: 0.002, 15: 0.0035}
-    )
+    windows: List[int]
+    thresholds: Dict[int, float]
+    name: str = "target"
 
     def __post_init__(self):
         self.windows_thresholds = [(w, self.thresholds[w]) for w in self.windows]
 
 
-CONFIG_y_v1 = TargetConfig(
-    name="config_y_v1",
-    windows=[1, 3, 5, 10, 15],
-    thresholds={1: 0.0007, 3: 0.001, 5: 0.0015, 10: 0.002, 15: 0.0035},
-)
+# remove default factory for all configs use list instead of tuple remove wrapper configs remove name from targetconfig renamne as TargetConfig check and refactor target
+fns_mapping = {
+    "StochasticConfig": StochasticConfig,
+    "BollingerConfig": BollingerConfig,
+    "MACDConfig": MACDConfig,
+    "RSIConfig": RSIConfig,
+    "MFIConfig": MFIConfig,
+    "VWAPConfig": VWAPConfig,
+    "DonchianConfig": DonchianConfig,
+    "ATRConfig": ATRConfig,
+    "TargetConfig": TargetConfig,
+}
 
-# def diff(config1: FeatureBankConfig, config2: FeatureBankConfig) -> Dict[str, Any]:
-#     diff = {}
-#     for group_name, group_cfg1 in vars(config1).items():
-#         for sub_name, sub_cfg1 in vars(group_cfg1).items():
-#             for params, feature_names in sub_cfg1.features.items():
 
-#                 if sub_name not in diff:
-#                     diff[sub_name] = {}
-#                 diff[sub_name][params] = feature_names
-#     return diff
+@dataclass
+class FeaturesSelectionConfig:
+    name: str
+    trading_pair: str
+    features_config: List[IndicatorConfig]
+    targets_config: TargetConfig
+
+
+def validate_yaml(data) -> bool:
+    """Validate YAML configuration data against expected schema."""
+    meta_keys = ["name", "trading_pair"]
+    for key in meta_keys:
+        if key not in data or len(data[key]) == 0 or not isinstance(data[key], str):
+            raise KeyError(f"Missing/empty/non-str for required key: {key}")
+
+    for cfg in ["features_config", "targets_config"]:
+        if cfg not in data:
+            raise KeyError(f"Missing config: {cfg}")
+        config_inputs = data[cfg]
+        for config_name, inputs in config_inputs.items():
+            if config_name not in fns_mapping:
+                raise KeyError(f"Config name not found: {config_name}")
+            else:
+                # Get the class from fns_mapping
+                config_class = fns_mapping[config_name]
+                # Get field names from the dataclass
+                from dataclasses import fields
+
+                expected_fields = {field.name for field in fields(config_class)}
+                for k, v in inputs.items():
+                    if k not in expected_fields:
+                        raise KeyError(f"Config attribute missing: {config_name}:{k}")
+    return True
+
+
+def load_configs_from_yaml(yaml_path: str) -> FeaturesSelectionConfig:
+    with open(yaml_path, encoding="utf-8") as f:
+        file = yaml.safe_load(f)
+        validate_yaml(file)
+        name = file["name"]
+        trading_pair = file["trading_pair"]
+        features_inputs = file["features_config"]
+        targets_inputs = file["targets_config"]
+    features_cfg = [
+        fns_mapping[feature](**inputs) for feature, inputs in features_inputs.items()
+    ]
+    targets_cfg = [
+        fns_mapping[target](**inputs) for target, inputs in targets_inputs.items()
+    ]
+    return FeaturesSelectionConfig(
+        name=name,
+        trading_pair=trading_pair,
+        features_config=features_cfg,
+        targets_config=targets_cfg[0],
+    )

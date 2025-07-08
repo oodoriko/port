@@ -1,9 +1,11 @@
+import datetime as dt
 import os
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 import numpy as np
 import polars as pl
 import psycopg
+from config import *
 from dotenv import load_dotenv
 
 
@@ -22,31 +24,9 @@ def load_env_file():
 
 def get_historical_data(
     trading_pair: str,
-    limit: Optional[int] = None,
+    start_date: str,
+    end_date: str,
 ) -> Tuple[List[str], np.ndarray]:
-    """
-    Pull data from historical.historical_coinbase_btc_usdc table and convert to array of arrays.
-
-    Args:
-        limit: Optional limit on number of rows to fetch
-
-    Returns:
-        Tuple containing:
-        - List of column names
-        - List of lists where each inner list contains all values for one column
-
-    Example:
-        column_names, column_arrays = get_historical_btc_usdc_data(limit=1000)
-        # column_names = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
-        # column_arrays = [
-        #     [1640995200, 1640995260, ...],  # timestamp column
-        #     [47000.0, 47100.0, ...],       # open column
-        #     [47200.0, 47300.0, ...],       # high column
-        #     [46900.0, 47000.0, ...],       # low column
-        #     [47100.0, 47200.0, ...],       # close column
-        #     [1.23, 2.45, ...]              # volume column
-        # ]
-    """
     load_env_file()
 
     # Get the NEON_READ_ONLY connection string
@@ -63,17 +43,15 @@ def get_historical_data(
         conn = psycopg.connect(connection_string)
         cursor = conn.cursor()
 
+        start_timestamp = int(dt.datetime.strptime(start_date, "%Y-%m-%d").timestamp())
+        end_timestamp = int(dt.datetime.strptime(end_date, "%Y-%m-%d").timestamp())
+
         base_query = f"""
-        SELECT timestamp, open, high, low, close, volume 
+        SELECT timestamp, open, high, low, close, volume
         FROM historical.historical_coinbase_{trading_pair.replace("-", "_")} 
-        ORDER BY timestamp ASC
         """
 
-        if limit:
-            query = f"{base_query} LIMIT {limit}"
-        else:
-            query = base_query
-
+        query = f"{base_query}WHERE timestamp >= '{start_timestamp}' AND timestamp <= '{end_timestamp}' ORDER BY timestamp ASC"
         cursor.execute(query)
 
         column_names = [desc[0] for desc in cursor.description]
@@ -102,28 +80,10 @@ def get_historical_data(
             conn.close()
 
 
-def get_historical_data_dict(trading_pair: str, limit: Optional[int] = None) -> dict:
-    """
-    Alternative function that returns data as a dictionary with column names as keys.
-
-    Args:
-        limit: Optional limit on number of rows to fetch
-
-    Returns:
-        Dictionary where keys are column names and values are lists of column data
-
-    Example:
-        data = get_historical_btc_usdc_data_dict(limit=1000)
-        # data = {
-        #     'timestamp': [1640995200, 1640995260, ...],
-        #     'open': [47000.0, 47100.0, ...],
-        #     'high': [47200.0, 47300.0, ...],
-        #     'low': [46900.0, 47000.0, ...],
-        #     'close': [47100.0, 47200.0, ...],
-        #     'volume': [1.23, 2.45, ...]
-        # }
-    """
-    column_names, column_arrays = get_historical_data(trading_pair, limit)
+def get_historical_data_dict(trading_pair: str, start_date: str, end_date: str) -> dict:
+    column_names, column_arrays = get_historical_data(
+        trading_pair, start_date, end_date
+    )
     # Extract each column as a separate array
     return dict(
         zip(column_names, [column_arrays[:, i] for i in range(len(column_names))])
