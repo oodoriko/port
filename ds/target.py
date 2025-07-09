@@ -65,8 +65,18 @@ def compute_vwap(
 
 
 def bucket_quantiles(series: np.array, q: int = 5) -> np.array:
-    edges = np.percentile(series, [100 / q * i for i in range(1, q)])
-    return np.digitize(series, edges)
+    # Remove NaN values for percentile calculation
+    valid_series = series[~np.isnan(series)]
+    if len(valid_series) == 0:
+        return np.full_like(series, 0, dtype=int)
+
+    # Calculate quantile edges (q+1 edges for q buckets)
+    edges = np.percentile(valid_series, np.linspace(0, 100, q + 1))
+    # Remove the first edge (0th percentile) to get q edges
+    edges = edges[1:]
+
+    # Use digitize to assign bucket indices (0 to q-1)
+    return np.digitize(series, edges) - 1
 
 
 def build_target(

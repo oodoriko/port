@@ -1,5 +1,7 @@
 import datetime as dt
+import logging
 import os
+import warnings
 from typing import List, Tuple
 
 import numpy as np
@@ -7,6 +9,19 @@ import polars as pl
 import psycopg
 from config import *
 from dotenv import load_dotenv
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+warnings.filterwarnings("ignore")
+
+
+class DSLogger:
+    def __init__(self, name: str):
+        self.logger = logging.getLogger(name)
+
+    def info(self, message: str):
+        self.logger.info(message)
 
 
 def load_env_file():

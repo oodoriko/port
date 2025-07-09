@@ -1,266 +1,281 @@
-from pathlib import Path
+from typing import Dict, List, Tuple
 
 import numpy as np
-import pandas as pd
 import polars as pl
-from lightgbm import LGBMClassifier, LGBMRegressor
-from sklearn.compose import ColumnTransformer
-from sklearn.feature_selection import RFECV, VarianceThreshold
-from sklearn.model_selection import TimeSeriesSplit, cross_val_score
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+from ds_utils import DSLogger
+from model import CustomXGB
 
 
-def run_experiment(
-    features_fp: Path,
-    target_fp: Path,
-    y_col: str,
-    is_classification: bool,
-    sample_size: int = None,
-    chunk_size: int = 100000,
-):
+class RegimeBasedFeatureSelector:
+    """bucket the timestamps into different regimes, the idea here is we want to find
+    signals that is stable across idiosyncrasies. In other word, we are forfeiting regime
+    driven alpha. This is basically a beta strategy optimizer. In the event we want to focus
+    on regime detection and switch strategy based off that, we can reverse the filtering rules in this class.
 
-    print(f"\n{'='*60}")
-    print(f"FEATURE SELECTION EXPERIMENT")
-    print(f"{'='*60}")
-    print(f"Features file: {features_fp}")
-    print(f"Target file: {target_fp}")
-    print(f"Target column: {y_col}")
-    print(f"Task type: {'Classification' if is_classification else 'Regression'}")
-    print(f"Sample size: {sample_size if sample_size else 'Full dataset'}")
+    Regimes are heavily influenced by market microstructure.
+    This selector use XGBoost
+    """
 
-    # 0. load & align
-    print(f"\n{'='*40}")
-    print("LOADING DATA...")
-    print(f"{'='*40}")
+    def __init__(
+        self,
+        indicators: pl.DataFrame,
+        targets: pl.DataFrame,
+        price: np.array,
+        volume: np.array,
+        timestamp: np.array,
+        temporal_stability_threshold: float = 0.8,
+        regime_stability_threshold: float = 0.8,
+        performance_threshold: float = 0.1,
+        gap_days=1,
+        target_col: str = "label_vwap",
+    ):
+        self.indicators = indicators
+        self.targets = targets
+        self.price = price
+        self.volume = volume
+        self.timestamp = timestamp
 
-    if sample_size:
-        print(f"Sampling {sample_size:,} rows for testing...")
-        target_df = pl.read_parquet(target_fp)
-        total_rows = len(target_df)
-        print(f"Total rows in target: {total_rows:,}")
+        self.temporal_stability_threshold = temporal_stability_threshold
+        self.regime_stability_threshold = regime_stability_threshold
+        self.performance_threshold = performance_threshold
+        self.gap_days = gap_days
 
-        random_indices = np.random.choice(
-            total_rows, size=min(sample_size, total_rows), replace=False
-        )
-        random_indices = sorted(random_indices)  # Sort for efficient reading
-
-        target_pandas = target_df.to_pandas()
-        sampled_target = target_pandas.iloc[random_indices]
-
-        features_df = pl.read_parquet(features_fp)
-        features_pandas = features_df.to_pandas()
-        sampled_features = features_pandas.iloc[random_indices]
-
-        X = sampled_features
-        y = sampled_target[y_col]
-    else:
-        X = pl.read_parquet(features_fp).to_pandas()
-        y = pl.read_parquet(target_fp).to_pandas()[y_col]
-
-    print(f"Final dataset shape: {X.shape}")
-    print(f"Target shape: {y.shape}")
-
-    # Print target statistics
-    print(f"\nTARGET STATISTICS:")
-    print(f"  Count: {len(y):,}")
-    print(f"  Null values: {y.isnull().sum()}")
-
-    if is_classification:
-        print(f"  Class distribution:")
-        for class_val, count in y.value_counts().items():
-            print(f"    Class {class_val}: {count:,} ({count/len(y)*100:.2f}%)")
-
-    # Print feature statistics
-    print(f"\nFEATURE STATISTICS:")
-    print(f"  Total features: {X.shape[1]}")
-    print(f"  Features with nulls: {X.isnull().sum().sum()}")
-    print(f"  Features with zero variance: {(X.var() == 0).sum()}")
-    print(f"  Features with low variance (< 1e-6): {(X.var() < 1e-6).sum()}")
-
-    # Clean data - remove rows with NaN values
-    print(f"\n{'='*40}")
-    print("CLEANING DATA...")
-    print(f"{'='*40}")
-
-    # Check for NaN values
-    target_nulls = y.isnull().sum()
-    feature_nulls = X.isnull().sum().sum()
-
-    print(f"Target nulls: {target_nulls}")
-    print(f"Feature nulls: {feature_nulls}")
-
-    if target_nulls > 0 or feature_nulls > 0:
-        valid_mask = ~(y.isnull() | X.isnull().any(axis=1))
-        X = X[valid_mask]
-        y = y[valid_mask]
-        print(f"Removed {len(valid_mask) - valid_mask.sum()} rows with NaN values")
-        print(f"Clean dataset shape: {X.shape}")
-        print(f"Clean target shape: {y.shape}")
-    else:
-        print("No NaN values found - data is clean!")
-
-    # 1. split - reduced folds to save memory
-    print(f"\n{'='*40}")
-    print("SETTING UP CROSS-VALIDATION...")
-    print(f"{'='*40}")
-    tscv = TimeSeriesSplit(n_splits=3)
-    print(f"Time series cross-validation with {tscv.n_splits} folds")
-
-    # 2. preprocessing + stage-0/1
-    print(f"\n{'='*40}")
-    print("SETTING UP PREPROCESSING PIPELINE...")
-    print(f"{'='*40}")
-    pre = Pipeline(
-        [
-            ("var", VarianceThreshold(0.0)),
-            ("sc", StandardScaler()),
+        self.feature_cols = [
+            col for col in self.indicators.columns if col not in ["timestamp", "regime"]
         ]
-    )
-    print("Pipeline: VarianceThreshold -> StandardScaler")
+        self.target_col = target_col
 
-    # 3. model - memory optimized parameters
-    print(f"\n{'='*40}")
-    print("CONFIGURING LIGHTGBM MODEL...")
-    print(f"{'='*40}")
-    if is_classification:
-        est = LGBMClassifier(
-            objective="multiclass",
-            num_class=3,
-            num_leaves=31,
-            max_depth=6,
-            feature_fraction=0.8,
-            bagging_fraction=0.8,
-            bagging_freq=5,
-            min_data_in_leaf=20,
-            verbose=-1,
-            n_jobs=1,
-        )
-    else:
-        est = LGBMRegressor(
-            objective="regression",
-            num_leaves=31,
-            max_depth=6,
-            feature_fraction=0.8,
-            bagging_fraction=0.8,
-            bagging_freq=5,
-            min_data_in_leaf=20,
-            verbose=-1,
-            n_jobs=1,
-        )
+        self.features_scores = {}
+        self.selected_features = []
+        self.feature_performance_matrix = {}
+        self.regime_performance_matrix = {}
 
-    print(f"Model type: {type(est).__name__}")
-    print(f"Parameters: num_leaves={est.num_leaves}, max_depth={est.max_depth}")
-    print(
-        f"Feature fraction: {est.feature_fraction}, Bagging fraction: {est.bagging_fraction}"
-    )
+        self.logger = DSLogger(__name__)
 
-    print(f"\n{'='*40}")
-    print("SETTING UP FEATURE SELECTION...")
-    print(f"{'='*40}")
-    sel = RFECV(
-        estimator=est,
-        cv=tscv,
-        scoring="roc_auc_ovr" if is_classification else "neg_mean_absolute_error",
-        step=10,
-        min_features_to_select=50,
-    )
+    def fit(self):
+        self.logger.info("Step 1: Creating regimes")
+        regimes_df = _create_regimes(self.price, self.volume, self.timestamp)
+        regimes = regimes_df.select(pl.col("regime").unique()).to_series().to_list()
+        regimes = [r for r in regimes if r is not None]
 
-    print(
-        f"Feature selection: RFECV with step={sel.step}, min_features={sel.min_features_to_select}"
-    )
-    print(f"Scoring metric: {sel.scoring}")
-
-    pipe = Pipeline([("pre", pre), ("sel", sel), ("est", est)])
-
-    print(f"\n{'='*40}")
-    print("TRAINING MODEL AND ANALYZING FEATURES...")
-    print(f"{'='*40}")
-
-    print("Fitting pipeline...")
-    pipe.fit(X, y)
-
-    selected_features = X.columns[sel.support_].tolist()
-    removed_features = X.columns[~sel.support_].tolist()
-
-    print(f"\nFEATURE SELECTION RESULTS:")
-    print(f"  Original features: {X.shape[1]}")
-    print(f"  Selected features: {len(selected_features)}")
-    print(f"  Removed features: {len(removed_features)}")
-    print(f"  Reduction: {len(removed_features)/X.shape[1]*100:.1f}%")
-
-    final_estimator = pipe.named_steps["est"]
-    if hasattr(final_estimator, "feature_importances_"):
-        feature_importance = final_estimator.feature_importances_
-        feature_names = selected_features
-
-        importance_df = pd.DataFrame(
-            {"feature": feature_names, "importance": feature_importance}
-        ).sort_values("importance", ascending=False)
-
-        print(f"\nTOP 20 MOST IMPORTANT FEATURES:")
-        print(f"{'='*50}")
-        for i, (_, row) in enumerate(importance_df.head(20).iterrows()):
-            print(f"{i+1:2d}. {row['feature']:<30} {row['importance']:.6f}")
-
-        print(f"\nBOTTOM 20 LEAST IMPORTANT FEATURES:")
-        print(f"{'='*50}")
-        for i, (_, row) in enumerate(importance_df.tail(20).iterrows()):
-            print(
-                f"{len(importance_df)-19+i:2d}. {row['feature']:<30} {row['importance']:.6f}"
+        if self.indicators["timestamp"].dtype not in [pl.Datetime]:
+            self.indicators = self.indicators.with_columns(
+                pl.from_epoch(pl.col("timestamp")).alias("timestamp")
+            )
+        if self.targets["timestamp"].dtype not in [pl.Datetime]:
+            self.targets = self.targets.with_columns(
+                pl.from_epoch(pl.col("timestamp")).alias("timestamp")
             )
 
-        importance_file = f"feature_importance_{y_col}_{sample_size or 'full'}.csv"
-        importance_df.to_csv(importance_file, index=False)
-        print(f"\nFeature importance saved to: {importance_file}")
+        data_with_regimes = self.indicators.join(
+            regimes_df, on="timestamp", how="inner"
+        ).join(self.targets, on="timestamp", how="inner")
 
-        removed_file = f"removed_features_{y_col}_{sample_size or 'full'}.txt"
-        with open(removed_file, "w") as f:
-            for feature in removed_features:
-                f.write(f"{feature}\n")
-        print(f"Removed features saved to: {removed_file}")
+        self.logger.info(f"Found {len(regimes)} regimes")
 
-    print(f"\n{'='*40}")
-    print("CROSS-VALIDATION RESULTS...")
-    print(f"{'='*40}")
-    cv_score = cross_val_score(
-        pipe,
-        X,
-        y,
-        cv=tscv,
-        scoring=("roc_auc_ovr" if is_classification else "neg_mean_absolute_error"),
-        n_jobs=1,
-    )
-
-    print(f"CV scores: {cv_score}")
-    print(f"Mean CV score: {cv_score.mean():.6f}")
-    print(f"CV score std: {cv_score.std():.6f}")
-
-    print(f"\nRFECV DETAILS:")
-    print(f"  Best number of features: {sel.n_features_}")
-    if hasattr(sel, "grid_scores_"):
-        print(f"  Grid scores: {sel.grid_scores_}")
-    elif hasattr(sel, "cv_results_"):
-        print(
-            f"  CV results available: {len(sel.cv_results_['mean_test_score'])} scores"
+        self.logger.info("Step 2: Creating splits")
+        splits = _create_forward_splits(
+            data_with_regimes, train_weeks=2, test_weeks=1, gap_days=1
         )
-        print(f"  Best score: {sel.cv_results_['mean_test_score'].max():.6f}")
-    else:
-        print("  Grid scores not available in this sklearn version")
 
-    return pipe, selected_features, cv_score.mean()
+        self.feature_performance_matrix = {feature: [] for feature in self.feature_cols}
+        self.regime_performance_matrix = {
+            regime: {feature: [] for feature in self.feature_cols} for regime in regimes
+        }
+        self.logger.info(f"Created {len(splits)} splits")
+
+        self.logger.info("Step 3: Start walk forward validation")
+        for idx, (train_expr, test_expr) in enumerate(splits):
+            train_data = data_with_regimes.filter(train_expr)
+            test_data = data_with_regimes.filter(test_expr)
+
+            if train_data.height < 100 or test_data.height < 100:
+                self.logger.info(
+                    f"Skipping split {idx} due to insufficient data. Train: {train_data.height}, Test: {test_data.height}"
+                )
+                continue
+
+            self.logger.info(f"Evaluating feature performance for split {idx}")
+            model = CustomXGB(
+                train_data=train_data,
+                test_data=test_data,
+                feature_cols=self.feature_cols,
+                target_col=self.target_col,
+            )
+            overall_feature_performance = model.fit()
+            if self.feature_cols:
+                self.task_type = overall_feature_performance[self.feature_cols[0]][
+                    "task_type"
+                ]
+            for feature in self.feature_cols:
+                self.feature_performance_matrix[feature].append(
+                    overall_feature_performance[feature]["primary_score"]
+                )
+
+            self.logger.info(f"Evaluating regime performance for split {idx}")
+            for regime in regimes:
+                test_data_regime = test_data.filter(pl.col("regime") == regime)
+                if test_data_regime.height > 10:
+                    model = CustomXGB(
+                        train_data,
+                        test_data_regime,
+                        self.feature_cols,
+                        self.target_col,
+                    )
+                    regime_performance = model.fit()
+                    for feature in self.feature_cols:
+                        self.regime_performance_matrix[regime][feature].append(
+                            regime_performance[feature]["primary_score"]
+                        )
+            break
+        self.logger.info("Step 4: feature stability scores")
+        for feature in self.feature_cols:
+            temporal_scores = self.feature_performance_matrix[feature]
+            if len(temporal_scores) > 0:
+                temporal_stability = np.mean(
+                    np.array(temporal_scores) > self.performance_threshold
+                )
+            else:
+                temporal_stability = 0.0
+
+            regime_stabilities = []
+            for regime in regimes:
+                regime_scores = self.regime_performance_matrix[regime][feature]
+                if len(regime_scores) > 0:
+                    regime_stability = np.mean(
+                        np.array(regime_scores) > self.performance_threshold
+                    )
+                    regime_stabilities.append(regime_stability)
+            average_regime_stability = (
+                np.mean(regime_stabilities) if regime_stabilities else 0.0
+            )
+            self.features_scores[feature] = {
+                "temporal_stability": temporal_stability,
+                "regime_stability": average_regime_stability,
+                "combined_stability": (temporal_stability * average_regime_stability)
+                / 2,
+                "mean_performance": (
+                    np.mean(temporal_scores) if temporal_scores else 0.0
+                ),
+                "std_performance": np.std(temporal_scores) if temporal_scores else 0.0,
+                "task_type": getattr(self, "task_type", "unknown"),
+            }
+
+        self.logger.info(f"Step 5: select stable features")
+        for feature, score in self.features_scores.items():
+            if (
+                score["temporal_stability"] >= self.temporal_stability_threshold
+                and score["regime_stability"] >= self.regime_stability_threshold
+            ):
+                self.selected_features.append(feature)
+        self.logger.info(
+            f"Selected {len(self.selected_features)} out of {len(self.feature_cols)} features "
+            f"({len(self.selected_features)/len(self.feature_cols)*100:.1f}% selection rate)"
+        )
+
+    def get_metrics(self) -> pl.DataFrame:
+        report_data = []
+        for feature in sorted(
+            self.features_scores.keys(),
+            key=lambda x: self.features_scores[x]["combined_stability"],
+            reverse=True,
+        ):
+
+            scores = self.features_scores[feature]
+            status = "SELECTED" if feature in self.selected_features else "REJECTED"
+
+            report_data.append(
+                {
+                    "feature": feature,
+                    "status": status,
+                    "temporal_stability": scores["temporal_stability"],
+                    "regime_stability": scores["regime_stability"],
+                    "combined_stability": scores["combined_stability"],
+                    "mean_performance": scores["mean_performance"],
+                    "std_performance": scores["std_performance"],
+                }
+            )
+
+        return pl.DataFrame(report_data)
 
 
-features_fp = Path("data/signals/coinbase_btc_usdc_config_v1.parquet")
-target_fp = Path("data/targets/coinbase_btc_usdc_config_y_v1_1_0.0007.parquet")
+def _calculate_volatility(price: np.array, window: int = 20) -> np.array:
+    returns = np.full(price.shape[0], np.nan)
+    returns[1:] = np.diff(price) / price[:-1]
+    n = len(returns)
+    result = np.full(n, np.nan)
+
+    for i in range(window - 1, n):
+        window_data = returns[i - window + 1 : i + 1]
+        result[i] = np.std(window_data)
+
+    return result * np.sqrt(window)
 
 
-# run_experiment(
-#     features_fp,
-#     target_fp,
-#     y_col="vwap_ret",
-#     is_classification=False,
-#     sample_size=500000,
-# )
+def _create_regimes(price: np.array, volume: np.array, timestamp: np.array) -> np.array:
+    volatility = _calculate_volatility(price)
+    df = pl.DataFrame(
+        {"volatility": volatility, "volume": volume, "timestamp": timestamp}
+    )
+    # Convert timestamp to datetime if it's Unix timestamp (integer)
+    if df["timestamp"].dtype in [pl.Int64, pl.Int32, pl.Float64, pl.Float32]:
+        df = df.with_columns(pl.from_epoch(pl.col("timestamp")).alias("timestamp"))
 
-run_experiment(features_fp, target_fp, y_col="vwap_ret", is_classification=False)
+    regimes = (
+        df.with_columns(
+            [
+                pl.col("timestamp").dt.hour().alias("hour"),
+                pl.col("volume")
+                .qcut(3, labels=["Low", "Medium", "High"])
+                .alias("volume_regime"),
+            ]
+        )
+        .with_columns(
+            [
+                pl.when(pl.col("hour") < 8)
+                .then(pl.lit("Asian"))
+                .when(pl.col("hour") < 16)
+                .then(pl.lit("European"))
+                .otherwise(pl.lit("US"))
+                .alias("session"),
+                pl.when(pl.col("volatility") < pl.col("volatility").median())
+                .then(pl.lit("Low"))
+                .otherwise(pl.lit("High"))
+                .alias("volatility_regime"),
+            ]
+        )
+        .with_columns(
+            [
+                pl.concat_str(
+                    [
+                        pl.col("session"),
+                        pl.col("volatility_regime"),
+                        pl.col("volume_regime"),
+                    ]
+                ).alias("regime"),
+                pl.col("timestamp").dt.week().alias("week"),
+            ]
+        )
+    )
+    return regimes
+
+
+def _create_forward_splits(
+    df: pl.DataFrame, train_weeks: int = 2, test_weeks: int = 1, gap_days: int = 1
+) -> List[Tuple[pl.Expr, pl.Expr]]:
+    unique_weeks = df.select(pl.col("week").unique().sort()).to_series().to_list()
+    splits = []
+
+    for i in range(len(unique_weeks) - train_weeks - test_weeks - gap_days + 1):
+        train_weeks_range = unique_weeks[i : i + train_weeks]
+        test_weeks_range = unique_weeks[
+            i + train_weeks + gap_days : i + train_weeks + gap_days + test_weeks
+        ]
+
+        # Create Polars expressions for filtering
+        train_expr = pl.col("week").is_in(train_weeks_range)
+        test_expr = pl.col("week").is_in(test_weeks_range)
+
+        splits.append((train_expr, test_expr))
+
+    return splits

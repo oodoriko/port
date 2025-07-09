@@ -2,19 +2,19 @@ name: "V_1.0"
 trading_pair: "BTC_USDC"
 
 features_config:
-  # # momentum
-  # StochasticConfig:
-  #   k_line: [9, 14, 21]
-  #   d_line: [3, 5]
-  #   include_delta: True
-  #   include_k_lag1: True
-  #   include_d_lag1: True
-  # MACDConfig:
-  #   fast_line: [3, 5, 6, 8, 10, 12]
-  #   slow_line: [10, 13, 10, 21, 26, 35]
-  #   signal_line: [3, 5, 9]
-  #   include_lag1: True
-  #   include_hist_delta: True
+  # momentum
+  StochasticConfig:
+    k_line: [9, 14, 21]
+    d_line: [3, 5]
+    include_delta: True
+    include_k_lag1: True
+    include_d_lag1: True
+  MACDConfig:
+    fast_line: [3, 5, 6, 8, 10, 12]
+    slow_line: [10, 13, 10, 21, 26, 35]
+    signal_line: [3, 5, 9]
+    include_lag1: True
+    include_hist_delta: True
   RSIConfig:
     windows: [6, 9, 14, 21, 30]
     include_delta: True
@@ -25,18 +25,18 @@ features_config:
     std_multipliers: [1.5, 2.0, 2.5]
     types: ["bandwidth", "zscore"]
 
-  # # volume
-  # MFIConfig:
-  #   mfi_windows: [6, 14, 21]
-  #   include_delta: True
-  # VWAPConfig:
-  #   vwap_rolling_windows: [20, 50]
+  # volume
+  MFIConfig:
+    mfi_windows: [6, 14, 21]
+    include_delta: True
+  VWAPConfig:
+    vwap_rolling_windows: [20, 50]
 
-  # # price structure
-  # DonchianConfig:
-  #   windows: [10, 20, 30, 50, 100]
-  # ATRConfig:
-  #   windows: [5, 10, 14, 21, 30]
+  # price structure
+  DonchianConfig:
+    windows: [10, 20, 30, 50, 100]
+  ATRConfig:
+    windows: [5, 10, 14, 21, 30]
 
 targets_config:
   TargetConfig:
