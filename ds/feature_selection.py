@@ -49,6 +49,7 @@ class RegimeBasedFeatureSelector:
         self.selected_features = []
         self.feature_performance_matrix = {}
         self.regime_performance_matrix = {}
+        self.feature_importance_matrix = {}
 
         self.logger = DSLogger(__name__)
 
@@ -57,6 +58,7 @@ class RegimeBasedFeatureSelector:
         regimes_df = _create_regimes(self.price, self.volume, self.timestamp)
         regimes = regimes_df.select(pl.col("regime").unique()).to_series().to_list()
         regimes = [r for r in regimes if r is not None]
+        print(regimes)
 
         if self.indicators["timestamp"].dtype not in [pl.Datetime]:
             self.indicators = self.indicators.with_columns(
@@ -74,11 +76,10 @@ class RegimeBasedFeatureSelector:
         self.logger.info(f"Found {len(regimes)} regimes")
 
         self.logger.info("Step 2: Creating splits")
-        splits = _create_forward_splits(
-            data_with_regimes, train_weeks=2, test_weeks=1, gap_days=1
-        )
+        splits = _create_forward_splits(data_with_regimes)
 
         self.feature_performance_matrix = {feature: [] for feature in self.feature_cols}
+        self.feature_importance_matrix = {feature: [] for feature in self.feature_cols}
         self.regime_performance_matrix = {
             regime: {feature: [] for feature in self.feature_cols} for regime in regimes
         }
@@ -111,7 +112,9 @@ class RegimeBasedFeatureSelector:
                 self.feature_performance_matrix[feature].append(
                     overall_feature_performance[feature]["primary_score"]
                 )
-
+                self.feature_importance_matrix[feature].append(
+                    overall_feature_performance[feature]["importance"]
+                )
             self.logger.info(f"Evaluating regime performance for split {idx}")
             for regime in regimes:
                 test_data_regime = test_data.filter(pl.col("regime") == regime)
@@ -127,7 +130,6 @@ class RegimeBasedFeatureSelector:
                         self.regime_performance_matrix[regime][feature].append(
                             regime_performance[feature]["primary_score"]
                         )
-            break
         self.logger.info("Step 4: feature stability scores")
         for feature in self.feature_cols:
             temporal_scores = self.feature_performance_matrix[feature]
@@ -168,6 +170,7 @@ class RegimeBasedFeatureSelector:
                 and score["regime_stability"] >= self.regime_stability_threshold
             ):
                 self.selected_features.append(feature)
+
         self.logger.info(
             f"Selected {len(self.selected_features)} out of {len(self.feature_cols)} features "
             f"({len(self.selected_features)/len(self.feature_cols)*100:.1f}% selection rate)"
@@ -180,8 +183,8 @@ class RegimeBasedFeatureSelector:
             key=lambda x: self.features_scores[x]["combined_stability"],
             reverse=True,
         ):
-
             scores = self.features_scores[feature]
+            importance = self.feature_importance_matrix[feature]
             status = "SELECTED" if feature in self.selected_features else "REJECTED"
 
             report_data.append(
@@ -193,6 +196,7 @@ class RegimeBasedFeatureSelector:
                     "combined_stability": scores["combined_stability"],
                     "mean_performance": scores["mean_performance"],
                     "std_performance": scores["std_performance"],
+                    "importance": np.mean(importance) if importance else 0.0,
                 }
             )
 
@@ -232,12 +236,12 @@ def _create_regimes(price: np.array, volume: np.array, timestamp: np.array) -> n
         )
         .with_columns(
             [
-                pl.when(pl.col("hour") < 8)
-                .then(pl.lit("Asian"))
-                .when(pl.col("hour") < 16)
-                .then(pl.lit("European"))
-                .otherwise(pl.lit("US"))
-                .alias("session"),
+                # pl.when(pl.col("hour") < 8)
+                # .then(pl.lit("Asian"))
+                # .when(pl.col("hour") < 16)
+                # .then(pl.lit("European"))
+                # .otherwise(pl.lit("US"))
+                # .alias("session"),
                 pl.when(pl.col("volatility") < pl.col("volatility").median())
                 .then(pl.lit("Low"))
                 .otherwise(pl.lit("High"))
@@ -248,7 +252,7 @@ def _create_regimes(price: np.array, volume: np.array, timestamp: np.array) -> n
             [
                 pl.concat_str(
                     [
-                        pl.col("session"),
+                        # pl.col("session"),
                         pl.col("volatility_regime"),
                         pl.col("volume_regime"),
                     ]
@@ -261,7 +265,7 @@ def _create_regimes(price: np.array, volume: np.array, timestamp: np.array) -> n
 
 
 def _create_forward_splits(
-    df: pl.DataFrame, train_weeks: int = 2, test_weeks: int = 1, gap_days: int = 1
+    df: pl.DataFrame, train_weeks: int = 5, test_weeks: int = 2, gap_days: int = 3
 ) -> List[Tuple[pl.Expr, pl.Expr]]:
     unique_weeks = df.select(pl.col("week").unique().sort()).to_series().to_list()
     splits = []

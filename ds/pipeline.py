@@ -76,6 +76,7 @@ def run_pipeline(
                     "selected_features": selector.selected_features,
                     "feature_performance_matrix": selector.feature_performance_matrix,
                     "regime_performance_matrix": selector.regime_performance_matrix,
+                    "feature_importance_matrix": selector.feature_importance_matrix,
                 }
                 break
             break
@@ -115,6 +116,12 @@ def save_results(results: dict, results_path: str):
                 with open(regime_path, "w") as f:
                     json.dump(data["regime_performance_matrix"], f, indent=2)
                 print(f"Saved regime performance: {regime_path}")
+
+            if "feature_importance_matrix" in data:
+                importance_path = f"{target_folder}/feature_importance_matrix.json"
+                with open(importance_path, "w") as f:
+                    json.dump(data["feature_importance_matrix"], f, indent=2)
+                print(f"Saved feature importance: {importance_path}")
 
             summary = {
                 "target_file": target_file,
@@ -167,7 +174,7 @@ def load_feature_selection_results(data_dir: str, target_folder: str):
 
 if __name__ == "__main__":
     config_path = "features_sets/config_v_1.yaml"
-    start_date = "2024-11-01"
+    start_date = "2025-01-01"
     end_date = "2025-05-01"
     data_dir = "data"
     run_pipeline(config_path, start_date, end_date, data_dir)
